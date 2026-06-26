@@ -40,6 +40,7 @@ import com.github.claudecodegui.session.SessionLifecycleManager;
 import com.github.claudecodegui.session.StreamMessageCoalescer;
 import com.github.claudecodegui.util.JsUtils;
 import com.github.claudecodegui.util.MessageJsonConverter;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.ApplicationManager;
@@ -50,7 +51,10 @@ import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.util.concurrency.AppExecutorUtil;
 
 import javax.swing.*;
+import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -179,16 +183,191 @@ public class ChatWindowDelegate {
         }
     }
 
+    /**
+     * Set of fields managed by the provider configuration.
+     * These fields are compared during sync checks.
+     */
+    private static final Set<String> PROVIDER_MANAGED_FIELDS = Set.of(
+            "env",
+            "model",
+            "alwaysThinkingEnabled",
+            "codemossProviderId",
+            "ccSwitchProviderId",
+            "maxContextLengthTokens",
+            "temperature",
+            "topP",
+            "topK"
+    );
+
     public void syncActiveProvider() {
         try {
             CodemossSettingsService settingsService = host.getSettingsService();
-            if (settingsService.isLocalProviderActive()) {
-                LOG.info("[ClaudeSDKToolWindow] Local provider active, skipping startup sync");
+
+            // 1. Local settings and CLI login modes do not manage global config
+            if (settingsService.isLocalProviderActive() || settingsService.isCliLoginProviderActive()) {
+                LOG.info("[ClaudeSDKToolWindow] Local/CLI provider active, skipping startup sync");
                 return;
             }
+
+            // 2. Check if global config was modified by user
+            if (isGlobalConfigModifiedByUser(settingsService)) {
+                LOG.info("[ClaudeSDKToolWindow] Global config modified by user, skipping sync to preserve user changes");
+                return;
+            }
+
+            // 3. Check if sync is needed
+            if (!isSyncNeeded(settingsService)) {
+                LOG.info("[ClaudeSDKToolWindow] No sync needed, global config is up to date");
+                return;
+            }
+
             settingsService.applyActiveProviderToClaudeSettings();
+            LOG.info("[ClaudeSDKToolWindow] Synced active provider to global settings");
         } catch (Exception e) {
             LOG.warn("Failed to sync active provider on startup: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Detect if global config was modified by user.
+     * Compares global settings with active provider settings.
+     */
+    private boolean isGlobalConfigModifiedByUser(CodemossSettingsService settingsService) {
+        try {
+            JsonObject globalSettings = settingsService.readClaudeSettings();
+            JsonObject activeProvider = settingsService.getActiveClaudeProvider();
+
+            if (activeProvider == null || !activeProvider.has("settingsConfig")) {
+                return false;
+            }
+
+            JsonObject providerSettings = activeProvider.getAsJsonObject("settingsConfig");
+
+            // Check if global config has user-added fields (not in provider config)
+            if (globalSettings.has("env") && globalSettings.get("env").isJsonObject()) {
+                JsonObject globalEnv = globalSettings.getAsJsonObject("env");
+                JsonObject providerEnv = providerSettings.has("env")
+                    ? providerSettings.getAsJsonObject("env")
+                    : new JsonObject();
+
+                for (String key : globalEnv.keySet()) {
+                    // Skip provider-managed fields
+                    if (isProviderManagedField(key)) {
+                        continue;
+                    }
+                    // If global config has field not in provider config, user added it
+                    if (!providerEnv.has(key)) {
+                        LOG.info("[ClaudeSDKToolWindow] Detected user-added field in global config: " + key);
+                        return true;
+                    }
+                }
+            }
+
+            // Check if provider-managed fields have different values
+            for (String field : PROVIDER_MANAGED_FIELDS) {
+                if (!providerSettings.has(field) || providerSettings.get(field).isJsonNull()) {
+                    continue;
+                }
+
+                if (!globalSettings.has(field)) {
+                    // Provider has field but global doesn't - need sync, not user modification
+                    continue;
+                }
+
+                JsonElement providerValue = providerSettings.get(field);
+                JsonElement globalValue = globalSettings.get(field);
+
+                // For env object, compare key values
+                if ("env".equals(field) && providerValue.isJsonObject() && globalValue.isJsonObject()) {
+                    JsonObject providerEnv = providerValue.getAsJsonObject();
+                    JsonObject globalEnv = globalValue.getAsJsonObject();
+
+                    for (String envKey : providerEnv.keySet()) {
+                        if (!globalEnv.has(envKey)) {
+                            continue; // Provider has key that global doesn't
+                        }
+
+                        String providerVal = providerEnv.get(envKey).getAsString();
+                        String globalVal = globalEnv.get(envKey).getAsString();
+
+                        if (!Objects.equals(providerVal, globalVal)) {
+                            LOG.info("[ClaudeSDKToolWindow] Detected difference in env." + envKey);
+                            return true;
+                        }
+                    }
+                } else if (!Objects.equals(providerValue.toString(), globalValue.toString())) {
+                    LOG.info("[ClaudeSDKToolWindow] Detected difference in field: " + field);
+                    return true;
+                }
+            }
+
+            return false;
+        } catch (Exception e) {
+            LOG.warn("[ClaudeSDKToolWindow] Failed to check if global config was modified: " + e.getMessage());
+            return false; // On error, default to not skipping sync
+        }
+    }
+
+    /**
+     * Check if a field is managed by the provider configuration.
+     */
+    private boolean isProviderManagedField(String field) {
+        return PROVIDER_MANAGED_FIELDS.contains(field);
+    }
+
+    /**
+     * Check if sync is needed by comparing provider config with global config.
+     */
+    private boolean isSyncNeeded(CodemossSettingsService settingsService) {
+        try {
+            JsonObject globalSettings = settingsService.readClaudeSettings();
+            JsonObject activeProvider = settingsService.getActiveClaudeProvider();
+
+            if (activeProvider == null || !activeProvider.has("settingsConfig")) {
+                return false;
+            }
+
+            JsonObject providerSettings = activeProvider.getAsJsonObject("settingsConfig");
+
+            // Check if provider-managed fields are missing or different in global config
+            for (String field : PROVIDER_MANAGED_FIELDS) {
+                if (!providerSettings.has(field) || providerSettings.get(field).isJsonNull()) {
+                    continue;
+                }
+
+                if (!globalSettings.has(field)) {
+                    // Provider has field but global doesn't - sync needed
+                    return true;
+                }
+
+                JsonElement providerValue = providerSettings.get(field);
+                JsonElement globalValue = globalSettings.get(field);
+
+                if (!Objects.equals(providerValue.toString(), globalValue.toString())) {
+                    return true;
+                }
+            }
+
+            // Check if provider ID matches
+            if (globalSettings.has("codemossProviderId")) {
+                String globalProviderId = globalSettings.get("codemossProviderId").getAsString();
+                String activeProviderId = activeProvider.has("id")
+                    ? activeProvider.get("id").getAsString()
+                    : "";
+
+                if (!globalProviderId.equals(activeProviderId)) {
+                    LOG.info("[ClaudeSDKToolWindow] Provider ID mismatch, sync needed");
+                    return true;
+                }
+            } else {
+                // No provider ID in global config - need sync
+                return true;
+            }
+
+            return false;
+        } catch (Exception e) {
+            LOG.warn("[ClaudeSDKToolWindow] Failed to check if sync is needed: " + e.getMessage());
+            return true; // On error, default to syncing
         }
     }
 

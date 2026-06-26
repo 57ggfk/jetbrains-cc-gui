@@ -408,6 +408,14 @@ public class CodemossSettingsService {
         providerManager.applyActiveProviderToClaudeSettings();
     }
 
+    /**
+     * Read Claude Settings from ~/.claude/settings.json.
+     * Exposed for sync detection logic.
+     */
+    public JsonObject readClaudeSettings() throws IOException {
+        return claudeSettingsManager.readClaudeSettings();
+    }
+
     // ==================== Working Directory Management ====================
 
     public String getCustomWorkingDirectory(String projectPath) throws IOException {
@@ -909,6 +917,10 @@ public class CodemossSettingsService {
 
     public boolean isLocalProviderActive() {
         return providerManager.isLocalProviderActive();
+    }
+
+    public boolean isCliLoginProviderActive() {
+        return providerManager.isCliLoginProviderActive();
     }
 
     // ==================== MCP Server Management ====================
