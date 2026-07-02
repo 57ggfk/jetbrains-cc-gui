@@ -409,11 +409,12 @@ public class CodemossSettingsService {
     }
 
     /**
-     * Read Claude Settings from ~/.claude/settings.json.
-     * Exposed for sync detection logic.
+     * Startup-time repair pass: only fills in provider-managed fields that are
+     * missing from {@code ~/.claude/settings.json}, never overwrites existing
+     * values. See {@link ProviderManager#repairActiveProviderToClaudeSettings()}.
      */
-    public JsonObject readClaudeSettings() throws IOException {
-        return claudeSettingsManager.readClaudeSettings();
+    public boolean repairActiveProviderToClaudeSettings() throws IOException {
+        return providerManager.repairActiveProviderToClaudeSettings();
     }
 
     // ==================== Working Directory Management ====================
@@ -917,10 +918,6 @@ public class CodemossSettingsService {
 
     public boolean isLocalProviderActive() {
         return providerManager.isLocalProviderActive();
-    }
-
-    public boolean isCliLoginProviderActive() {
-        return providerManager.isCliLoginProviderActive();
     }
 
     // ==================== MCP Server Management ====================
