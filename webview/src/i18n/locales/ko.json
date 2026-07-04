@@ -266,6 +266,12 @@
         "disabled": "비활성화",
         "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "IDE가 포커스되지 않았을 때만 시스템 알림 표시",
+        "enabled": "활성화",
+        "disabled": "비활성화",
+        "hint": "활성화하면 IDE 창에 포커스가 있을 때 작업 완료 및 질문 알림 시스템 알림을 건너뜁니다."
+      },
       "sendShortcut": {
         "label": "전송 단축키",
         "enter": "Enter로 전송",

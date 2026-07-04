@@ -715,6 +715,21 @@ public class ProjectConfigHandler {
             "Failed to save ask user question notification setting");
     }
 
+    public void handleGetSystemNotificationOnlyWhenUnfocused() {
+        respondWithJson("window.updateSystemNotificationOnlyWhenUnfocused",
+            () -> jsonOf("systemNotificationOnlyWhenUnfocused", settingsService.getSystemNotificationOnlyWhenUnfocused()),
+            jsonOf("systemNotificationOnlyWhenUnfocused", false),
+            "Failed to get system notification only-when-unfocused");
+    }
+
+    public void handleSetSystemNotificationOnlyWhenUnfocused(String content) {
+        handleBooleanToggle(content, "systemNotificationOnlyWhenUnfocused", false,
+            "system notification only when unfocused",
+            settingsService::setSystemNotificationOnlyWhenUnfocused,
+            "window.updateSystemNotificationOnlyWhenUnfocused",
+            "Failed to save system notification focus setting");
+    }
+
     public void handleGetAskUserQuestionSoundNotificationEnabled() {
         respondWithJson("window.updateAskUserQuestionSoundNotificationEnabled",
             () -> jsonOf("askUserQuestionSoundNotificationEnabled",

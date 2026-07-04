@@ -282,6 +282,12 @@
         "disabled": "Disabled",
         "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "Show system notifications only when IDE is not focused",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "hint": "When enabled, task completion and question reminder notifications are skipped while the IDE window is focused."
+      },
       "sendShortcut": {
         "label": "Send Shortcut",
         "enter": "Enter to Send",

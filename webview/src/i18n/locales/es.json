@@ -266,6 +266,12 @@
         "disabled": "Desactivado",
         "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "Mostrar notificaciones del sistema solo cuando el IDE no tenga el foco",
+        "enabled": "Activado",
+        "disabled": "Desactivado",
+        "hint": "Cuando está activado, las notificaciones de tarea completada y recordatorio de pregunta se omiten mientras la ventana del IDE tiene el foco."
+      },
       "sendShortcut": {
         "label": "Atajo de envío",
         "enter": "Enter para enviar",

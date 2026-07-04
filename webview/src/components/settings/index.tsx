@@ -200,6 +200,9 @@ const SettingsView = ({
     handleAskUserQuestionNotificationEnabledChange,
     detailedOutputEnabled,
     handleDetailedOutputEnabledChange,
+    systemNotificationOnlyWhenUnfocused,
+    setSystemNotificationOnlyWhenUnfocused,
+    handleSystemNotificationOnlyWhenUnfocusedChange,
     askUserQuestionSoundNotificationEnabled,
     setAskUserQuestionSoundNotificationEnabled,
     handleAskUserQuestionSoundNotificationEnabledChange,
@@ -358,6 +361,7 @@ const SettingsView = ({
     setStatusBarWidgetEnabled,
     setTaskCompletionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
+    setSystemNotificationOnlyWhenUnfocused,
     setAskUserQuestionSoundNotificationEnabled,
   });
 
@@ -544,6 +548,8 @@ const SettingsView = ({
               onAskUserQuestionNotificationEnabledChange={handleAskUserQuestionNotificationEnabledChange}
               detailedOutputEnabled={detailedOutputEnabled}
               onDetailedOutputEnabledChange={handleDetailedOutputEnabledChange}
+              systemNotificationOnlyWhenUnfocused={systemNotificationOnlyWhenUnfocused}
+              onSystemNotificationOnlyWhenUnfocusedChange={handleSystemNotificationOnlyWhenUnfocusedChange}
               askUserQuestionSoundNotificationEnabled={askUserQuestionSoundNotificationEnabled}
               onAskUserQuestionSoundNotificationEnabledChange={handleAskUserQuestionSoundNotificationEnabledChange}
               permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}

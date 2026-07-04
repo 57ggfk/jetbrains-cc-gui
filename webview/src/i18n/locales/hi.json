@@ -266,6 +266,12 @@
         "disabled": "अक्षम",
         "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "सिस्टम सूचनाएं केवल तब दिखाएं जब IDE फोकस में न हो",
+        "enabled": "सक्षम",
+        "disabled": "अक्षम",
+        "hint": "सक्षम होने पर, IDE विंडो फोकस में रहते समय कार्य पूर्ण होने और प्रश्न रिमाइंडर की सिस्टम सूचनाएं छोड़ दी जाती हैं।"
+      },
       "sendShortcut": {
         "label": "भेजने का शॉर्टकट",
         "enter": "Enter से भेजें",

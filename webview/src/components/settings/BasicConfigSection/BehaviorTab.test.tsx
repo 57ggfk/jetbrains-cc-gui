@@ -33,6 +33,8 @@ function renderBehaviorTab(overrides: Partial<ComponentProps<typeof BehaviorTab>
     onAskUserQuestionNotificationEnabledChange: vi.fn(),
     detailedOutputEnabled: false,
     onDetailedOutputEnabledChange: vi.fn(),
+    systemNotificationOnlyWhenUnfocused: false,
+    onSystemNotificationOnlyWhenUnfocusedChange: vi.fn(),
     askUserQuestionSoundNotificationEnabled: false,
     onAskUserQuestionSoundNotificationEnabledChange: vi.fn(),
     permissionDialogTimeoutSeconds: 300,
@@ -123,6 +125,22 @@ describe('BehaviorTab ask user question sound notification toggle', () => {
 
     expect(onAskUserQuestionSoundNotificationEnabledChange).toHaveBeenCalledWith(true);
     expect(onAskUserQuestionNotificationEnabledChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('BehaviorTab system notification focus gate toggle', () => {
+  it('fires the focus gate callback when clicked', () => {
+    const onSystemNotificationOnlyWhenUnfocusedChange = vi.fn();
+    renderBehaviorTab({ onSystemNotificationOnlyWhenUnfocusedChange });
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: /settings.basic.systemNotificationOnlyWhenUnfocused.disabled/i,
+    }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    fireEvent.click(checkbox);
+
+    expect(onSystemNotificationOnlyWhenUnfocusedChange).toHaveBeenCalledWith(true);
   });
 });
 

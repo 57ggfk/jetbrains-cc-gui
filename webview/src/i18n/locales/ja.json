@@ -266,6 +266,12 @@
         "disabled": "無効",
         "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "IDE がフォーカスされていない時だけシステム通知を表示",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、IDE ウィンドウがフォーカスされている間は、タスク完了通知と質問リマインダー通知をスキップします。"
+      },
       "sendShortcut": {
         "label": "送信ショートカット",
         "enter": "Enterで送信",

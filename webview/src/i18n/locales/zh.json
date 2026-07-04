@@ -282,6 +282,12 @@
         "disabled": "已关闭",
         "hint": "开启后，当 Claude 向你提问时播放已配置的提示音。会使用下方的音效选择和焦点规则。"
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "仅在 IDE 未聚焦时显示系统通知",
+        "enabled": "已开启",
+        "disabled": "已关闭",
+        "hint": "开启后，IDE 窗口聚焦时会跳过任务完成和提问提醒系统通知。"
+      },
       "sendShortcut": {
         "label": "发送快捷键",
         "enter": "Enter 发送",

@@ -75,6 +75,8 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_task_completion_notification_enabled",
         "get_ask_user_question_notification_enabled",
         "set_ask_user_question_notification_enabled",
+        "get_system_notification_only_when_unfocused",
+        "set_system_notification_only_when_unfocused",
         "get_ask_user_question_sound_notification_enabled",
         "set_ask_user_question_sound_notification_enabled",
         "get_ide_theme",
@@ -269,6 +271,12 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_ask_user_question_notification_enabled":
                 projectConfigHandler.handleSetAskUserQuestionNotificationEnabled(content);
+                return true;
+            case "get_system_notification_only_when_unfocused":
+                projectConfigHandler.handleGetSystemNotificationOnlyWhenUnfocused();
+                return true;
+            case "set_system_notification_only_when_unfocused":
+                projectConfigHandler.handleSetSystemNotificationOnlyWhenUnfocused(content);
                 return true;
             case "get_ask_user_question_sound_notification_enabled":
                 projectConfigHandler.handleGetAskUserQuestionSoundNotificationEnabled();

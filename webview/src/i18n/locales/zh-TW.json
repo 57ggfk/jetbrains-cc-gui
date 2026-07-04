@@ -266,6 +266,12 @@
         "disabled": "已關閉",
         "hint": "開啟後，當 Claude 向你提問時播放已設定的提示音。會使用下方的音效選擇與焦點規則。"
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "僅在 IDE 未聚焦時顯示系統通知",
+        "enabled": "已開啟",
+        "disabled": "已關閉",
+        "hint": "開啟後，IDE 視窗聚焦時會略過任務完成與提問提醒系統通知。"
+      },
       "sendShortcut": {
         "label": "發送快捷鍵",
         "enter": "Enter 發送",

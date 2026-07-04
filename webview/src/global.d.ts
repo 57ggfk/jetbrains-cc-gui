@@ -403,6 +403,11 @@ interface Window {
   updateAskUserQuestionNotificationEnabled?: (json: string) => void;
 
   /**
+   * Update visual system notification focus gate state
+   */
+  updateSystemNotificationOnlyWhenUnfocused?: (json: string) => void;
+
+  /**
    * Update AskUserQuestion reminder sound notification enabled state
    */
   updateAskUserQuestionSoundNotificationEnabled?: (json: string) => void;

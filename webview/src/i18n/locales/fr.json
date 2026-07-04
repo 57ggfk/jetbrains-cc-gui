@@ -266,6 +266,12 @@
         "disabled": "Désactivé",
         "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
       },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "Afficher les notifications système uniquement lorsque l'IDE n'est pas au premier plan",
+        "enabled": "Activé",
+        "disabled": "Désactivé",
+        "hint": "Lorsque activé, les notifications de fin de tâche et les rappels de question sont ignorés tant que la fenêtre de l'IDE est au premier plan."
+      },
       "sendShortcut": {
         "label": "Raccourci d'envoi",
         "enter": "Entrée pour envoyer",
