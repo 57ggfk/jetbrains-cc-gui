@@ -66,12 +66,12 @@ public class SystemNotificationService {
     private static volatile SystemNotificationService instance;
     private static final BooleanProvider DEFAULT_SYSTEM_NOTIFICATION_ONLY_WHEN_UNFOCUSED_PROVIDER =
         SystemNotificationService::readSystemNotificationOnlyWhenUnfocused;
-    private static final BooleanProvider DEFAULT_IDE_ACTIVE_PROVIDER =
-        () -> ApplicationManager.getApplication().isActive();
+    private static final BooleanProvider DEFAULT_IDE_FOCUSED_PROVIDER =
+        IdeFocusState::isIdeApplicationFocused;
 
     private static BooleanProvider systemNotificationOnlyWhenUnfocusedProvider =
         DEFAULT_SYSTEM_NOTIFICATION_ONLY_WHEN_UNFOCUSED_PROVIDER;
-    private static BooleanProvider ideActiveProvider = DEFAULT_IDE_ACTIVE_PROVIDER;
+    private static BooleanProvider ideFocusedProvider = DEFAULT_IDE_FOCUSED_PROVIDER;
 
     // Track active notification window to prevent duplicates. Only mutated on EDT.
     private JWindow activeNotificationWindow = null;
@@ -178,7 +178,7 @@ public class SystemNotificationService {
             return false;
         }
 
-        if (systemNotificationOnlyWhenUnfocusedProvider.getAsBoolean() && ideActiveProvider.getAsBoolean()) {
+        if (systemNotificationOnlyWhenUnfocusedProvider.getAsBoolean() && ideFocusedProvider.getAsBoolean()) {
             LOG.debug("[SystemNotification] IDE window is focused, skipping visual notification");
             return false;
         }
@@ -506,12 +506,12 @@ public class SystemNotificationService {
         systemNotificationOnlyWhenUnfocusedProvider = provider;
     }
 
-    static void setIdeActiveProvider(@NotNull BooleanProvider provider) {
-        ideActiveProvider = provider;
+    static void setIdeFocusedProvider(@NotNull BooleanProvider provider) {
+        ideFocusedProvider = provider;
     }
 
     static void resetTestHooks() {
         systemNotificationOnlyWhenUnfocusedProvider = DEFAULT_SYSTEM_NOTIFICATION_ONLY_WHEN_UNFOCUSED_PROVIDER;
-        ideActiveProvider = DEFAULT_IDE_ACTIVE_PROVIDER;
+        ideFocusedProvider = DEFAULT_IDE_FOCUSED_PROVIDER;
     }
 }
