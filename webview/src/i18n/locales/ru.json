@@ -260,6 +260,12 @@
         "disabled": "Отключено",
         "hint": "Если включено, внизу сообщений при наличии данных показывается оценочная стоимость хода, а попадания в кэш отображаются внутри сводки входных Token. Расход Token всегда остаётся видимым."
       },
+      "askUserQuestionSoundNotification": {
+        "label": "Ask User Question Sound",
+        "enabled": "Включено",
+        "disabled": "Выключено",
+        "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
+      },
       "sendShortcut": {
         "label": "Клавиша отправки",
         "enter": "Enter для отправки",

@@ -260,6 +260,12 @@
         "disabled": "已關閉",
         "hint": "開啟後，訊息底部會在可用時顯示本輪預估費用，並在輸入 Token 中標明快取命中。Token 消耗資訊始終保持顯示。"
       },
+      "askUserQuestionSoundNotification": {
+        "label": "詢問使用者聲音提醒",
+        "enabled": "已開啟",
+        "disabled": "已關閉",
+        "hint": "開啟後，當 Claude 向你提問時播放已設定的提示音。會使用下方的音效選擇與焦點規則。"
+      },
       "sendShortcut": {
         "label": "發送快捷鍵",
         "enter": "Enter 發送",

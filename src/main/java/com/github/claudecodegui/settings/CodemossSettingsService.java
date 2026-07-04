@@ -1599,6 +1599,34 @@ public class CodemossSettingsService {
         LOG.info("[CodemossSettings] Set ask user question notification enabled: " + enabled);
     }
 
+    /**
+     * Get whether the AskUserQuestion reminder sound notification is enabled.
+     *
+     * @return whether the reminder sound is enabled, default is false (opt-in)
+     */
+    public boolean getAskUserQuestionSoundNotificationEnabled() throws IOException {
+        JsonObject config = readConfig();
+
+        if (config.has("askUserQuestionSoundNotificationEnabled")
+                && !config.get("askUserQuestionSoundNotificationEnabled").isJsonNull()) {
+            return config.get("askUserQuestionSoundNotificationEnabled").getAsBoolean();
+        }
+
+        return false;
+    }
+
+    /**
+     * Set whether the AskUserQuestion reminder sound notification is enabled.
+     *
+     * @param enabled whether to enable
+     */
+    public void setAskUserQuestionSoundNotificationEnabled(boolean enabled) throws IOException {
+        JsonObject config = readConfig();
+        config.addProperty("askUserQuestionSoundNotificationEnabled", enabled);
+        writeConfig(config);
+        LOG.info("[CodemossSettings] Set ask user question sound notification enabled: " + enabled);
+    }
+
     // ==================== AI Feature Toggle Management ====================
 
     /**

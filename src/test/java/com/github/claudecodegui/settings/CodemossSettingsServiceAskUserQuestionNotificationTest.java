@@ -31,11 +31,15 @@ public class CodemossSettingsServiceAskUserQuestionNotificationTest {
 
         CodemossSettingsService service = new CodemossSettingsService();
         assertFalse(service.getAskUserQuestionNotificationEnabled());
+        assertFalse(service.getAskUserQuestionSoundNotificationEnabled());
 
         Path configPath = tempHome.resolve(".codemoss").resolve("config.json");
-        Files.writeString(configPath, "{\"askUserQuestionNotificationEnabled\":null}", StandardCharsets.UTF_8);
+        Files.writeString(configPath,
+                "{\"askUserQuestionNotificationEnabled\":null,\"askUserQuestionSoundNotificationEnabled\":null}",
+                StandardCharsets.UTF_8);
 
         assertFalse(service.getAskUserQuestionNotificationEnabled());
+        assertFalse(service.getAskUserQuestionSoundNotificationEnabled());
     }
 
     @Test
@@ -52,6 +56,23 @@ public class CodemossSettingsServiceAskUserQuestionNotificationTest {
 
         service.setAskUserQuestionNotificationEnabled(false);
         assertFalse(service.getAskUserQuestionNotificationEnabled());
+    }
+
+    @Test
+    public void persistsSoundEnabledFlagIndependently() throws Exception {
+        Path tempHome = Files.createTempDirectory("ask-user-question-sound-notification-persist-home");
+        useTemporaryHomeDirectory(tempHome);
+
+        CodemossSettingsService service = new CodemossSettingsService();
+        service.setAskUserQuestionNotificationEnabled(false);
+        service.setAskUserQuestionSoundNotificationEnabled(true);
+
+        assertFalse(service.getAskUserQuestionNotificationEnabled());
+        assertTrue(service.getAskUserQuestionSoundNotificationEnabled());
+
+        JsonObject config = service.readConfig();
+        assertFalse(config.get("askUserQuestionNotificationEnabled").getAsBoolean());
+        assertTrue(config.get("askUserQuestionSoundNotificationEnabled").getAsBoolean());
     }
 
     private void useTemporaryHomeDirectory(Path tempHome) throws Exception {

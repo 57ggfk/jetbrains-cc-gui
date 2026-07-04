@@ -260,6 +260,12 @@
         "disabled": "Desactivado",
         "hint": "Cuando está activada, el pie de cada mensaje muestra el coste estimado del turno cuando esté disponible e incluye los aciertos de caché dentro del resumen de tokens de entrada. El uso de tokens siempre permanece visible."
       },
+      "askUserQuestionSoundNotification": {
+        "label": "Ask User Question Sound",
+        "enabled": "Activado",
+        "disabled": "Desactivado",
+        "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
+      },
       "sendShortcut": {
         "label": "Atajo de envío",
         "enter": "Enter para enviar",

@@ -114,6 +114,8 @@ export interface BehaviorTabProps {
   onAskUserQuestionNotificationEnabledChange?: (enabled: boolean) => void;
   detailedOutputEnabled?: boolean;
   onDetailedOutputEnabledChange?: (enabled: boolean) => void;
+  askUserQuestionSoundNotificationEnabled?: boolean;
+  onAskUserQuestionSoundNotificationEnabledChange?: (enabled: boolean) => void;
   permissionDialogTimeoutSeconds?: number;
   onPermissionDialogTimeoutChange?: (seconds: number) => void;
 }
@@ -152,6 +154,8 @@ const BehaviorTab = ({
   onAskUserQuestionNotificationEnabledChange = () => {},
   detailedOutputEnabled = false,
   onDetailedOutputEnabledChange = () => {},
+  askUserQuestionSoundNotificationEnabled = false,
+  onAskUserQuestionSoundNotificationEnabledChange = () => {},
   permissionDialogTimeoutSeconds = DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS,
   onPermissionDialogTimeoutChange = () => {},
 }: BehaviorTabProps) => {
@@ -443,6 +447,32 @@ const BehaviorTab = ({
         <small className={styles.formHint}>
           <span className="codicon codicon-info" />
           <span>{t('settings.basic.askUserQuestionNotification.hint')}</span>
+        </small>
+      </div>
+
+      {/* AskUserQuestion reminder sound notification toggle */}
+      <div className={styles.streamingSection}>
+        <div className={styles.fieldHeader}>
+          <span className="codicon codicon-unmute" />
+          <span className={styles.fieldLabel}>{t('settings.basic.askUserQuestionSoundNotification.label')}</span>
+        </div>
+        <label className={styles.toggleWrapper}>
+          <input
+            type="checkbox"
+            className={styles.toggleInput}
+            checked={askUserQuestionSoundNotificationEnabled}
+            onChange={(e) => onAskUserQuestionSoundNotificationEnabledChange(e.target.checked)}
+          />
+          <span className={styles.toggleSlider} />
+          <span className={styles.toggleLabel}>
+            {askUserQuestionSoundNotificationEnabled
+              ? t('settings.basic.askUserQuestionSoundNotification.enabled')
+              : t('settings.basic.askUserQuestionSoundNotification.disabled')}
+          </span>
+        </label>
+        <small className={styles.formHint}>
+          <span className="codicon codicon-info" />
+          <span>{t('settings.basic.askUserQuestionSoundNotification.hint')}</span>
         </small>
       </div>
 

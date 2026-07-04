@@ -88,6 +88,7 @@ export interface UseSettingsBasicActionsReturn {
   taskCompletionNotificationEnabled: boolean;
   askUserQuestionNotificationEnabled: boolean;
   detailedOutputEnabled: boolean;
+  askUserQuestionSoundNotificationEnabled: boolean;
   commitAiConfig: CommitAiConfig;
   promptEnhancerConfig: PromptEnhancerConfig;
 
@@ -122,6 +123,7 @@ export interface UseSettingsBasicActionsReturn {
   handleTaskCompletionNotificationEnabledChange: (enabled: boolean) => void;
   handleAskUserQuestionNotificationEnabledChange: (enabled: boolean) => void;
   handleDetailedOutputEnabledChange: (enabled: boolean) => void;
+  handleAskUserQuestionSoundNotificationEnabledChange: (enabled: boolean) => void;
   permissionDialogTimeoutSeconds: number;
   handlePermissionDialogTimeoutChange: (seconds: number) => void;
   handleCommitAiProviderChange: (provider: CommitAiProvider) => void;
@@ -174,6 +176,7 @@ export interface UseSettingsBasicActionsReturn {
   /** @internal */ setStatusBarWidgetEnabled: (enabled: boolean) => void;
   /** @internal */ setTaskCompletionNotificationEnabled: (enabled: boolean) => void;
   /** @internal */ setAskUserQuestionNotificationEnabled: (enabled: boolean) => void;
+  /** @internal */ setAskUserQuestionSoundNotificationEnabled: (enabled: boolean) => void;
   /** @internal */ setCommitAiConfig: (config: CommitAiConfig) => void;
   /** @internal */ setPromptEnhancerConfig: (config: PromptEnhancerConfig) => void;
 }
@@ -290,6 +293,7 @@ export function useSettingsBasicActions({
 
   // AskUserQuestion reminder notification toggle (default: false, opt-in feature)
   const [askUserQuestionNotificationEnabled, setAskUserQuestionNotificationEnabled] = useState<boolean>(false);
+  const [askUserQuestionSoundNotificationEnabled, setAskUserQuestionSoundNotificationEnabled] = useState<boolean>(false);
 
   // Detailed message footer output (localStorage-only, default: false to preserve original footer style)
   const [detailedOutputEnabled, setDetailedOutputEnabledState] = useState<boolean>(() =>
@@ -528,6 +532,12 @@ export function useSettingsBasicActions({
     setDetailedOutputEnabled(enabled);
   }, []);
 
+  const handleAskUserQuestionSoundNotificationEnabledChange = useCallback((enabled: boolean) => {
+    setAskUserQuestionSoundNotificationEnabled(enabled);
+    const payload = { askUserQuestionSoundNotificationEnabled: enabled };
+    sendToJava(`set_ask_user_question_sound_notification_enabled:${JSON.stringify(payload)}`);
+  }, []);
+
   // Permission dialog timeout change handler
   const handlePermissionDialogTimeoutChange = useCallback((seconds: number) => {
     const clamped = clampPermissionDialogTimeoutSeconds(seconds);
@@ -744,6 +754,9 @@ export function useSettingsBasicActions({
     handleAskUserQuestionNotificationEnabledChange,
     detailedOutputEnabled,
     handleDetailedOutputEnabledChange,
+    askUserQuestionSoundNotificationEnabled,
+    setAskUserQuestionSoundNotificationEnabled,
+    handleAskUserQuestionSoundNotificationEnabledChange,
     permissionDialogTimeoutSeconds,
     handlePermissionDialogTimeoutChange,
     commitAiConfig,

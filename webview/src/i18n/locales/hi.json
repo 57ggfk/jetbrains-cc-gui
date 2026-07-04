@@ -260,6 +260,12 @@
         "disabled": "बंद",
         "hint": "चालू होने पर, उपलब्ध होने पर संदेशों के नीचे अनुमानित टर्न लागत दिखेगी और इनपुट Token सारांश में कैश हिट शामिल होंगे। Token उपयोग हमेशा दिखाई देता रहेगा।"
       },
+      "askUserQuestionSoundNotification": {
+        "label": "Ask User Question Sound",
+        "enabled": "सक्षम",
+        "disabled": "अक्षम",
+        "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
+      },
       "sendShortcut": {
         "label": "भेजने का शॉर्टकट",
         "enter": "Enter से भेजें",

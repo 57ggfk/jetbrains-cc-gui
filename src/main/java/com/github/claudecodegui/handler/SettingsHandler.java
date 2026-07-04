@@ -75,6 +75,8 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_task_completion_notification_enabled",
         "get_ask_user_question_notification_enabled",
         "set_ask_user_question_notification_enabled",
+        "get_ask_user_question_sound_notification_enabled",
+        "set_ask_user_question_sound_notification_enabled",
         "get_ide_theme",
         "get_commit_prompt",
         "set_commit_prompt",
@@ -267,6 +269,12 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_ask_user_question_notification_enabled":
                 projectConfigHandler.handleSetAskUserQuestionNotificationEnabled(content);
+                return true;
+            case "get_ask_user_question_sound_notification_enabled":
+                projectConfigHandler.handleGetAskUserQuestionSoundNotificationEnabled();
+                return true;
+            case "set_ask_user_question_sound_notification_enabled":
+                projectConfigHandler.handleSetAskUserQuestionSoundNotificationEnabled(content);
                 return true;
             case "get_ai_title_generation_enabled":
                 projectConfigHandler.handleGetAiTitleGenerationEnabled();

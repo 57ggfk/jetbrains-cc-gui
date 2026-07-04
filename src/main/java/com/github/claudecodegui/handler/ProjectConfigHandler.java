@@ -715,6 +715,23 @@ public class ProjectConfigHandler {
             "Failed to save ask user question notification setting");
     }
 
+    public void handleGetAskUserQuestionSoundNotificationEnabled() {
+        respondWithJson("window.updateAskUserQuestionSoundNotificationEnabled",
+            () -> jsonOf("askUserQuestionSoundNotificationEnabled",
+                    settingsService.getAskUserQuestionSoundNotificationEnabled()),
+            jsonOf("askUserQuestionSoundNotificationEnabled", false),
+            "Failed to get ask user question sound notification enabled");
+    }
+
+    public void handleSetAskUserQuestionSoundNotificationEnabled(String content) {
+        // Default to disabled when payload is missing or the field is absent/null (opt-in feature).
+        handleBooleanToggle(content, "askUserQuestionSoundNotificationEnabled", false,
+            "ask user question sound notification enabled",
+            settingsService::setAskUserQuestionSoundNotificationEnabled,
+            "window.updateAskUserQuestionSoundNotificationEnabled",
+            "Failed to save ask user question sound notification setting");
+    }
+
     private void dispatchUiFontConfigUpdate() {
         try {
             String uiFontConfigJson = FontConfigService.getResolvedUiFontConfigJson(settingsService);
