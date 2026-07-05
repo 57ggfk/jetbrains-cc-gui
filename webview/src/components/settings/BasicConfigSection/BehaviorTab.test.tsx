@@ -174,22 +174,6 @@ describe('BehaviorTab system notification focus gate toggle', () => {
   });
 });
 
-describe('BehaviorTab system notification focus gate toggle', () => {
-  it('fires the focus gate callback when clicked', () => {
-    const onSystemNotificationOnlyWhenUnfocusedChange = vi.fn();
-    renderBehaviorTab({ onSystemNotificationOnlyWhenUnfocusedChange });
-
-    const checkbox = screen.getByRole('checkbox', {
-      name: /settings.basic.systemNotificationOnlyWhenUnfocused.disabled/i,
-    }) as HTMLInputElement;
-    expect(checkbox.checked).toBe(false);
-
-    fireEvent.click(checkbox);
-
-    expect(onSystemNotificationOnlyWhenUnfocusedChange).toHaveBeenCalledWith(true);
-  });
-});
-
 describe('BehaviorTab permission dialog timeout', () => {
   it('exposes the timeout number input with an accessible label', () => {
     renderBehaviorTab();

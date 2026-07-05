@@ -511,32 +511,6 @@ const BehaviorTab = ({
         </small>
       </div>
 
-      {/* System notification focus gate */}
-      <div className={styles.streamingSection}>
-        <div className={styles.fieldHeader}>
-          <span className="codicon codicon-eye-closed" />
-          <span className={styles.fieldLabel}>{t('settings.basic.systemNotificationOnlyWhenUnfocused.label')}</span>
-        </div>
-        <label className={styles.toggleWrapper}>
-          <input
-            type="checkbox"
-            className={styles.toggleInput}
-            checked={systemNotificationOnlyWhenUnfocused}
-            onChange={(e) => onSystemNotificationOnlyWhenUnfocusedChange(e.target.checked)}
-          />
-          <span className={styles.toggleSlider} />
-          <span className={styles.toggleLabel}>
-            {systemNotificationOnlyWhenUnfocused
-              ? t('settings.basic.systemNotificationOnlyWhenUnfocused.enabled')
-              : t('settings.basic.systemNotificationOnlyWhenUnfocused.disabled')}
-          </span>
-        </label>
-        <small className={styles.formHint}>
-          <span className="codicon codicon-info" />
-          <span>{t('settings.basic.systemNotificationOnlyWhenUnfocused.hint')}</span>
-        </small>
-      </div>
-
       {/* Sound notification */}
       <div className={styles.streamingSection}>
         <div className={styles.fieldHeader}>
