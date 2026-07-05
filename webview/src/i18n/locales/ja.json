@@ -238,18 +238,18 @@
       },
       "diffExpanded": {
         "label": "差分をデフォルトで展開",
-        "enabled": "展開",
-        "disabled": "折りたたみ",
+        "enabled": "有効",
+        "disabled": "無効",
         "hint": "有効にすると、チャット内のコード差分がデフォルトで展開表示されます。無効の場合、差分は折りたたまれた状態で表示されます。"
       },
       "taskCompletionNotification": {
-        "label": "タスク完了通知",
+        "label": "タスク完了システム通知",
         "enabled": "有効",
         "disabled": "無効",
         "hint": "有効にすると、AIタスクが完了した時にシステム通知を表示します。無効の場合、通知は表示されません。"
       },
       "askUserQuestionNotification": {
-        "label": "ユーザー質問通知",
+        "label": "質問システム通知",
         "enabled": "有効",
         "disabled": "無効",
         "hint": "有効にすると、Claude が質問した時にシステム通知を表示し、見逃しを防ぎます。無効の場合、通知は表示されません。"
@@ -261,16 +261,38 @@
         "hint": "有効にすると、利用可能な場合にメッセージ下部へターンの推定コストを表示し、入力 Token の概要内にキャッシュヒットを含めます。Token 消費量は常に表示されます。"
       },
       "askUserQuestionSoundNotification": {
-        "label": "Ask User Question Sound",
+        "label": "質問アラート音",
         "enabled": "有効",
         "disabled": "無効",
-        "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
+        "hint": "有効にすると、Claude が質問した時に設定済みのアラート音を再生します。下のサウンド選択とフォーカス規則を使用します。"
       },
       "systemNotificationOnlyWhenUnfocused": {
         "label": "IDE がフォーカスされていない時だけシステム通知を表示",
         "enabled": "有効",
         "disabled": "無効",
-        "hint": "有効にすると、IDE ウィンドウがフォーカスされている間は、タスク完了通知と質問リマインダー通知をスキップします。"
+        "hint": "有効にすると、タスク完了と質問のシステム通知は IDE がフォーカスされていない時だけ表示されます。"
+      },
+      "soundNotification": {
+        "label": "タスク完了アラート音",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、AI タスクが完了した時に通知音を再生します。画面から離れていても完了に気づけます。",
+        "onlyWhenUnfocused": "IDE がフォーカスされていない時だけアラート音を再生",
+        "onlyWhenUnfocusedHint": "有効にすると、タスク完了と質問のアラート音は IDE がフォーカスされていない時だけ再生されます。",
+        "selectSound": "通知音",
+        "soundDefault": "デフォルト",
+        "soundChime": "チャイム",
+        "soundBell": "ベル",
+        "soundDing": "ディン",
+        "soundSuccess": "成功",
+        "soundCustom": "カスタム...",
+        "customSound": "カスタム音声ファイル",
+        "customSoundPlaceholder": "音声ファイルのパスを選択または入力",
+        "customSoundHint": "WAV、MP3、AIFF 形式に対応",
+        "testSound": "テスト",
+        "browse": "参照",
+        "useDefault": "デフォルトを使用",
+        "customSoundSaved": "カスタム音声を保存しました"
       },
       "sendShortcut": {
         "label": "送信ショートカット",

@@ -241,9 +241,9 @@
         "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
       },
       "diffExpanded": {
-        "label": "Expand Diffs by Default",
-        "enabled": "Expanded",
-        "disabled": "Collapsed",
+        "label": "Expand diffs by default",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
         "hint": "When enabled, code diffs in chat will be expanded by default. When disabled, diffs start collapsed and can be expanded by clicking."
       },
       "commitGeneration": {
@@ -259,13 +259,13 @@
         "hint": "When enabled, shows current model and mode info in the IDE status bar (e.g. GUI [Opus] {Auto}). When disabled, the widget is hidden."
       },
       "taskCompletionNotification": {
-        "label": "Task Completion Notification",
+        "label": "Task completion system notification",
         "enabled": "Enabled",
         "disabled": "Disabled",
         "hint": "When enabled, shows a system notification when AI task completes. When disabled, no notification appears."
       },
       "askUserQuestionNotification": {
-        "label": "Ask User Question Notification",
+        "label": "Question system notification",
         "enabled": "Enabled",
         "disabled": "Disabled",
         "hint": "When enabled, shows a system notification when Claude asks you a question, so you won't miss it. When disabled, no notification appears."
@@ -277,16 +277,16 @@
         "hint": "When enabled, message footers show estimated turn cost when available and include cache hits inside the input token summary. Token usage remains visible either way."
       },
       "askUserQuestionSoundNotification": {
-        "label": "Ask User Question Sound",
+        "label": "Question alert sound",
         "enabled": "Enabled",
         "disabled": "Disabled",
         "hint": "When enabled, plays the configured alert sound when Claude asks you a question. Uses the sound selection and focus rules below."
       },
       "systemNotificationOnlyWhenUnfocused": {
-        "label": "Show system notifications only when IDE is not focused",
+        "label": "Show system notifications only when IDE is unfocused",
         "enabled": "Enabled",
         "disabled": "Disabled",
-        "hint": "When enabled, task completion and question reminder notifications are skipped while the IDE window is focused."
+        "hint": "When enabled, task completion and question system notifications are shown only while the IDE is unfocused."
       },
       "sendShortcut": {
         "label": "Send Shortcut",
@@ -318,12 +318,12 @@
         "softDarkDesc": "Keep code contrast without the harsh black background"
       },
       "soundNotification": {
-        "label": "Task Completion Sound",
+        "label": "Task completion alert sound",
         "enabled": "Enabled",
         "disabled": "Disabled",
         "hint": "When enabled, a notification sound will play when AI completes a task, so you'll know even when away from the screen.",
-        "onlyWhenUnfocused": "Play only when IDE is not focused",
-        "onlyWhenUnfocusedHint": "When enabled, the sound will only play when the IDE window is not in focus.",
+        "onlyWhenUnfocused": "Play alert sounds only when IDE is unfocused",
+        "onlyWhenUnfocusedHint": "When enabled, task completion and question alert sounds play only while the IDE is unfocused.",
         "selectSound": "Notification Sound",
         "soundDefault": "Default",
         "soundChime": "Chime",
