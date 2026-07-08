@@ -25,13 +25,16 @@ import com.github.claudecodegui.util.JsUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentManager;
 import com.intellij.ui.jcef.JBCefBrowser;
+import com.intellij.util.Alarm;
 
 import javax.swing.*;
 import java.awt.*;
@@ -89,6 +92,20 @@ public class ClaudeChatWindow {
     // A session_updated reload that arrived while a turn was streaming is parked
     // here and drained at stream end (onStreamEnded). See {@link DeferredReload}.
     private final DeferredReload deferredReload = new DeferredReload();
+    // Backstop for the parked reload. onStreamEnded is the fast drain path, but it
+    // is edge-triggered: a defer that lands just after the stream-end edge (a
+    // cross-thread check-then-act between the daemon reader's isStreamActive() read
+    // and the stream reader's streamActive=false + drain), or the LAST background
+    // answer of a fan-out with no following stream end, would otherwise never be
+    // drained — the answer stays invisible forever. This alarm re-checks after a
+    // short delay and drains the parked reload the moment the stream is idle,
+    // without ever reloading mid-stream. Pooled thread: draining kicks off an async
+    // loadFromServer() that reads JSONL, so it must not run on the EDT.
+    private static final int DEFERRED_RELOAD_SAFETY_DRAIN_MS = 500;
+    private final Disposable safetyAlarmDisposable =
+            Disposer.newDisposable("ccgui-deferred-reload-safety");
+    private final Alarm deferredReloadSafetyAlarm =
+            new Alarm(Alarm.ThreadToUse.POOLED_THREAD, safetyAlarmDisposable);
 
     private HandlerContext handlerContext;
     private MessageDispatcher messageDispatcher;
@@ -673,6 +690,11 @@ public class ClaudeChatWindow {
                     // and drain it at stream end (onStreamEnded).
                     if (sessionCallbackAdapter != null && streamCoalescer != null && streamCoalescer.isStreamActive()) {
                         deferredReload.defer(updatedSessionId);
+                        // onStreamEnded drains this at the next stream-end. Also arm the
+                        // safety backstop so a defer that races the stream-end edge — or
+                        // the last fan-out answer with no following stream end — is still
+                        // drained once the stream goes idle (see deferredReloadSafetyTick).
+                        scheduleDeferredReloadSafetyDrain();
                         LOG.info("[ClaudeChatWindow] session_updated during active turn, deferring reload to stream end");
                         return;
                     }
@@ -741,6 +763,60 @@ public class ClaudeChatWindow {
         }
         LOG.info("[ClaudeChatWindow] draining deferred session_updated reload after stream end, sessionId=" + target);
         requestSessionReload(target);
+    }
+
+    /**
+     * What the safety backstop should do on a tick. Pure function so the
+     * park/stream/dispose state machine is unit-testable without a full
+     * ClaudeChatWindow.
+     *
+     * <ul>
+     *   <li>{@code DONE} — disposed, or nothing parked (the fast onStreamEnded
+     *       path already drained it): stop polling.</li>
+     *   <li>{@code RECHECK_LATER} — still parked but a stream is active:
+     *       reloading now would race the streaming append, so wait and re-check.</li>
+     *   <li>{@code DRAIN} — parked and the stream is idle: the safe point to
+     *       drain, even though no onStreamEnded edge arrived for this defer.</li>
+     * </ul>
+     */
+    enum SafetyDrainAction { DONE, RECHECK_LATER, DRAIN }
+
+    static SafetyDrainAction decideDeferredReloadSafety(boolean disposed, boolean hasPending, boolean streamActive) {
+        if (disposed || !hasPending) {
+            return SafetyDrainAction.DONE;
+        }
+        return streamActive ? SafetyDrainAction.RECHECK_LATER : SafetyDrainAction.DRAIN;
+    }
+
+    /** (Re)arm the safety backstop; overlapping arms collapse to one pending tick. */
+    private void scheduleDeferredReloadSafetyDrain() {
+        if (disposed) {
+            return;
+        }
+        deferredReloadSafetyAlarm.cancelAllRequests();
+        deferredReloadSafetyAlarm.addRequest(this::deferredReloadSafetyTick, DEFERRED_RELOAD_SAFETY_DRAIN_MS);
+    }
+
+    /**
+     * Backstop tick: drain a still-parked reload once the stream is idle, or
+     * re-check later while it is still streaming. Guarantees the last background
+     * answer of a fan-out is never orphaned by a missed/raced onStreamEnded edge.
+     * A no-op when the fast path already drained the parked reload.
+     */
+    private void deferredReloadSafetyTick() {
+        boolean streamActive = streamCoalescer != null && streamCoalescer.isStreamActive();
+        switch (decideDeferredReloadSafety(disposed, deferredReload.hasPending(), streamActive)) {
+            case DRAIN:
+                LOG.info("[ClaudeChatWindow] safety-draining deferred reload (no stream-end edge followed the defer)");
+                drainDeferredReload();
+                break;
+            case RECHECK_LATER:
+                scheduleDeferredReloadSafetyDrain();
+                break;
+            case DONE:
+            default:
+                break;
+        }
     }
 
     /**
@@ -997,6 +1073,8 @@ public class ClaudeChatWindow {
         chatWindowDelegate.dispose();
         editorContextTracker.dispose();
         streamCoalescer.dispose();
+        deferredReloadSafetyAlarm.cancelAllRequests();
+        Disposer.dispose(safetyAlarmDisposable);
         if (sessionCallbackAdapter != null) {
             sessionCallbackAdapter.dispose();
         }
