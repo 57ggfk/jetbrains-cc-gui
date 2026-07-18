@@ -31,6 +31,8 @@ public class ClaudeSession {
 
     private final Gson gson = new Gson();
     private final Project project;
+    /** Start time of the latest submitted turn, retained across Webview rebuilds. */
+    private volatile long lastTurnStartedAtMillis;
 
     // Session state manager
     private final com.github.claudecodegui.session.SessionState state;
@@ -472,6 +474,7 @@ public class ClaudeSession {
             String requestedReasoningEffort,
             String requestedCodexFastMode
     ) {
+        lastTurnStartedAtMillis = System.currentTimeMillis();
         String normalizedInput = (input != null) ? input.trim() : "";
         Message userMessage = contextService.buildUserMessage(normalizedInput, attachments);
         sendService.updateSessionStateForSend(userMessage, normalizedInput);
@@ -646,6 +649,14 @@ public class ClaudeSession {
      */
     public String getModel() {
         return state.getModel();
+    }
+
+    /**
+     * Returns the start time of the latest submitted turn, or {@code 0} when
+     * no turn has been submitted yet.
+     */
+    public long getLastTurnStartedAtMillis() {
+        return lastTurnStartedAtMillis;
     }
 
     /**
