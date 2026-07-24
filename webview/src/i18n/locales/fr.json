@@ -313,6 +313,13 @@
         "invalidValue": "Le tarif doit être un nombre non négatif",
         "defaultPricing": "Tarif par défaut utilisé"
       },
+      "contextWindow": {
+        "label": "Contexte maximal (tokens)",
+        "placeholder": "ex. 500000",
+        "hint": "Facultatif. Utilisé pour afficher l’utilisation du contexte dans le plugin sans modifier la limite réelle du fournisseur.",
+        "invalidValue": "Le contexte maximal doit être un entier positif",
+        "summary": "Contexte : {{value}} tokens"
+      },
       "configuredSectionTitle": "Modèles Claude configurés",
       "configuredSectionDesc": "Les modèles du fournisseur Claude actif ou de settings.json figurent déjà dans le sélecteur. Seul le tarif peut être modifié ici.",
       "configuredEditHint": "Ce modèle est géré par le fournisseur Claude actif ou settings.json. Seul le tarif peut être modifié ici.",

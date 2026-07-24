@@ -2064,7 +2064,7 @@ public class CodemossSettingsService {
         codexProviderManager.saveProviderOrder(orderedIds);
     }
 
-    // ==================== User Model Pricing Management ====================
+    // ==================== User Model Metadata Management ====================
 
     /**
      * Persist user-configured model pricing for a provider family, replacing the whole map.
@@ -2096,6 +2096,38 @@ public class CodemossSettingsService {
         writeConfig(config);
         LOG.info("[CodemossSettings] Set user model pricing for " + provider
                 + ": " + (pricing == null ? 0 : pricing.size()) + " models");
+    }
+
+    /**
+     * Persist user-configured model context windows for a provider family, replacing the whole map.
+     */
+    public void setCustomModelContextWindows(String provider, Map<String, Integer> contextWindows) throws IOException {
+        JsonObject config = readConfig();
+
+        JsonObject root;
+        if (config.has("customModelContextWindows") && config.get("customModelContextWindows").isJsonObject()) {
+            root = config.getAsJsonObject("customModelContextWindows");
+        } else {
+            root = new JsonObject();
+            config.add("customModelContextWindows", root);
+        }
+
+        if (contextWindows == null || contextWindows.isEmpty()) {
+            root.remove(provider);
+        } else {
+            JsonObject providerNode = new JsonObject();
+            for (Map.Entry<String, Integer> entry : contextWindows.entrySet()) {
+                Integer value = entry.getValue();
+                if (value != null && value > 0) {
+                    providerNode.addProperty(entry.getKey(), value);
+                }
+            }
+            root.add(provider, providerNode);
+        }
+
+        writeConfig(config);
+        LOG.info("[CodemossSettings] Set user model context windows for " + provider
+                + ": " + (contextWindows == null ? 0 : contextWindows.size()) + " models");
     }
 
     private JsonObject serializeModelPricing(ModelPricing pricing) {

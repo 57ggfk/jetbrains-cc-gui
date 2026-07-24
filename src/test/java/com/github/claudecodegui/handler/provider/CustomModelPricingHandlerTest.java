@@ -25,6 +25,7 @@ public class CustomModelPricingHandlerTest {
                   "models": [
                     {
                       "id": "custom-codex",
+                      "contextWindowTokens": 500000,
                       "pricing": {
                         "inputCostPer1M": 0.2,
                         "outputCostPer1M": 0.8,
@@ -54,6 +55,7 @@ public class CustomModelPricingHandlerTest {
         assertEquals(0.02, savedPricing.get("custom-codex").cacheReadCostPer1M(), 0.000001);
         assertEquals(0.3, savedPricing.get("partial-price-model").inputCostPer1M(), 0.000001);
         assertNull(savedPricing.get("partial-price-model").outputCostPer1M());
+        assertEquals(Map.of("custom-codex", 500_000), settings.contextWindowsRef.get());
     }
 
     @Test
@@ -66,16 +68,24 @@ public class CustomModelPricingHandlerTest {
         assertTrue(handled);
         assertNull(settings.providerRef.get());
         assertNull(settings.pricingRef.get());
+        assertNull(settings.contextWindowsRef.get());
     }
 
     private static final class CapturingSettingsService extends CodemossSettingsService {
         private final AtomicReference<String> providerRef = new AtomicReference<>();
         private final AtomicReference<Map<String, ModelPricing>> pricingRef = new AtomicReference<>();
+        private final AtomicReference<Map<String, Integer>> contextWindowsRef = new AtomicReference<>();
 
         @Override
         public void setCustomModelPricing(String provider, Map<String, ModelPricing> pricing) throws IOException {
             providerRef.set(provider);
             pricingRef.set(pricing);
+        }
+
+        @Override
+        public void setCustomModelContextWindows(String provider, Map<String, Integer> contextWindows) throws IOException {
+            providerRef.set(provider);
+            contextWindowsRef.set(contextWindows);
         }
     }
 }

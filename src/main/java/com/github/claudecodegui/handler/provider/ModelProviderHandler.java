@@ -5,6 +5,7 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 
 import com.github.claudecodegui.session.SessionSendService;
 import com.github.claudecodegui.skill.SlashCommandRegistry;
+import com.github.claudecodegui.provider.CustomModelContextWindowProvider;
 import com.github.claudecodegui.util.EditorFileUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -95,7 +96,11 @@ public class ModelProviderHandler {
             com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
 
             String resolvedModelForUsage = resolveConfiguredClaudeModelFromSettings(model);
-            int newMaxTokens = getModelContextLimit(resolvedModelForUsage);
+            int newMaxTokens = getModelContextLimit(
+                    context.getCurrentProvider(),
+                    model,
+                    resolvedModelForUsage
+            );
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
                     + ", resolved model: " + resolvedModelForUsage);
@@ -377,5 +382,17 @@ public class ModelProviderHandler {
         }
 
         return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
+    }
+
+    public static int getModelContextLimit(String provider, String model) {
+        return CustomModelContextWindowProvider.getInstance()
+                .getContextWindow(provider, model)
+                .orElseGet(() -> getModelContextLimit(model));
+    }
+
+    static int getModelContextLimit(String provider, String requestedModel, String resolvedModel) {
+        return CustomModelContextWindowProvider.getInstance()
+                .getContextWindow(provider, requestedModel)
+                .orElseGet(() -> getModelContextLimit(provider, resolvedModel));
     }
 }

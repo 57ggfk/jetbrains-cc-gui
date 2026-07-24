@@ -62,11 +62,11 @@ function normalizeComparableModelId(modelId: string): string {
 }
 
 /**
- * Mirror custom model pricing into the Java config file used by usage aggregators.
- * The complete model list is sent because deleting a model or clearing all pricing
- * must replace the provider's persisted pricing map, not merge with stale entries.
+ * Mirror custom model metadata into the Java config file used by usage displays and aggregators.
+ * The complete model list is sent because deleting a model or clearing optional metadata
+ * must replace the provider's persisted maps, not merge with stale entries.
  */
-function syncCustomModelPricing(storageKey: string, models: CodexCustomModel[]) {
+function syncCustomModelMetadata(storageKey: string, models: CodexCustomModel[]) {
   const provider = STORAGE_KEY_TO_PROVIDER[storageKey];
   if (!provider) {
     return;
@@ -121,7 +121,7 @@ export function usePluginModels(storageKey: string) {
     const validModels = validateCodexCustomModels(newModels);
     setModels(validModels);
     writePluginModels(storageKey, validModels);
-    syncCustomModelPricing(storageKey, validModels);
+    syncCustomModelMetadata(storageKey, validModels);
   }, [storageKey]);
 
   return { models, updateModels };

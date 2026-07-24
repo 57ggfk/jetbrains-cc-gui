@@ -398,4 +398,8 @@ public class SettingsHandler extends BaseMessageHandler {
     public static int getModelContextLimit(String model) {
         return ModelProviderHandler.getModelContextLimit(model);
     }
+
+    public static int getModelContextLimit(String provider, String model) {
+        return ModelProviderHandler.getModelContextLimit(provider, model);
+    }
 }

@@ -396,7 +396,10 @@ public class SessionLifecycleManager {
      * Reset token usage statistics in the frontend (used after new session creation).
      */
     private void resetTokenUsage() {
-        int maxTokens = SettingsHandler.getModelContextLimit(host.getHandlerContext().getCurrentModel());
+        int maxTokens = SettingsHandler.getModelContextLimit(
+                host.getHandlerContext().getCurrentProvider(),
+                host.getHandlerContext().getCurrentModel()
+        );
         JsonObject usageUpdate = new JsonObject();
         usageUpdate.addProperty("percentage", 0);
         usageUpdate.addProperty("totalTokens", 0);

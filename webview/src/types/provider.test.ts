@@ -31,7 +31,7 @@ describe('PROVIDER_PRESETS', () => {
   });
 });
 
-describe('custom model pricing validation', () => {
+describe('custom model validation', () => {
   it('accepts optional non-negative per-million-token pricing fields', () => {
     expect(isValidModelPricing({
       inputCostPer1M: 1.25,
@@ -48,6 +48,37 @@ describe('custom model pricing validation', () => {
         outputCostPer1M: 0.8,
       },
     })).toBe(true);
+  });
+
+  it('accepts an optional positive integer context window', () => {
+    expect(isValidCodexCustomModel({
+      id: 'vendor/custom-model',
+      label: 'Custom Model',
+      contextWindowTokens: 500_000,
+    })).toBe(true);
+
+    expect(isValidCodexCustomModel({
+      id: 'vendor/custom-model',
+      label: 'Custom Model',
+    })).toBe(true);
+  });
+
+  it('rejects invalid custom context windows', () => {
+    expect(isValidCodexCustomModel({
+      id: 'zero-context',
+      label: 'Zero',
+      contextWindowTokens: 0,
+    })).toBe(false);
+    expect(isValidCodexCustomModel({
+      id: 'fractional-context',
+      label: 'Fractional',
+      contextWindowTokens: 500_000.5,
+    })).toBe(false);
+    expect(isValidCodexCustomModel({
+      id: 'oversized-context',
+      label: 'Oversized',
+      contextWindowTokens: 2_147_483_648,
+    })).toBe(false);
   });
 
   it('rejects invalid custom pricing values', () => {

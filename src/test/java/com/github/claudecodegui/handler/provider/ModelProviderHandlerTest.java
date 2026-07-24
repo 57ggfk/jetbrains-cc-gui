@@ -1,7 +1,11 @@
 package com.github.claudecodegui.handler.provider;
 
+import com.github.claudecodegui.provider.CustomModelContextWindowProvider;
 import com.google.gson.JsonObject;
 import org.junit.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -107,6 +111,69 @@ public class ModelProviderHandlerTest {
         assertEquals(500_000, ModelProviderHandler.getModelContextLimit("custom-model[500k]"));
         assertEquals(2_000_000, ModelProviderHandler.getModelContextLimit("custom-model[2m]"));
         assertEquals(100_000, ModelProviderHandler.getModelContextLimit("custom-model[100K]"));
+    }
+
+    @Test
+    public void shouldPreferConfiguredCustomContextAndKeepExistingFallbacks() throws Exception {
+        Path config = Files.createTempFile("model-context-limit", ".json");
+        Files.writeString(config, """
+                {
+                  "customModelContextWindows": {
+                    "codex": {
+                      "custom-model": 750000
+                    }
+                  }
+                }
+                """);
+        CustomModelContextWindowProvider.setInstanceForTests(
+                CustomModelContextWindowProvider.createForTests(config)
+        );
+
+        try {
+            assertEquals(750_000, ModelProviderHandler.getModelContextLimit("codex", "custom-model"));
+            assertEquals(500_000, ModelProviderHandler.getModelContextLimit("codex", "legacy-model[500k]"));
+            assertEquals(200_000, ModelProviderHandler.getModelContextLimit("codex", "unknown-model"));
+        } finally {
+            CustomModelContextWindowProvider.setInstanceForTests(null);
+        }
+    }
+
+    @Test
+    public void shouldPreferRequestedModelContextBeforeClaudeAliasResolution() throws Exception {
+        Path config = Files.createTempFile("model-context-limit", ".json");
+        Files.writeString(config, """
+                {
+                  "customModelContextWindows": {
+                    "claude": {
+                      "claude-sonnet-4-6": 750000
+                    }
+                  }
+                }
+                """);
+        CustomModelContextWindowProvider.setInstanceForTests(
+                CustomModelContextWindowProvider.createForTests(config)
+        );
+
+        try {
+            assertEquals(
+                    750_000,
+                    ModelProviderHandler.getModelContextLimit(
+                            "claude",
+                            "claude-sonnet-4-6",
+                            "glm-4.7[1m]"
+                    )
+            );
+            assertEquals(
+                    1_000_000,
+                    ModelProviderHandler.getModelContextLimit(
+                            "claude",
+                            "claude-opus-4-6",
+                            "glm-4.7[1m]"
+                    )
+            );
+        } finally {
+            CustomModelContextWindowProvider.setInstanceForTests(null);
+        }
     }
 
     // ============================================================================

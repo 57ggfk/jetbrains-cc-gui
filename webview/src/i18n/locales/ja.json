@@ -313,6 +313,13 @@
         "invalidValue": "料金は0以上の数値で入力してください",
         "defaultPricing": "既定料金を使用中"
       },
+      "contextWindow": {
+        "label": "最大コンテキスト（トークン）",
+        "placeholder": "例: 500000",
+        "hint": "任意。プラグインのコンテキスト使用量表示に使用され、プロバイダーの実際の上限は変更しません。",
+        "invalidValue": "最大コンテキストは正の整数で入力してください",
+        "summary": "コンテキスト: {{value}} トークン"
+      },
       "configuredSectionTitle": "設定済みの Claude モデル",
       "configuredSectionDesc": "現在の Claude プロバイダーまたは settings.json のモデルは既にモデル選択リストに表示されています。ここでは料金のみ変更できます。",
       "configuredEditHint": "このモデルは現在の Claude プロバイダーまたは settings.json で管理されています。ここでは料金のみ変更できます。",

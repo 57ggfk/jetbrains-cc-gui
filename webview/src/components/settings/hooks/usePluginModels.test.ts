@@ -157,4 +157,31 @@ describe('usePluginModels', () => {
       models: expectedModels,
     }));
   });
+
+  it('persists and syncs a custom context window alongside pricing', () => {
+    const { result } = renderHook(() => usePluginModels(STORAGE_KEYS.CODEX_CUSTOM_MODELS));
+
+    act(() => {
+      result.current.updateModels([{
+        id: 'vendor/context-model',
+        label: 'Context Model',
+        contextWindowTokens: 500_000,
+        pricing: { inputCostPer1M: 0.1 },
+      }]);
+    });
+
+    const expectedModels = [{
+      id: 'vendor/context-model',
+      label: 'Context Model',
+      contextWindowTokens: 500_000,
+      pricing: { inputCostPer1M: 0.1 },
+    }];
+
+    expect(result.current.models).toEqual(expectedModels);
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.CODEX_CUSTOM_MODELS) || '[]')).toEqual(expectedModels);
+    expect(sendBridgeEventMock).toHaveBeenLastCalledWith('set_custom_model_pricing', JSON.stringify({
+      provider: 'codex',
+      models: expectedModels,
+    }));
+  });
 });

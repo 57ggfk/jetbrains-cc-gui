@@ -366,6 +366,13 @@
         "invalidValue": "Pricing must be a non-negative number",
         "defaultPricing": "Using default pricing"
       },
+      "contextWindow": {
+        "label": "Maximum context (tokens)",
+        "placeholder": "e.g. 500000",
+        "hint": "Optional. Used for plugin context usage display and does not change the provider's actual limit.",
+        "invalidValue": "Maximum context must be a positive whole number",
+        "summary": "Context: {{value}} tokens"
+      },
       "configuredSectionTitle": "Configured Claude models",
       "configuredSectionDesc": "Models from the active Claude provider/settings.json are already in the selector. Only pricing can be changed here.",
       "configuredEditHint": "This model is managed by the active Claude provider/settings.json. Only pricing can be changed here.",
