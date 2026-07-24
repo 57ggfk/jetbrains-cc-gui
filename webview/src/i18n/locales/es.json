@@ -314,10 +314,10 @@
         "defaultPricing": "Usando el precio predeterminado"
       },
       "contextWindow": {
-        "label": "Contexto máximo (tokens)",
-        "placeholder": "p. ej. 500000",
-        "hint": "Opcional. Se usa para mostrar el uso de contexto del plugin y no cambia el límite real del proveedor.",
-        "invalidValue": "El contexto máximo debe ser un número entero positivo",
+        "label": "Contexto máximo (K tokens)",
+        "placeholder": "p. ej. 500",
+        "hint": "Opcional. Introduce miles de tokens (500 = 500.000 tokens). Solo se usa para mostrar el uso de contexto del plugin.",
+        "invalidValue": "El contexto máximo debe ser un número positivo válido en unidades K",
         "summary": "Contexto: {{value}} tokens"
       },
       "configuredSectionTitle": "Modelos de Claude configurados",

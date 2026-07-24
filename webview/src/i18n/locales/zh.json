@@ -367,10 +367,10 @@
         "defaultPricing": "使用默认价格"
       },
       "contextWindow": {
-        "label": "最大上下文（tokens）",
-        "placeholder": "例如 500000",
-        "hint": "可选。仅用于插件显示上下文用量，不会改变供应商的实际限制。",
-        "invalidValue": "最大上下文必须是正整数",
+        "label": "最大上下文（K tokens）",
+        "placeholder": "例如 500",
+        "hint": "可选。按千 tokens 输入（500 = 500,000 tokens），仅用于插件显示上下文用量。",
+        "invalidValue": "最大上下文必须是有效的正数（单位 K）",
         "summary": "上下文：{{value}} tokens"
       },
       "configuredSectionTitle": "已配置的 Claude 模型",

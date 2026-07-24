@@ -29,7 +29,7 @@ describe('CustomModelDialog', () => {
       target: { value: 'Custom Model' },
     });
     fireEvent.change(screen.getByLabelText('settings.pluginModels.contextWindow.label'), {
-      target: { value: '500000' },
+      target: { value: '500' },
     });
     fireEvent.change(screen.getByLabelText('settings.pluginModels.pricing.inputLabel'), {
       target: { value: '0.2' },
@@ -83,7 +83,36 @@ describe('CustomModelDialog', () => {
     }]);
   });
 
-  it('blocks saving when the context window is not a positive integer', () => {
+  it('converts decimal K input to an exact token count', () => {
+    const onModelsChange = vi.fn();
+
+    render(
+      <CustomModelDialog
+        isOpen
+        models={[]}
+        onModelsChange={onModelsChange}
+        onClose={vi.fn()}
+        initialAddMode
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('settings.codexProvider.dialog.modelIdPlaceholder'), {
+      target: { value: 'vendor/decimal-context' },
+    });
+    fireEvent.change(screen.getByLabelText('settings.pluginModels.contextWindow.label'), {
+      target: { value: '500.5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'common.add' }));
+
+    expect(onModelsChange).toHaveBeenCalledWith([{
+      id: 'vendor/decimal-context',
+      label: 'vendor/decimal-context',
+      description: undefined,
+      contextWindowTokens: 500_500,
+    }]);
+  });
+
+  it('blocks saving when the context window is not a valid positive K value', () => {
     const onModelsChange = vi.fn();
 
     render(
@@ -100,12 +129,12 @@ describe('CustomModelDialog', () => {
       target: { value: 'vendor/invalid-context' },
     });
     fireEvent.change(screen.getByLabelText('settings.pluginModels.contextWindow.label'), {
-      target: { value: '1.5' },
+      target: { value: '0' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'common.add' }));
 
     expect(onModelsChange).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toBe('Maximum context must be a positive whole number');
+    expect(screen.getByRole('alert').textContent).toBe('Maximum context must be a valid positive number in K units');
   });
 
   it('clears a previously configured context window', () => {
@@ -126,7 +155,7 @@ describe('CustomModelDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'common.edit vendor/context-model' }));
     const contextInput = screen.getByLabelText('settings.pluginModels.contextWindow.label') as HTMLInputElement;
-    expect(contextInput.value).toBe('500000');
+    expect(contextInput.value).toBe('500');
 
     fireEvent.change(contextInput, { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));

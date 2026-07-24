@@ -314,10 +314,10 @@
         "defaultPricing": "Tarif par défaut utilisé"
       },
       "contextWindow": {
-        "label": "Contexte maximal (tokens)",
-        "placeholder": "ex. 500000",
-        "hint": "Facultatif. Utilisé pour afficher l’utilisation du contexte dans le plugin sans modifier la limite réelle du fournisseur.",
-        "invalidValue": "Le contexte maximal doit être un entier positif",
+        "label": "Contexte maximal (K tokens)",
+        "placeholder": "ex. 500",
+        "hint": "Facultatif. Saisissez des milliers de tokens (500 = 500 000 tokens). Utilisé uniquement pour l’affichage dans le plugin.",
+        "invalidValue": "Le contexte maximal doit être un nombre positif valide en unités K",
         "summary": "Contexte : {{value}} tokens"
       },
       "configuredSectionTitle": "Modèles Claude configurés",
