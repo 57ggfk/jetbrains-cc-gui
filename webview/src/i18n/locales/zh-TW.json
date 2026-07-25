@@ -316,8 +316,8 @@
       "contextWindow": {
         "label": "最大上下文（K tokens）",
         "placeholder": "例如 500",
-        "hint": "選填。以千 tokens 為單位輸入（500 = 500,000 tokens），僅用於外掛顯示上下文用量。",
-        "invalidValue": "最大上下文必須是有效的正數（單位 K）",
+        "hint": "選填。請輸入整數 K 值（500 = 500,000 tokens），僅用於外掛顯示上下文用量。",
+        "invalidValue": "最大上下文必須是正整數（單位 K）",
         "summary": "上下文：{{value}} tokens"
       },
       "configuredSectionTitle": "已設定的 Claude 模型",

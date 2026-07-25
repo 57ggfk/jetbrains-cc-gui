@@ -71,6 +71,35 @@ public class CustomModelPricingHandlerTest {
         assertNull(settings.contextWindowsRef.get());
     }
 
+    @Test
+    public void shouldKeepClaudePricingAndIgnoreClaudeContextWindows() {
+        CapturingSettingsService settings = new CapturingSettingsService();
+        CustomModelPricingHandler handler = new CustomModelPricingHandler(null, settings);
+
+        boolean handled = handler.handle(CustomModelPricingHandler.SET_TYPE,
+                "{\"provider\":\"claude\",\"models\":[{\"id\":\"custom-claude\","
+                        + "\"contextWindowTokens\":500000,\"pricing\":{\"inputCostPer1M\":0.2}}]}");
+
+        assertTrue(handled);
+        assertEquals("claude", settings.providerRef.get());
+        assertEquals(0.2, settings.pricingRef.get().get("custom-claude").inputCostPer1M(), 0.000001);
+        assertNull(settings.contextWindowsRef.get());
+    }
+
+    @Test
+    public void shouldRejectCodexContextWindowsThatAreNotWholeKValues() {
+        CapturingSettingsService settings = new CapturingSettingsService();
+        CustomModelPricingHandler handler = new CustomModelPricingHandler(null, settings);
+
+        handler.handle(CustomModelPricingHandler.SET_TYPE,
+                "{\"provider\":\"codex\",\"models\":["
+                        + "{\"id\":\"valid\",\"contextWindowTokens\":1000},"
+                        + "{\"id\":\"sub-k\",\"contextWindowTokens\":500},"
+                        + "{\"id\":\"partial-k\",\"contextWindowTokens\":500500}]}");
+
+        assertEquals(Map.of("valid", 1_000), settings.contextWindowsRef.get());
+    }
+
     private static final class CapturingSettingsService extends CodemossSettingsService {
         private final AtomicReference<String> providerRef = new AtomicReference<>();
         private final AtomicReference<Map<String, ModelPricing>> pricingRef = new AtomicReference<>();

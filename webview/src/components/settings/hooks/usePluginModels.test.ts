@@ -23,6 +23,7 @@ describe('usePluginModels', () => {
         {
           id: 'vendor/custom-claude',
           label: 'Custom Claude',
+          contextWindowTokens: 500_000,
           pricing: {
             inputCostPer1M: 0.2,
             outputCostPer1M: 0.8,
@@ -60,6 +61,21 @@ describe('usePluginModels', () => {
         },
       ],
     }));
+  });
+
+  it('drops stale context metadata when reading Claude custom models', () => {
+    localStorage.setItem(STORAGE_KEYS.CLAUDE_CUSTOM_MODELS, JSON.stringify([{
+      id: 'vendor/custom-claude',
+      label: 'Custom Claude',
+      contextWindowTokens: 500_000,
+    }]));
+
+    const { result } = renderHook(() => usePluginModels(STORAGE_KEYS.CLAUDE_CUSTOM_MODELS));
+
+    expect(result.current.models).toEqual([{
+      id: 'vendor/custom-claude',
+      label: 'Custom Claude',
+    }]);
   });
 
   it('keeps configured Claude model pricing when syncing user custom models', () => {

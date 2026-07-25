@@ -17,15 +17,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Handles persistence of user-configured model pricing and context windows.
+ * Handles persistence of user-configured model pricing and Codex context windows.
  *
  * <p>The frontend sends {@code set_custom_model_pricing} whenever plugin-level custom models or
  * pricing-only Claude configured models change. The payload shape is:
  * <pre>
  * { "provider": "claude"|"codex", "models": [ { "id": "...", "pricing": { ... } } ] }
  * </pre>
- * Pricing and context-window maps are persisted independently. Missing fields are omitted from
- * their respective maps so existing hardcoded context and pricing fallbacks remain unchanged.
+ * Pricing is supported for both provider families. Context-window metadata is accepted only for
+ * Codex models so Claude's runtime-controlled context behavior remains unchanged.
  */
 public class CustomModelPricingHandler extends BaseMessageHandler {
 
@@ -59,6 +59,7 @@ public class CustomModelPricingHandler extends BaseMessageHandler {
 
             Map<String, ModelPricing> pricingMap = new LinkedHashMap<>();
             Map<String, Integer> contextWindowMap = new LinkedHashMap<>();
+            boolean supportsContextWindows = "codex".equals(provider);
             if (payload.has("models") && payload.get("models").isJsonArray()) {
                 JsonArray models = payload.getAsJsonArray("models");
                 for (JsonElement el : models) {
@@ -77,22 +78,29 @@ public class CustomModelPricingHandler extends BaseMessageHandler {
                     if (pricing != null) {
                         pricingMap.put(id, pricing);
                     }
-                    Integer contextWindow = parseContextWindow(model);
-                    if (contextWindow != null) {
-                        contextWindowMap.put(id, contextWindow);
+                    if (supportsContextWindows) {
+                        Integer contextWindow = parseContextWindow(model);
+                        if (contextWindow != null) {
+                            contextWindowMap.put(id, contextWindow);
+                        }
                     }
                 }
             }
 
             settingsService.setCustomModelPricing(provider, pricingMap);
-            settingsService.setCustomModelContextWindows(provider, contextWindowMap);
             CustomPricingProvider.getInstance().invalidateCache();
-            CustomModelContextWindowProvider.getInstance().invalidateCache();
+            if (supportsContextWindows) {
+                settingsService.setCustomModelContextWindows(provider, contextWindowMap);
+                CustomModelContextWindowProvider.getInstance().invalidateCache();
+            }
             LOG.info("[CustomModelPricingHandler] Persisted " + pricingMap.size()
-                    + " custom model pricing entries and " + contextWindowMap.size()
-                    + " context window entries for " + provider);
+                    + " custom model pricing entries"
+                    + (supportsContextWindows ? " and " + contextWindowMap.size() + " context window entries" : "")
+                    + " for " + provider);
 
-            refreshCurrentUsage(provider);
+            if (supportsContextWindows) {
+                refreshCurrentUsage(provider);
+            }
         } catch (Exception e) {
             LOG.error("[CustomModelPricingHandler] Failed to handle " + type + ": " + e.getMessage(), e);
         }
@@ -125,7 +133,7 @@ public class CustomModelPricingHandler extends BaseMessageHandler {
         }
         try {
             int value = model.get("contextWindowTokens").getAsBigDecimal().intValueExact();
-            return value > 0 ? value : null;
+            return value >= 1_000 && value % 1_000 == 0 ? value : null;
         } catch (Exception e) {
             return null;
         }

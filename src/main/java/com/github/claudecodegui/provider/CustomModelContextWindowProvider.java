@@ -22,6 +22,8 @@ public final class CustomModelContextWindowProvider {
 
     private static final Logger LOG = Logger.getInstance(CustomModelContextWindowProvider.class);
     private static final String ROOT_KEY = "customModelContextWindows";
+    private static final String CODEX_PROVIDER = "codex";
+    private static final int TOKENS_PER_K = 1_000;
 
     private static volatile CustomModelContextWindowProvider instance;
 
@@ -72,16 +74,13 @@ public final class CustomModelContextWindowProvider {
             return OptionalInt.empty();
         }
 
-        Map<String, Integer> forProvider = getOrLoad().forProvider(normalizeProvider(provider));
-        String trimmedModelId = modelId.trim();
-        Integer exact = forProvider.get(trimmedModelId);
-        if (exact != null) {
-            return OptionalInt.of(exact);
+        String normalizedProvider = normalizeProvider(provider);
+        if (!CODEX_PROVIDER.equals(normalizedProvider)) {
+            return OptionalInt.empty();
         }
 
-        String baseModelId = stripOneMillionContextSuffix(trimmedModelId);
-        Integer base = forProvider.get(baseModelId);
-        return base == null ? OptionalInt.empty() : OptionalInt.of(base);
+        Integer contextWindow = getOrLoad().forProvider(CODEX_PROVIDER).get(modelId.trim());
+        return contextWindow == null ? OptionalInt.empty() : OptionalInt.of(contextWindow);
     }
 
     public void invalidateCache() {
@@ -120,23 +119,19 @@ public final class CustomModelContextWindowProvider {
             }
 
             JsonObject root = config.getAsJsonObject(ROOT_KEY);
-            Map<String, Map<String, Integer>> result = new HashMap<>();
-            for (String provider : new String[]{"claude", "codex"}) {
-                if (!root.has(provider) || !root.get(provider).isJsonObject()) {
-                    continue;
-                }
-
-                JsonObject providerNode = root.getAsJsonObject(provider);
-                Map<String, Integer> modelMap = new HashMap<>();
-                for (String modelId : providerNode.keySet()) {
-                    Integer contextWindow = readContextWindow(providerNode.get(modelId));
-                    if (contextWindow != null) {
-                        modelMap.put(modelId, contextWindow);
-                    }
-                }
-                result.put(provider, Map.copyOf(modelMap));
+            if (!root.has(CODEX_PROVIDER) || !root.get(CODEX_PROVIDER).isJsonObject()) {
+                return new CachedContextWindows(mtime, empty);
             }
-            return new CachedContextWindows(mtime, Map.copyOf(result));
+
+            JsonObject providerNode = root.getAsJsonObject(CODEX_PROVIDER);
+            Map<String, Integer> modelMap = new HashMap<>();
+            for (String modelId : providerNode.keySet()) {
+                Integer contextWindow = readContextWindow(providerNode.get(modelId));
+                if (contextWindow != null) {
+                    modelMap.put(modelId, contextWindow);
+                }
+            }
+            return new CachedContextWindows(mtime, Map.of(CODEX_PROVIDER, Map.copyOf(modelMap)));
         } catch (Exception e) {
             LOG.warn("[CustomModelContextWindowProvider] Failed to read config: " + e.getMessage());
             return new CachedContextWindows(mtime, empty);
@@ -149,7 +144,7 @@ public final class CustomModelContextWindowProvider {
         }
         try {
             int value = element.getAsBigDecimal().intValueExact();
-            return value > 0 ? value : null;
+            return value >= TOKENS_PER_K && value % TOKENS_PER_K == 0 ? value : null;
         } catch (Exception e) {
             return null;
         }
@@ -157,10 +152,6 @@ public final class CustomModelContextWindowProvider {
 
     private static String normalizeProvider(String provider) {
         return provider.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static String stripOneMillionContextSuffix(String modelId) {
-        return modelId.replaceFirst("(?i)\\[1m]$", "");
     }
 
     private static long readMtimeSafe(Path path) {

@@ -316,8 +316,8 @@
       "contextWindow": {
         "label": "Contexte maximal (K tokens)",
         "placeholder": "ex. 500",
-        "hint": "Facultatif. Saisissez des milliers de tokens (500 = 500 000 tokens). Utilisé uniquement pour l’affichage dans le plugin.",
-        "invalidValue": "Le contexte maximal doit être un nombre positif valide en unités K",
+        "hint": "Facultatif. Saisissez un nombre entier de milliers de tokens (500 = 500 000 tokens). Utilisé uniquement pour l’affichage dans le plugin.",
+        "invalidValue": "Le contexte maximal doit être un entier positif en unités K",
         "summary": "Contexte : {{value}} tokens"
       },
       "configuredSectionTitle": "Modèles Claude configurés",

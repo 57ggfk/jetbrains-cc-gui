@@ -11,12 +11,33 @@ const STORAGE_KEY_TO_PROVIDER: Partial<Record<string, 'claude' | 'codex'>> = {
 /**
  * Read plugin-level custom models from localStorage
  */
+function stripContextWindowMetadata(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  return value.map(model => {
+    if (!model || typeof model !== 'object' || Array.isArray(model)) {
+      return model;
+    }
+    return Object.fromEntries(
+      Object.entries(model).filter(([key]) => key !== 'contextWindowTokens'),
+    );
+  });
+}
+
+function validatePluginModels(storageKey: string, value: unknown): CodexCustomModel[] {
+  const candidate = storageKey === STORAGE_KEYS.CLAUDE_CUSTOM_MODELS
+    ? stripContextWindowMetadata(value)
+    : value;
+  return validateCodexCustomModels(candidate);
+}
+
 function readPluginModels(storageKey: string): CodexCustomModel[] {
   try {
     const stored = localStorage.getItem(storageKey);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return validateCodexCustomModels(parsed);
+    return validatePluginModels(storageKey, parsed);
   } catch {
     return [];
   }
@@ -118,7 +139,7 @@ export function usePluginModels(storageKey: string) {
   }, [storageKey]);
 
   const updateModels = useCallback((newModels: CodexCustomModel[]) => {
-    const validModels = validateCodexCustomModels(newModels);
+    const validModels = validatePluginModels(storageKey, newModels);
     setModels(validModels);
     writePluginModels(storageKey, validModels);
     syncCustomModelMetadata(storageKey, validModels);

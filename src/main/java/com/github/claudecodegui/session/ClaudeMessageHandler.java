@@ -363,7 +363,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                 if (messageObj.has("usage") && messageObj.get("usage").isJsonObject()) {
                     JsonObject usage = messageObj.getAsJsonObject("usage");
                     int usedTokens = TokenUsageUtils.extractUsedTokens(usage, state.getProvider());
-                    int maxTokens = SettingsHandler.getModelContextLimit(state.getProvider(), state.getModel());
+                    int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
                     LOG.debug("Updated token usage from assistant message: " + usedTokens);
@@ -629,7 +629,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                         msg.add("usage", usageJson);
                     }
                     int usedTokens = TokenUsageUtils.extractUsedTokens(usageJson, state.getProvider());
-                    int maxTokens = SettingsHandler.getModelContextLimit(state.getProvider(), state.getModel());
+                    int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
                     LOG.debug("Fallback: updated token usage from result message: " + usedTokens);
@@ -932,7 +932,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         try {
             JsonObject usageJson = gson.fromJson(content, JsonObject.class);
             int usedTokens = TokenUsageUtils.extractUsedTokens(usageJson, state.getProvider());
-            int maxTokens = SettingsHandler.getModelContextLimit(state.getProvider(), state.getModel());
+            int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
             ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
             // Notify webview of usage update
             callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);

@@ -365,8 +365,8 @@
       "contextWindow": {
         "label": "Contexto máximo (K tokens)",
         "placeholder": "ex.: 500",
-        "hint": "Opcional. Informe milhares de tokens (500 = 500.000 tokens). Usado apenas para exibir o uso de contexto no plugin.",
-        "invalidValue": "O contexto máximo deve ser um número positivo válido em unidades K",
+        "hint": "Opcional. Informe um número inteiro de milhares de tokens (500 = 500.000 tokens). Usado apenas para exibir o uso de contexto no plugin.",
+        "invalidValue": "O contexto máximo deve ser um inteiro positivo em unidades K",
         "summary": "Contexto: {{value}} tokens"
       },
       "configuredSectionTitle": "Modelos Claude configurados",

@@ -18,6 +18,7 @@ describe('CustomModelDialog', () => {
         models={[]}
         onModelsChange={onModelsChange}
         onClose={vi.fn()}
+        contextWindowEnabled
         initialAddMode
       />,
     );
@@ -67,6 +68,7 @@ describe('CustomModelDialog', () => {
         models={[]}
         onModelsChange={onModelsChange}
         onClose={vi.fn()}
+        contextWindowEnabled
         initialAddMode
       />,
     );
@@ -83,7 +85,7 @@ describe('CustomModelDialog', () => {
     }]);
   });
 
-  it('converts decimal K input to an exact token count', () => {
+  it('rejects fractional K input', () => {
     const onModelsChange = vi.fn();
 
     render(
@@ -92,6 +94,7 @@ describe('CustomModelDialog', () => {
         models={[]}
         onModelsChange={onModelsChange}
         onClose={vi.fn()}
+        contextWindowEnabled
         initialAddMode
       />,
     );
@@ -104,12 +107,8 @@ describe('CustomModelDialog', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'common.add' }));
 
-    expect(onModelsChange).toHaveBeenCalledWith([{
-      id: 'vendor/decimal-context',
-      label: 'vendor/decimal-context',
-      description: undefined,
-      contextWindowTokens: 500_500,
-    }]);
+    expect(onModelsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe('Maximum context must be a positive integer in K units');
   });
 
   it('blocks saving when the context window is not a valid positive K value', () => {
@@ -121,6 +120,7 @@ describe('CustomModelDialog', () => {
         models={[]}
         onModelsChange={onModelsChange}
         onClose={vi.fn()}
+        contextWindowEnabled
         initialAddMode
       />,
     );
@@ -134,7 +134,37 @@ describe('CustomModelDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'common.add' }));
 
     expect(onModelsChange).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toBe('Maximum context must be a valid positive number in K units');
+    expect(screen.getByRole('alert').textContent).toBe('Maximum context must be a positive integer in K units');
+  });
+
+  it('uses whole-K input constraints only when Codex context configuration is enabled', () => {
+    const { rerender } = render(
+      <CustomModelDialog
+        isOpen
+        models={[]}
+        onModelsChange={vi.fn()}
+        onClose={vi.fn()}
+        initialAddMode
+      />,
+    );
+
+    expect(screen.queryByLabelText('settings.pluginModels.contextWindow.label')).toBeNull();
+
+    rerender(
+      <CustomModelDialog
+        isOpen
+        models={[]}
+        onModelsChange={vi.fn()}
+        onClose={vi.fn()}
+        contextWindowEnabled
+        initialAddMode
+      />,
+    );
+
+    const contextInput = screen.getByLabelText('settings.pluginModels.contextWindow.label') as HTMLInputElement;
+    expect(contextInput.min).toBe('1');
+    expect(contextInput.step).toBe('1');
+    expect(contextInput.inputMode).toBe('numeric');
   });
 
   it('clears a previously configured context window', () => {
@@ -150,6 +180,7 @@ describe('CustomModelDialog', () => {
         }]}
         onModelsChange={onModelsChange}
         onClose={vi.fn()}
+        contextWindowEnabled
       />,
     );
 

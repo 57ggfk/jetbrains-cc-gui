@@ -2099,9 +2099,13 @@ public class CodemossSettingsService {
     }
 
     /**
-     * Persist user-configured model context windows for a provider family, replacing the whole map.
+     * Persist user-configured Codex model context windows, replacing the whole map.
      */
     public void setCustomModelContextWindows(String provider, Map<String, Integer> contextWindows) throws IOException {
+        if (!"codex".equalsIgnoreCase(provider)) {
+            LOG.warn("[CodemossSettings] Ignored custom context windows for unsupported provider: " + provider);
+            return;
+        }
         JsonObject config = readConfig();
 
         JsonObject root;
@@ -2113,20 +2117,24 @@ public class CodemossSettingsService {
         }
 
         if (contextWindows == null || contextWindows.isEmpty()) {
-            root.remove(provider);
+            root.remove("codex");
         } else {
             JsonObject providerNode = new JsonObject();
             for (Map.Entry<String, Integer> entry : contextWindows.entrySet()) {
                 Integer value = entry.getValue();
-                if (value != null && value > 0) {
+                if (value != null && value >= 1_000 && value % 1_000 == 0) {
                     providerNode.addProperty(entry.getKey(), value);
                 }
             }
-            root.add(provider, providerNode);
+            if (providerNode.size() == 0) {
+                root.remove("codex");
+            } else {
+                root.add("codex", providerNode);
+            }
         }
 
         writeConfig(config);
-        LOG.info("[CodemossSettings] Set user model context windows for " + provider
+        LOG.info("[CodemossSettings] Set user model context windows for codex"
                 + ": " + (contextWindows == null ? 0 : contextWindows.size()) + " models");
     }
 

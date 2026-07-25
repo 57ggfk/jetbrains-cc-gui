@@ -131,6 +131,7 @@ public class ModelProviderHandlerTest {
 
         try {
             assertEquals(750_000, ModelProviderHandler.getModelContextLimit("codex", "custom-model"));
+            assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("codex", "custom-model[1m]"));
             assertEquals(500_000, ModelProviderHandler.getModelContextLimit("codex", "legacy-model[500k]"));
             assertEquals(200_000, ModelProviderHandler.getModelContextLimit("codex", "unknown-model"));
         } finally {
@@ -139,13 +140,13 @@ public class ModelProviderHandlerTest {
     }
 
     @Test
-    public void shouldPreferRequestedModelContextBeforeClaudeAliasResolution() throws Exception {
+    public void shouldIgnoreConfiguredCustomContextForClaude() throws Exception {
         Path config = Files.createTempFile("model-context-limit", ".json");
         Files.writeString(config, """
                 {
                   "customModelContextWindows": {
                     "claude": {
-                      "claude-sonnet-4-6": 750000
+                      "custom-claude": 750000
                     }
                   }
                 }
@@ -155,22 +156,8 @@ public class ModelProviderHandlerTest {
         );
 
         try {
-            assertEquals(
-                    750_000,
-                    ModelProviderHandler.getModelContextLimit(
-                            "claude",
-                            "claude-sonnet-4-6",
-                            "glm-4.7[1m]"
-                    )
-            );
-            assertEquals(
-                    1_000_000,
-                    ModelProviderHandler.getModelContextLimit(
-                            "claude",
-                            "claude-opus-4-6",
-                            "glm-4.7[1m]"
-                    )
-            );
+            assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude", "custom-claude"));
+            assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude", "custom-claude[1m]"));
         } finally {
             CustomModelContextWindowProvider.setInstanceForTests(null);
         }

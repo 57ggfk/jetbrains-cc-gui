@@ -108,7 +108,8 @@ export function isValidCodexCustomModel(model: unknown): model is CodexCustomMod
     if (
       typeof obj.contextWindowTokens !== 'number'
       || !Number.isSafeInteger(obj.contextWindowTokens)
-      || obj.contextWindowTokens <= 0
+      || obj.contextWindowTokens < 1_000
+      || obj.contextWindowTokens % 1_000 !== 0
       || obj.contextWindowTokens > 2_147_483_647
     ) return false;
   }

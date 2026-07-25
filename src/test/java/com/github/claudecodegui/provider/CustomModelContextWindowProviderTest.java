@@ -11,7 +11,7 @@ import static org.junit.Assert.assertFalse;
 public class CustomModelContextWindowProviderTest {
 
     @Test
-    public void shouldResolveProviderSpecificContextWindowsAndClaudeSuffix() throws Exception {
+    public void shouldResolveOnlyWholeKCodexContextWindowsByExactModelId() throws Exception {
         Path config = Files.createTempFile("custom-model-context", ".json");
         Files.writeString(config, """
                 {
@@ -22,6 +22,8 @@ public class CustomModelContextWindowProviderTest {
                     },
                     "codex": {
                       "shared-model": 1000000,
+                      "partial-k-model": 500500,
+                      "sub-k-model": 500,
                       "fractional-model": 12.5
                     }
                   }
@@ -30,10 +32,12 @@ public class CustomModelContextWindowProviderTest {
 
         CustomModelContextWindowProvider provider = CustomModelContextWindowProvider.createForTests(config);
 
-        assertEquals(500_000, provider.getContextWindow("claude", "shared-model").orElseThrow());
-        assertEquals(500_000, provider.getContextWindow("claude", "shared-model[1m]").orElseThrow());
+        assertFalse(provider.getContextWindow("claude", "shared-model").isPresent());
         assertEquals(1_000_000, provider.getContextWindow("codex", "shared-model").orElseThrow());
+        assertFalse(provider.getContextWindow("codex", "shared-model[1m]").isPresent());
         assertFalse(provider.getContextWindow("claude", "invalid-model").isPresent());
+        assertFalse(provider.getContextWindow("codex", "partial-k-model").isPresent());
+        assertFalse(provider.getContextWindow("codex", "sub-k-model").isPresent());
         assertFalse(provider.getContextWindow("codex", "fractional-model").isPresent());
         assertFalse(provider.getContextWindow("codex", "missing-model").isPresent());
     }

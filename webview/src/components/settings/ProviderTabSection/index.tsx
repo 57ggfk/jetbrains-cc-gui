@@ -193,6 +193,7 @@ const ProviderTabSection = ({
             : undefined
         }
         onClose={closeModelDialog}
+        contextWindowEnabled={dialogTarget === 'codex'}
         initialAddMode={modelDialogAddMode}
       />
     </div>

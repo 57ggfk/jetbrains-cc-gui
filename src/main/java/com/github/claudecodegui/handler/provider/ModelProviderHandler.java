@@ -95,12 +95,12 @@ public class ModelProviderHandler {
 
             com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
 
-            String resolvedModelForUsage = resolveConfiguredClaudeModelFromSettings(model);
-            int newMaxTokens = getModelContextLimit(
-                    context.getCurrentProvider(),
-                    model,
-                    resolvedModelForUsage
-            );
+            String provider = context.getCurrentProvider();
+            boolean isCodex = "codex".equalsIgnoreCase(provider);
+            String resolvedModelForUsage = isCodex ? model : resolveConfiguredClaudeModelFromSettings(model);
+            int newMaxTokens = isCodex
+                    ? getModelContextLimit(provider, model)
+                    : getModelContextLimit(resolvedModelForUsage);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
                     + ", resolved model: " + resolvedModelForUsage);
@@ -390,9 +390,4 @@ public class ModelProviderHandler {
                 .orElseGet(() -> getModelContextLimit(model));
     }
 
-    static int getModelContextLimit(String provider, String requestedModel, String resolvedModel) {
-        return CustomModelContextWindowProvider.getInstance()
-                .getContextWindow(provider, requestedModel)
-                .orElseGet(() -> getModelContextLimit(provider, resolvedModel));
-    }
 }

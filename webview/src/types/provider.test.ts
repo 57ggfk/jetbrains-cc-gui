@@ -50,7 +50,7 @@ describe('custom model validation', () => {
     })).toBe(true);
   });
 
-  it('accepts an optional positive integer context window', () => {
+  it('accepts an optional context window in whole-K token increments', () => {
     expect(isValidCodexCustomModel({
       id: 'vendor/custom-model',
       label: 'Custom Model',
@@ -73,6 +73,16 @@ describe('custom model validation', () => {
       id: 'fractional-context',
       label: 'Fractional',
       contextWindowTokens: 500_000.5,
+    })).toBe(false);
+    expect(isValidCodexCustomModel({
+      id: 'sub-k-context',
+      label: 'Sub K',
+      contextWindowTokens: 500,
+    })).toBe(false);
+    expect(isValidCodexCustomModel({
+      id: 'partial-k-context',
+      label: 'Partial K',
+      contextWindowTokens: 500_500,
     })).toBe(false);
     expect(isValidCodexCustomModel({
       id: 'oversized-context',
