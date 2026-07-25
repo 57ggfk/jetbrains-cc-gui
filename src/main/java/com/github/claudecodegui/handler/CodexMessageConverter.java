@@ -8,7 +8,9 @@ import com.github.claudecodegui.util.UserMessageSanitizer;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -26,6 +28,17 @@ public class CodexMessageConverter {
 
     /** Maximum number of tracked file-writing sessions to prevent unbounded growth. */
     private static final int MAX_SESSION_ENTRIES = 256;
+
+    /**
+     * Client-side orchestration calls persisted in Codex JSONL but never exposed as
+     * ordinary tool cards by the live SDK event stream. Replaying them would leak
+     * implementation details such as exec JavaScript and wait cell identifiers.
+     */
+    private static final Set<String> HIDDEN_HISTORY_TOOL_NAMES = Set.of(
+        "exec",
+        "wait",
+        "write_stdin"
+    );
 
     // Tracks file-writing sessions so later write_stdin events can display the target file.
     // Uses a bounded LRU map to prevent memory leaks over long IDE sessions.
@@ -68,6 +81,11 @@ public class CodexMessageConverter {
      */
     public static void clearSessionState() {
         SESSION_FILE_MAP.clear();
+    }
+
+    public static boolean isHiddenHistoryToolName(String toolName) {
+        return toolName != null
+            && HIDDEN_HISTORY_TOOL_NAMES.contains(toolName.toLowerCase(Locale.ROOT));
     }
 
     /**
@@ -398,6 +416,9 @@ public class CodexMessageConverter {
      * @return converted tool name, or null if the tool should be filtered out (e.g. write_stdin).
      */
     public static String convertToolName(String toolName, JsonElement toolInput) {
+        if (isHiddenHistoryToolName(toolName)) {
+            return null;
+        }
         if ("shell_command".equals(toolName) && toolInput != null && toolInput.isJsonObject()) {
             JsonObject inputObj = toolInput.getAsJsonObject();
             if (inputObj.has("command")) {
@@ -421,10 +442,6 @@ public class CodexMessageConverter {
             if (inputObj.has("plan") && inputObj.get("plan").isJsonArray()) {
                 return "todowrite";
             }
-        }
-        // Ignore write_stdin - it's waiting for previous command result
-        if ("write_stdin".equals(toolName)) {
-            return null;
         }
         return toolName;
     }
@@ -555,10 +572,13 @@ public class CodexMessageConverter {
      * Handles apply_patch and other custom tools.
      */
     public static JsonObject convertCustomToolCallToToolUse(JsonObject payload, String timestamp) {
+        String toolName = payload.has("name") ? payload.get("name").getAsString() : "unknown";
+        if (isHiddenHistoryToolName(toolName)) {
+            return null;
+        }
+
         JsonObject frontendMsg = new JsonObject();
         frontendMsg.addProperty("type", "assistant");
-
-        String toolName = payload.has("name") ? payload.get("name").getAsString() : "unknown";
 
         String toolInput = safeGetAsString(payload.get("input"), "");
 

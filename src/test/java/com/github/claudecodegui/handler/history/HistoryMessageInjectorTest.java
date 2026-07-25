@@ -2,7 +2,9 @@ package com.github.claudecodegui.handler.history;
 
 import com.github.claudecodegui.handler.core.HandlerContext;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.intellij.openapi.project.Project;
 import org.junit.Test;
 
@@ -153,6 +155,128 @@ public class HistoryMessageInjectorTest {
     }
 
     @Test
+    public void convertCodexMessagesReplaysBatchExecAsOriginalCommandGroup() {
+        JsonArray messages = new JsonArray();
+        messages.add(customToolCall(
+                "2026-07-23T02:00:00.000Z",
+                "exec-call",
+                "exec",
+                "const cmds = [\n"
+                    + "  {command:\"\\\"C:\\\\Windows\\\\System32\\\\WindowsPowerShell"
+                    + "\\\\v1.0\\\\powershell.exe\\\" -Command \\\"Write-Output one\\\"\","
+                    + "workdir:\"\\\\\\\\wsl.localhost\\\\Ubuntu\\\\home\\\\demo\",timeout_ms:10000},\n"
+                    + "  {command:'echo second',workdir:'D:/demo',timeout_ms:10000},\n"
+                    + "  {command:\"npm test\",workdir:\"D:/demo\",timeout_ms:10000}\n"
+                    + "];\n"
+                    + "const results = await Promise.all(cmds.map(c => tools.shell_command(c)));\n"
+                    + "results.forEach((r,i)=>{ text(`---${i+1}---`); text(r); });"
+        ));
+        messages.add(customToolCallOutput(
+                "2026-07-23T02:00:01.000Z",
+                "exec-call",
+                outputTextBlocks(
+                        "Script completed\nWall time 1.2 seconds\nOutput:\n",
+                        "---1---",
+                        "Exit code: 0\nWall time: 0.2 seconds\nOutput:\none",
+                        "---2---",
+                        "Exit code: 0\nWall time: 0.2 seconds\nOutput:\nsecond",
+                        "---3---",
+                        "Script error:\nExit code: 1\nWall time: 0.2 seconds\nOutput:\ntests failed"
+                )
+        ));
+        messages.add(functionCall("2026-07-23T02:00:02.000Z", "wait-call", "wait",
+                "{\"cell_id\":5,\"terminate\":true,\"max_tokens\":10000}"));
+        messages.add(functionCallOutput("2026-07-23T02:00:03.000Z", "wait-call", "completed"));
+        messages.add(responseItemAssistantMessage("2026-07-23T02:00:04.000Z", "visible assistant reply"));
+
+        List<JsonObject> result = HistoryMessageInjector.convertCodexMessagesToFrontendBatch(messages);
+
+        assertEquals(3, result.size());
+        JsonArray toolUses = result.get(0).getAsJsonObject("raw").getAsJsonArray("content");
+        assertEquals(3, toolUses.size());
+        assertEquals("tool_use", toolUses.get(0).getAsJsonObject().get("type").getAsString());
+        assertEquals("bash", toolUses.get(0).getAsJsonObject().get("name").getAsString());
+        assertEquals("bash", toolUses.get(1).getAsJsonObject().get("name").getAsString());
+        assertEquals("bash", toolUses.get(2).getAsJsonObject().get("name").getAsString());
+        JsonObject firstInput = toolUses.get(0).getAsJsonObject().getAsJsonObject("input");
+        assertTrue(firstInput.get("command").getAsString().startsWith("\"C:\\Windows\\System32"));
+        assertTrue(firstInput.get("description").getAsString().startsWith("Run \"C:\\Windows"));
+        assertEquals("\\\\wsl.localhost\\Ubuntu\\home\\demo", firstInput.get("workdir").getAsString());
+        assertEquals(10000, firstInput.get("timeout_ms").getAsInt());
+
+        JsonArray toolResults = result.get(1).getAsJsonObject("raw").getAsJsonArray("content");
+        assertEquals(3, toolResults.size());
+        assertFalse(toolResults.get(0).getAsJsonObject().get("is_error").getAsBoolean());
+        assertFalse(toolResults.get(1).getAsJsonObject().get("is_error").getAsBoolean());
+        assertTrue(toolResults.get(2).getAsJsonObject().get("is_error").getAsBoolean());
+        assertTrue(toolResults.get(0).getAsJsonObject().get("content").getAsString().contains("one"));
+        assertEquals(
+                toolUses.get(2).getAsJsonObject().get("id").getAsString(),
+                toolResults.get(2).getAsJsonObject().get("tool_use_id").getAsString()
+        );
+        assertEquals("visible assistant reply", result.get(2).get("content").getAsString());
+        assertFalse(result.toString().contains("const cmds"));
+        assertFalse(result.toString().contains("cell_id"));
+        assertFalse(result.toString().contains("max_tokens"));
+    }
+
+    @Test
+    public void convertCodexMessagesReplaysSingleExecWithLiveDescriptionAndResult() {
+        JsonArray messages = new JsonArray();
+        messages.add(customToolCall(
+                "2026-07-23T02:00:00.000Z",
+                "exec-1",
+                "exec",
+                "const r = await tools.shell_command({"
+                    + "command:'git status',workdir:'D:/demo',timeout_ms:5000"
+                    + "}); text(r);"
+        ));
+        messages.add(customToolCallOutput(
+                "2026-07-23T02:00:01.000Z",
+                "exec-1",
+                outputTextBlocks(
+                        "Script completed\nWall time 0.2 seconds\nOutput:\n",
+                        "Exit code: 0\nWall time: 0.1 seconds\nOutput:\nOn branch main"
+                )
+        ));
+
+        List<JsonObject> result = HistoryMessageInjector.convertCodexMessagesToFrontendBatch(messages);
+
+        assertEquals(2, result.size());
+        JsonObject toolUse = getOnlyRawContentBlock(result.get(0));
+        assertEquals("tool_use", toolUse.get("type").getAsString());
+        assertEquals("bash", toolUse.get("name").getAsString());
+        assertEquals("git status", toolUse.getAsJsonObject("input").get("command").getAsString());
+        assertEquals("Check git status", toolUse.getAsJsonObject("input").get("description").getAsString());
+        JsonObject toolResult = getOnlyRawContentBlock(result.get(1));
+        assertFalse(toolResult.get("is_error").getAsBoolean());
+        assertTrue(toolResult.get("content").getAsString().contains("On branch main"));
+    }
+
+    @Test
+    public void convertCodexMessagesSkipsWaitAndNonShellExecProtocolCards() {
+        JsonArray messages = new JsonArray();
+        messages.add(customToolCall(
+                "2026-07-23T02:00:00.000Z",
+                "patch-wrapper",
+                "exec",
+                "await tools.apply_patch('*** Begin Patch\\n*** End Patch');"
+        ));
+        messages.add(customToolCallOutput("2026-07-23T02:00:01.000Z", "patch-wrapper", "completed"));
+        messages.add(functionCall("2026-07-23T02:00:02.000Z", "wait-running", "wait",
+                "{\"cell_id\":9,\"terminate\":false,\"max_tokens\":10000}"));
+        messages.add(responseItemAssistantMessage("2026-07-23T02:00:03.000Z", "done"));
+
+        List<JsonObject> result = HistoryMessageInjector.convertCodexMessagesToFrontendBatch(messages);
+
+        assertEquals(1, result.size());
+        assertEquals("done", result.get(0).get("content").getAsString());
+        assertFalse(result.toString().contains("exec"));
+        assertFalse(result.toString().contains("cell_id"));
+        assertFalse(result.toString().contains("max_tokens"));
+    }
+
+    @Test
     public void convertCodexMessagesKeepsImageOnlyEventMessage() throws Exception {
         Path imagePath = Files.createTempFile("codex-history-image-only", ".png");
         try {
@@ -241,6 +365,83 @@ public class HistoryMessageInjectorTest {
         localImages.add(localImagePath);
         line.getAsJsonObject("payload").add("local_images", localImages);
         return line;
+    }
+
+    private static JsonObject functionCall(
+            String timestamp,
+            String callId,
+            String name,
+            String arguments
+    ) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("type", "function_call");
+        payload.addProperty("call_id", callId);
+        payload.addProperty("name", name);
+        payload.addProperty("arguments", arguments);
+        return responseItem(timestamp, payload);
+    }
+
+    private static JsonObject functionCallOutput(String timestamp, String callId, String output) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("type", "function_call_output");
+        payload.addProperty("call_id", callId);
+        payload.addProperty("output", output);
+        return responseItem(timestamp, payload);
+    }
+
+    private static JsonObject customToolCall(
+            String timestamp,
+            String callId,
+            String name,
+            String input
+    ) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("type", "custom_tool_call");
+        payload.addProperty("call_id", callId);
+        payload.addProperty("name", name);
+        payload.addProperty("input", input);
+        return responseItem(timestamp, payload);
+    }
+
+    private static JsonObject customToolCallOutput(String timestamp, String callId, String output) {
+        return customToolCallOutput(timestamp, callId, new JsonPrimitive(output));
+    }
+
+    private static JsonObject customToolCallOutput(
+            String timestamp,
+            String callId,
+            JsonElement output
+    ) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("type", "custom_tool_call_output");
+        payload.addProperty("call_id", callId);
+        payload.add("output", output);
+        return responseItem(timestamp, payload);
+    }
+
+    private static JsonArray outputTextBlocks(String... texts) {
+        JsonArray blocks = new JsonArray();
+        for (String text : texts) {
+            JsonObject block = new JsonObject();
+            block.addProperty("type", "input_text");
+            block.addProperty("text", text);
+            blocks.add(block);
+        }
+        return blocks;
+    }
+
+    private static JsonObject responseItem(String timestamp, JsonObject payload) {
+        JsonObject line = new JsonObject();
+        line.addProperty("timestamp", timestamp);
+        line.addProperty("type", "response_item");
+        line.add("payload", payload);
+        return line;
+    }
+
+    private static JsonObject getOnlyRawContentBlock(JsonObject frontendMessage) {
+        JsonArray blocks = frontendMessage.getAsJsonObject("raw").getAsJsonArray("content");
+        assertEquals(1, blocks.size());
+        return blocks.get(0).getAsJsonObject();
     }
 
     private static HandlerContext createContext(String basePath) {

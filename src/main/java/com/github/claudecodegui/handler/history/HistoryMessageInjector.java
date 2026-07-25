@@ -17,9 +17,13 @@ import com.intellij.openapi.diagnostic.Logger;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -29,7 +33,6 @@ import java.util.concurrent.CompletableFuture;
 public class HistoryMessageInjector {
 
     private static final Logger LOG = Logger.getInstance(HistoryMessageInjector.class);
-
     private final HandlerContext context;
 
     HistoryMessageInjector(HandlerContext context) {
@@ -170,14 +173,125 @@ public class HistoryMessageInjector {
      */
     public static List<JsonObject> convertCodexMessagesToFrontendBatch(JsonArray messages) {
         List<JsonObject> frontendMessages = new ArrayList<>();
+        Set<String> internalToolCallIds = new HashSet<>();
+        Map<String, CodexExecHistoryReplay.Output> outputsByCallId = new HashMap<>();
+
+        for (JsonElement element : messages) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject message = element.getAsJsonObject();
+            JsonObject payload = getResponseItemPayload(message);
+            if (isInternalHistoryToolCall(payload)) {
+                String callId = getStringProperty(payload, "call_id");
+                if (callId != null && !callId.isBlank()) {
+                    internalToolCallIds.add(callId);
+                }
+            } else if (isToolOutputPayload(payload)) {
+                String callId = getStringProperty(payload, "call_id");
+                if (callId != null && !callId.isBlank()) {
+                    outputsByCallId.put(
+                        callId,
+                        new CodexExecHistoryReplay.Output(
+                            payload,
+                            getStringProperty(message, "timestamp")
+                        )
+                    );
+                }
+            }
+        }
+
         for (int i = 0; i < messages.size(); i++) {
-            JsonObject msg = messages.get(i).getAsJsonObject();
+            JsonElement element = messages.get(i);
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject msg = element.getAsJsonObject();
+            JsonObject payload = getResponseItemPayload(msg);
+
+            if (isInternalHistoryToolCall(payload)) {
+                if (CodexExecHistoryReplay.isExecCall(payload)) {
+                    String callId = getStringProperty(payload, "call_id");
+                    String timestamp = getStringProperty(msg, "timestamp");
+                    List<CodexExecHistoryReplay.Command> commands =
+                        CodexExecHistoryReplay.extractCommands(payload);
+                    if (!commands.isEmpty()) {
+                        addCodexFrontendMessage(
+                            frontendMessages,
+                            CodexExecHistoryReplay.createToolUseMessage(callId, commands, timestamp)
+                        );
+                        CodexExecHistoryReplay.Output output =
+                            callId != null ? outputsByCallId.get(callId) : null;
+                        if (output != null) {
+                            addCodexFrontendMessage(
+                                frontendMessages,
+                                CodexExecHistoryReplay.createToolResultMessage(
+                                    callId,
+                                    commands,
+                                    output,
+                                    timestamp
+                                )
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
+            if (isOutputForInternalHistoryTool(payload, internalToolCallIds)) {
+                continue;
+            }
+
             JsonObject frontendMsg = convertCodexMessageToFrontend(msg);
             if (frontendMsg != null) {
                 addCodexFrontendMessage(frontendMessages, frontendMsg);
             }
         }
         return frontendMessages;
+    }
+
+    private static boolean isInternalHistoryToolCall(JsonObject payload) {
+        String payloadType = getStringProperty(payload, "type");
+        String toolName = getStringProperty(payload, "name");
+        if (payloadType == null || toolName == null) {
+            return false;
+        }
+
+        if (!"function_call".equals(payloadType) && !"custom_tool_call".equals(payloadType)) {
+            return false;
+        }
+        return CodexMessageConverter.isHiddenHistoryToolName(toolName);
+    }
+
+    private static boolean isToolOutputPayload(JsonObject payload) {
+        String payloadType = getStringProperty(payload, "type");
+        if (payloadType == null) {
+            return false;
+        }
+        return "function_call_output".equals(payloadType) || "custom_tool_call_output".equals(payloadType);
+    }
+
+    private static boolean isOutputForInternalHistoryTool(
+            JsonObject payload,
+            Set<String> internalToolCallIds
+    ) {
+        String callId = getStringProperty(payload, "call_id");
+        if (callId == null) {
+            return false;
+        }
+
+        return isToolOutputPayload(payload)
+            && internalToolCallIds.contains(callId);
+    }
+
+    private static JsonObject getResponseItemPayload(JsonObject message) {
+        if (message == null
+                || !message.has("type")
+                || !"response_item".equals(message.get("type").getAsString())
+                || !message.has("payload")
+                || !message.get("payload").isJsonObject()) {
+            return null;
+        }
+        return message.getAsJsonObject("payload");
     }
 
     private static void addCodexFrontendMessage(List<JsonObject> frontendMessages, JsonObject incoming) {
@@ -232,7 +346,10 @@ public class HistoryMessageInjector {
     }
 
     private static String getStringProperty(JsonObject object, String propertyName) {
-        if (object == null || !object.has(propertyName) || object.get(propertyName).isJsonNull()) {
+        if (object == null
+                || !object.has(propertyName)
+                || object.get(propertyName).isJsonNull()
+                || !object.get(propertyName).isJsonPrimitive()) {
             return null;
         }
         return object.get(propertyName).getAsString();
