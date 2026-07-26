@@ -61,14 +61,27 @@ public final class TokenUsageUtils {
      * Scans from end to find the last assistant message with usage data.
      */
     public static JsonObject findLastUsageFromRawMessages(List<JsonObject> messages) {
+        return findLastUsageFromRawMessages(messages, null);
+    }
+
+    public static JsonObject findLastUsageFromRawMessages(List<JsonObject> messages, String provider) {
+        boolean preferRootUsage = "codex".equals(provider);
         for (int i = messages.size() - 1; i >= 0; i--) {
             JsonObject msg = messages.get(i);
             if (!msg.has("type") || !"assistant".equals(msg.get("type").getAsString())) { continue; }
+            JsonObject rootUsage = msg.has("usage") && msg.get("usage").isJsonObject()
+                    ? msg.getAsJsonObject("usage") : null;
+            if (preferRootUsage && rootUsage != null) {
+                return rootUsage;
+            }
             if (msg.has("message") && msg.get("message").isJsonObject()) {
                 JsonObject message = msg.getAsJsonObject("message");
                 if (message.has("usage") && message.get("usage").isJsonObject()) {
                     return message.getAsJsonObject("usage");
                 }
+            }
+            if (rootUsage != null) {
+                return rootUsage;
             }
         }
         return null;
@@ -79,9 +92,22 @@ public final class TokenUsageUtils {
      * Scans from end to find the last assistant message with usage data.
      */
     public static JsonObject findLastUsageFromSessionMessages(List<ClaudeSession.Message> messages) {
+        return findLastUsageFromSessionMessages(messages, null);
+    }
+
+    public static JsonObject findLastUsageFromSessionMessages(
+            List<ClaudeSession.Message> messages,
+            String provider
+    ) {
+        boolean preferRootUsage = "codex".equals(provider);
         for (int i = messages.size() - 1; i >= 0; i--) {
             ClaudeSession.Message msg = messages.get(i);
             if (msg.type != ClaudeSession.Message.Type.ASSISTANT || msg.raw == null) { continue; }
+            JsonObject rootUsage = msg.raw.has("usage") && msg.raw.get("usage").isJsonObject()
+                    ? msg.raw.getAsJsonObject("usage") : null;
+            if (preferRootUsage && rootUsage != null) {
+                return rootUsage;
+            }
             // Check usage inside message object
             if (msg.raw.has("message") && msg.raw.get("message").isJsonObject()) {
                 JsonObject message = msg.raw.getAsJsonObject("message");
@@ -89,9 +115,8 @@ public final class TokenUsageUtils {
                     return message.getAsJsonObject("usage");
                 }
             }
-            // Check usage at root level
-            if (msg.raw.has("usage") && msg.raw.get("usage").isJsonObject()) {
-                return msg.raw.getAsJsonObject("usage");
+            if (rootUsage != null) {
+                return rootUsage;
             }
         }
         return null;

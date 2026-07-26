@@ -47,7 +47,10 @@ public class UsagePushService {
 
             // Extract the latest usage information from the current session
             List<ClaudeSession.Message> messages = session.getMessages();
-            JsonObject lastUsage = TokenUsageUtils.findLastUsageFromSessionMessages(messages);
+            JsonObject lastUsage = TokenUsageUtils.findLastUsageFromSessionMessages(
+                    messages,
+                    context.getCurrentProvider()
+            );
             if (lastUsage == null) {
                 // No usage data available yet — send update with zero used tokens
                 sendUsageUpdate(0, newMaxTokens);
