@@ -127,6 +127,15 @@ interface Window {
   onSubagentHistoryLoaded?: (json: string) => void;
 
   /**
+   * task_* SDK system event callback (async subagent lifecycle).
+   * Payload: { subtype: 'task_started'|'task_progress'|'task_notification',
+   *   task_id, tool_use_id, status?, summary?, usage?, output_file? }.
+   * task_notification carries the terminal status and result summary that the
+   * StatusPanel uses to mark a background (run_in_background) Agent subagent as completed.
+   */
+  onTaskEvent?: (eventJson: string) => void;
+
+  /**
    * SDK-to-CLI session conversion result callback.
    * Called by the Java backend after attempting to convert entrypoint from "sdk-cli" to "cli".
    * Payload: { success: boolean, infoCode?: string, errorCode?: string }.

@@ -131,6 +131,21 @@ public class ClaudeSession {
 
         default void onUserMessageUuidPatched(String content, String uuid) {
         }
+
+        /**
+         * Called when a Claude Code task_* SDK system event is received
+         * (task_started / task_progress / task_notification).
+         *
+         * <p>Async subagents (Agent/Task tool invoked with run_in_background:true) run
+         * in a background sidechain whose detailed
+         * messages never enter the main SDK stream. The main stream only carries these
+         * lightweight system events, which carry the agent's lifecycle signals: launch,
+         * per-tool progress, and terminal completion (with result + usage). Forwarding
+         * them to the frontend lets the subagent list reflect real running/completed
+         * state instead of being stuck on the launch summary.</p>
+         */
+        default void onTaskEvent(String eventJson) {
+        }
     }
 
     public ClaudeSession(Project project, ClaudeSDKBridge claudeSDKBridge, CodexSDKBridge codexSDKBridge) {

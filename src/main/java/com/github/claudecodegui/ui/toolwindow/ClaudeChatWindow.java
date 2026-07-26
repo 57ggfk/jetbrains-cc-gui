@@ -110,7 +110,13 @@ public class ClaudeChatWindow {
     private WebviewInitializer webviewInitializer;
     private final EditorContextTracker editorContextTracker;
     private final ChatWindowDelegate chatWindowDelegate;
-    private SessionCallbackAdapter sessionCallbackAdapter;
+    // volatile: read from the daemon reader thread by the task_event listener
+    // (titleEventListener), while reassigned on the EDT in setupSessionCallbacks.
+    // Without volatile a session switch could publish a new adapter on the EDT
+    // that the daemon thread never observes, so a late task_notification would
+    // route to the deactivated adapter and be dropped - leaving the subagent
+    // stuck on "running".
+    private volatile SessionCallbackAdapter sessionCallbackAdapter;
 
     public ClaudeChatWindow(Project project) {
         this(project, false);
@@ -850,6 +856,36 @@ public class ClaudeChatWindow {
                     // loadFromServer() returns, so a reload never lands on a session
                     // that the user has navigated away from.
                     requestSessionReload(updatedSessionId);
+                } else if ("task_event".equals(event)) {
+                    // Async subagent (Agent/Task tool with run_in_background:true)
+                    // lifecycle event forwarded by the
+                    // ai-bridge perpetual reader. task_notification arrives inter-turn
+                    // (after the turn's result), so it cannot ride the normal [MESSAGE]
+                    // stream -- route it to the frontend via onTaskEvent so the subagent
+                    // list reflects completion/usage instead of staying on "running".
+                    String taskSessionId = data.has("sessionId") && data.get("sessionId").isJsonPrimitive()
+                            ? data.get("sessionId").getAsString() : null;
+                    if (taskSessionId == null) {
+                        LOG.warn("[ClaudeChatWindow] task_event event missing sessionId");
+                        return;
+                    }
+                    // Mirror session_updated's guard: drop events that do not match the
+                    // active session so a stale background-agent completion cannot leak
+                    // into a session the user has since navigated to. Capture the
+                    // adapter into a local before the session check: session and
+                    // sessionCallbackAdapter are both volatile and reassigned on the EDT,
+                    // so reading them separately could route an old-session event to a
+                    // newly activated adapter. The captured adapter's onTaskEvent
+                    // re-checks isInactive(), so if the session switched after the
+                    // snapshot the delivery is skipped.
+                    var adapter = sessionCallbackAdapter;
+                    String currentSessionId = session != null ? session.getSessionId() : null;
+                    if (currentSessionId == null || !currentSessionId.equals(taskSessionId)) {
+                        return;
+                    }
+                    if (adapter != null && data.has("taskEvent") && !data.get("taskEvent").isJsonNull()) {
+                        adapter.onTaskEvent(data.get("taskEvent").toString());
+                    }
                 }
             };
             this.claudeSDKBridge.addDaemonEventListener(this.titleEventListener);
