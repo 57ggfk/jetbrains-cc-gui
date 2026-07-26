@@ -46,6 +46,41 @@ function makeConfig() {
   };
 }
 
+test('forwards Codex token_count events to the Java usage handler', async () => {
+  const emittedMessages = [];
+  const state = createInitialEventState((message) => emittedMessages.push(message));
+
+  await captureStdout(async () => {
+    await processCodexEventStream(
+      eventsFrom([
+        {
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: { input_tokens: 13007800, output_tokens: 9000 },
+              last_token_usage: { input_tokens: 180000, output_tokens: 2400 },
+            },
+          },
+        },
+      ]),
+      state,
+      makeConfig(),
+    );
+  });
+
+  assert.deepEqual(emittedMessages, [{
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: {
+        total_token_usage: { input_tokens: 13007800, output_tokens: 9000 },
+        last_token_usage: { input_tokens: 180000, output_tokens: 2400 },
+      },
+    },
+  }]);
+});
+
 test('Codex item.updated agent_message emits incremental content deltas before completion', async () => {
   const emittedMessages = [];
   const state = createInitialEventState((message) => emittedMessages.push(message));

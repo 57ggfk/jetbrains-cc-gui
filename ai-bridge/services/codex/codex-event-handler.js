@@ -760,6 +760,9 @@ export async function processCodexEventStream(events, state, config) {
       }
 
       case 'event_msg': {
+        if (event.payload?.type === 'token_count') {
+          state.emitMessage({ type: 'event_msg', payload: event.payload });
+        }
         await replayMissingFunctionCallsDuringStream(state, config);
         break;
       }

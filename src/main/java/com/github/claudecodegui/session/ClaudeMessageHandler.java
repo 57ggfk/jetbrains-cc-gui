@@ -362,7 +362,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                 JsonObject messageObj = mergedRaw.getAsJsonObject("message");
                 if (messageObj.has("usage") && messageObj.get("usage").isJsonObject()) {
                     JsonObject usage = messageObj.getAsJsonObject("usage");
-                    int usedTokens = TokenUsageUtils.extractUsedTokens(usage, state.getProvider());
+                    int usedTokens = TokenUsageUtils.extractContextTokens(usage, state.getProvider());
                     int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
@@ -628,7 +628,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                     if (msg != null) {
                         msg.add("usage", usageJson);
                     }
-                    int usedTokens = TokenUsageUtils.extractUsedTokens(usageJson, state.getProvider());
+                    int usedTokens = TokenUsageUtils.extractContextTokens(usageJson, state.getProvider());
                     int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
@@ -931,7 +931,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         if (content == null || content.isEmpty() || !content.startsWith("{")) { return; }
         try {
             JsonObject usageJson = gson.fromJson(content, JsonObject.class);
-            int usedTokens = TokenUsageUtils.extractUsedTokens(usageJson, state.getProvider());
+            int usedTokens = TokenUsageUtils.extractContextTokens(usageJson, state.getProvider());
             int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
             ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
             // Notify webview of usage update

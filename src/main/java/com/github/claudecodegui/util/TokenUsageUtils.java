@@ -24,6 +24,21 @@ public final class TokenUsageUtils {
         return inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens;
     }
 
+    public static int extractContextTokens(JsonObject usage, String provider) {
+        if (usage == null) {
+            return 0;
+        }
+        int input = usage.has("input_tokens") ? usage.get("input_tokens").getAsInt() : 0;
+        if ("codex".equals(provider)) {
+            return input;
+        }
+        int cacheCreation = usage.has("cache_creation_input_tokens")
+                ? usage.get("cache_creation_input_tokens").getAsInt() : 0;
+        int cacheRead = usage.has("cache_read_input_tokens")
+                ? usage.get("cache_read_input_tokens").getAsInt() : 0;
+        return input + cacheCreation + cacheRead;
+    }
+
     /**
      * Extract used token count from a usage JSON object, respecting provider differences.
      * - Claude: input + cache_creation + cache_read + output (total tokens, matches CLI status bar)

@@ -269,7 +269,7 @@ public class MessageJsonConverter {
             }
 
             String currentProvider = handlerContext.getCurrentProvider();
-            int usedTokens = TokenUsageUtils.extractUsedTokens(lastUsage, currentProvider);
+            int usedTokens = TokenUsageUtils.extractContextTokens(lastUsage, currentProvider);
             int maxTokens = SettingsHandler.getModelContextLimit(currentProvider, handlerContext.getCurrentModel());
             int percentage = Math.min(100, maxTokens > 0 ? (int) ((usedTokens * 100.0) / maxTokens) : 0);
 

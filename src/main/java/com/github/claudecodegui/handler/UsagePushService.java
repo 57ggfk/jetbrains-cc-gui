@@ -53,7 +53,7 @@ public class UsagePushService {
                 sendUsageUpdate(0, newMaxTokens);
                 return;
             }
-            int usedTokens = TokenUsageUtils.extractUsedTokens(lastUsage, context.getCurrentProvider());
+            int usedTokens = TokenUsageUtils.extractContextTokens(lastUsage, context.getCurrentProvider());
 
             // Send update
             sendUsageUpdate(usedTokens, newMaxTokens);
