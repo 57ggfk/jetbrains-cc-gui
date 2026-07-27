@@ -591,6 +591,8 @@
         "modelMapping": "Mapeo de modelos (se inyectará en el env del JSON)",
         "mainModel": "Modelo principal",
         "mainModelPlaceholder": "ej., claude-sonnet-4-6",
+        "fableModel": "Modelo Fable predeterminado",
+        "fableModelPlaceholder": "ej., claude-fable-5",
         "haikuModel": "Modelo Haiku predeterminado",
         "haikuModelPlaceholder": "ej., claude-haiku-4-5",
         "sonnetModel": "Modelo Sonnet predeterminado",
@@ -1415,6 +1417,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Modelo mejorado de Sonnet 4.6"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · Modelo recomendado por defecto"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · Última mejora de Opus"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · Modelo de razonamiento de alto rendimiento"
@@ -1425,7 +1435,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · El más reciente y capaz"
+        "description": "Opus 4.8 · Generación anterior de Opus"
       },
       "fable5": {
         "label": "Fable 5",

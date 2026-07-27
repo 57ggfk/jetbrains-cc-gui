@@ -26,13 +26,17 @@ public class ModelProviderHandler {
     static final Map<String, Integer> MODEL_CONTEXT_LIMITS = new HashMap<>();
     static {
         // Claude models with 1M context (base IDs)
+        MODEL_CONTEXT_LIMITS.put("claude-opus-5", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-5", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-7", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-fable-5", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-8", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-6", 200_000);
         // Claude models with [1m] suffix - 1M context
+        MODEL_CONTEXT_LIMITS.put("claude-opus-5[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-5[1m]", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-7[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-fable-5[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-8[1m]", 1_000_000);
@@ -323,6 +327,10 @@ public class ModelProviderHandler {
         }
 
         String mainModel = readConfiguredEnvValue(env, "ANTHROPIC_MODEL");
+        if (lowerBaseModel.contains("fable")) {
+            String mappedFable = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_FABLE_MODEL");
+            return mappedFable != null ? mappedFable : mainModel != null ? mainModel : baseModel;
+        }
         if (lowerBaseModel.contains("opus")) {
             String mappedOpus = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_OPUS_MODEL");
             return mappedOpus != null ? mappedOpus : mainModel != null ? mainModel : baseModel;

@@ -596,6 +596,8 @@
         "modelMapping": "モデルマッピング (JSON環境に注入されます)",
         "mainModel": "メインモデル",
         "mainModelPlaceholder": "例: claude-sonnet-4-6",
+        "fableModel": "Fableデフォルトモデル",
+        "fableModelPlaceholder": "例: claude-fable-5",
         "haikuModel": "Haikuデフォルトモデル",
         "haikuModelPlaceholder": "例: claude-haiku-4-5",
         "sonnetModel": "Sonnetデフォルトモデル",
@@ -1426,6 +1428,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Sonnet 4.6 のアップグレードモデル"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · デフォルトモデルを使用"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · 最新の Opus アップグレード"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · 高性能推論モデル"
@@ -1436,7 +1446,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · 最新かつ最も優れたモデル"
+        "description": "Opus 4.8 · 前世代の Opus モデル"
       },
       "fable5": {
         "label": "Fable 5",

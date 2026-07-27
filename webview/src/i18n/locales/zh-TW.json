@@ -596,6 +596,8 @@
         "modelMapping": "模型映射（會注入到 JSON 的 env 裡）",
         "mainModel": "主模型",
         "mainModelPlaceholder": "例如：claude-sonnet-4-6",
+        "fableModel": "Fable 預設模型",
+        "fableModelPlaceholder": "例如：claude-fable-5",
         "haikuModel": "Haiku 預設模型",
         "haikuModelPlaceholder": "例如：claude-haiku-4-5",
         "sonnetModel": "Sonnet 預設模型",
@@ -1420,6 +1422,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Sonnet 4.6 升級模型"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · 預設推薦模型"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · Opus 最新升級模型"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · 高效能推理模型"
@@ -1430,7 +1440,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · 最新最強大的模型"
+        "description": "Opus 4.8 · 保留的前代 Opus 模型"
       },
       "fable5": {
         "label": "Fable 5",

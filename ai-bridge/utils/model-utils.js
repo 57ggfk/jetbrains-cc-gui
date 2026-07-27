@@ -16,10 +16,13 @@ export function mapModelIdToSdkName(modelId) {
   const lowerModel = modelId.toLowerCase();
 
   // Mapping rules:
+  // - Contains 'fable' -> 'fable'
   // - Contains 'opus' -> 'opus'
   // - Contains 'haiku' -> 'haiku'
   // - Otherwise (contains 'sonnet' or unknown) -> 'sonnet'
-  if (lowerModel.includes('opus')) {
+  if (lowerModel.includes('fable')) {
+    return 'fable';
+  } else if (lowerModel.includes('opus')) {
     return 'opus';
   } else if (lowerModel.includes('haiku')) {
     return 'haiku';
@@ -67,7 +70,11 @@ export function resolveModelFromSettings(modelId, userEnv) {
 
   // Check family-specific env vars first. A stale generic mapping must not
   // silently route a selected Haiku/Sonnet/Opus model to another family.
-  if (lowerModel.includes('opus')) {
+  if (lowerModel.includes('fable')) {
+    return readMapped('ANTHROPIC_DEFAULT_FABLE_MODEL')
+      || readMapped('ANTHROPIC_MODEL')
+      || modelId;
+  } else if (lowerModel.includes('opus')) {
     return readMapped('ANTHROPIC_DEFAULT_OPUS_MODEL')
       || readMapped('ANTHROPIC_MODEL')
       || modelId;
@@ -83,7 +90,7 @@ export function resolveModelFromSettings(modelId, userEnv) {
       || readMapped('ANTHROPIC_MODEL')
       || modelId;
   }
-  // For non-Anthropic model IDs that don't contain 'opus'/'haiku'/'sonnet',
+  // For non-Anthropic model IDs that don't contain 'fable'/'opus'/'haiku'/'sonnet',
   // skip mapping and use the original model ID as-is.
 
   // No mapping configured, use original model ID
@@ -118,7 +125,10 @@ export function setModelEnvironmentVariables(modelId, baseModelId) {
 
   // Set the corresponding environment variable based on model type
   // so the SDK knows which specific version to use
-  if (lowerBase.includes('opus')) {
+  if (lowerBase.includes('fable')) {
+    process.env.ANTHROPIC_DEFAULT_FABLE_MODEL = modelId;
+    console.log('[MODEL_ENV] Set ANTHROPIC_DEFAULT_FABLE_MODEL =', modelId);
+  } else if (lowerBase.includes('opus')) {
     process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = modelId;
     console.log('[MODEL_ENV] Set ANTHROPIC_DEFAULT_OPUS_MODEL =', modelId);
   } else if (lowerBase.includes('haiku')) {

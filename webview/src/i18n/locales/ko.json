@@ -622,6 +622,8 @@
         "modelMapping": "모델 매핑 (JSON env에 주입됨)",
         "mainModel": "기본 모델",
         "mainModelPlaceholder": "예: claude-sonnet-4-6",
+        "fableModel": "Fable 기본 모델",
+        "fableModelPlaceholder": "예: claude-fable-5",
         "haikuModel": "Haiku 기본 모델",
         "haikuModelPlaceholder": "예: claude-haiku-4-5",
         "sonnetModel": "Sonnet 기본 모델",
@@ -1532,6 +1534,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Sonnet 4.6 업그레이드 모델"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · 기본 모델 사용"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · 최신 Opus 업그레이드"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · 고성능 추론 모델"
@@ -1542,7 +1552,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · 최신 및 가장 강력한 모델"
+        "description": "Opus 4.8 · 이전 세대 Opus 모델"
       },
       "fable5": {
         "label": "Fable 5",
