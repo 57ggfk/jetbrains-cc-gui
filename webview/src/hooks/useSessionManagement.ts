@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
-import type { ClaudeMessage, HistoryData } from '../types';
+import type { ClaudeMessage, HistoryData, SubagentHistoryResponse, TaskEventMap } from '../types';
 import { sendBridgeEvent } from '../utils/bridge';
 import { getSkipNewSessionConfirm } from '../utils/skipNewSessionConfirm';
 import { clearAllPersistedExpanded } from '../utils/expandedState';
@@ -30,6 +30,10 @@ interface UseSessionManagementOptions {
   setLoading: (loading: boolean) => void;
   setIsThinking: (thinking: boolean) => void;
   setStreamingActive: (active: boolean) => void;
+  /** Clears async subagent task events so stale completions cannot leak across sessions. */
+  setTaskEvents?: React.Dispatch<React.SetStateAction<TaskEventMap>>;
+  /** Clears polled sidechain histories so stale transcripts cannot leak across sessions. */
+  setSubagentHistories?: React.Dispatch<React.SetStateAction<Record<string, SubagentHistoryResponse>>>;
   clearToasts: () => void;
   addToast: (message: string, type?: ToastType) => void;
   t: TFunction;
@@ -77,6 +81,8 @@ export function useSessionManagement({
   setLoading: setLoadingState,
   setIsThinking,
   setStreamingActive,
+  setTaskEvents,
+  setSubagentHistories,
   clearToasts,
   addToast,
   t,
@@ -115,6 +121,18 @@ export function useSessionManagement({
       setStreamingActive(false);
     }
     setMessages([]);
+    // Drop async subagent events from the prior session: tool_use_ids are
+    // globally unique so stale entries cannot mislabel the new session's
+    // agents, but leaving them would grow the map without bound.
+    if (setTaskEvents) {
+      setTaskEvents({});
+    }
+    // Sidechain histories carry full transcript arrays (potentially large).
+    // Clear them on session switch for the same unbounded-growth reason; an
+    // expanded card will re-fetch the sidechain it actually needs via polling.
+    if (setSubagentHistories) {
+      setSubagentHistories({});
+    }
     if (currentSessionIdRef) {
       currentSessionIdRef.current = nextSessionId;
     }
@@ -142,7 +160,7 @@ export function useSessionManagement({
         window.__sessionTransitionToken = null;
       }
     }, 15_000); // 15 seconds — generous enough for slow history loads
-  }, [clearToasts, currentSessionIdRef, setStatus, setLoadingState, setIsThinking, setStreamingActive, setMessages, setCurrentSessionId, setCustomSessionTitle, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens]);
+  }, [clearToasts, currentSessionIdRef, setStatus, setLoadingState, setIsThinking, setStreamingActive, setMessages, setCurrentSessionId, setCustomSessionTitle, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens, setTaskEvents, setSubagentHistories]);
 
   // Create new session
   const createNewSession = useCallback(() => {

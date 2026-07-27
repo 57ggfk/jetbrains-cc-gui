@@ -380,6 +380,19 @@ public class SessionCallbackAdapter implements ClaudeSession.SessionCallback {
         jsTarget.callJavaScript("patchMessageUuid", JsUtils.escapeJs(content), JsUtils.escapeJs(uuid));
     }
 
+    @Override
+    public void onTaskEvent(String eventJson) {
+        if (isInactive() || eventJson == null || eventJson.trim().isEmpty()) {
+            return;
+        }
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (isInactive()) {
+                return;
+            }
+            jsTarget.callJavaScript("onTaskEvent", JsUtils.escapeJs(eventJson));
+        });
+    }
+
     /**
      * Dispose internal resources. Call when the parent window is disposed.
      */
