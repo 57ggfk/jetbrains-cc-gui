@@ -93,6 +93,9 @@
     "attachmentsUploaded": "[अटैचमेंट अपलोड हो गए]",
     "streamingConnected": "{{provider}} कनेक्ट हो गया, आपके प्रश्न को समझ रहा है",
     "showEarlierMessages": "{{count}} पुराने संदेश दिखाएं",
+    "showEarlierTurns": "पहले के {{count}} संवाद दौर दिखाएं ({{remaining}} लोड किए हुए शेष)",
+    "loadEarlierTurns": "डिस्क से पहले के {{count}} दौर लोड करें ({{total}} में से {{remaining}} शेष)",
+    "loadingEarlierTurns": "पहले के संवाद लोड हो रहे हैं...",
     "totalDuration": "इस जवाब में लगा समय",
     "tokenUsage": "{{input}} इन / {{output}} आउट",
     "tokenUsageDetail": "टर्न कुल — इनपुट {{input}} · कैश लेखन {{cacheWrite}} · कैश पठन {{cacheRead}} · आउटपुट {{output}}",
@@ -588,6 +591,8 @@
         "modelMapping": "मॉडल मैपिंग (JSON के env में इंजेक्ट किया जाएगा)",
         "mainModel": "मुख्य मॉडल",
         "mainModelPlaceholder": "उदाहरण: claude-sonnet-4-6",
+        "fableModel": "Fable डिफ़ॉल्ट मॉडल",
+        "fableModelPlaceholder": "उदाहरण: claude-fable-5",
         "haikuModel": "Haiku डिफ़ॉल्ट मॉडल",
         "haikuModelPlaceholder": "उदाहरण: claude-haiku-4-5",
         "sonnetModel": "Sonnet डिफ़ॉल्ट मॉडल",
@@ -1411,6 +1416,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Sonnet 4.6 का अपग्रेड मॉडल"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · डिफ़ॉल्ट अनुशंसित मॉडल"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · नवीनतम Opus अपग्रेड"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · उच्च-प्रदर्शन तर्क मॉडल"
@@ -1421,7 +1434,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · नवीनतम और सबसे सक्षम"
+        "description": "Opus 4.8 · पिछली Opus पीढ़ी"
       },
       "fable5": {
         "label": "Fable 5",

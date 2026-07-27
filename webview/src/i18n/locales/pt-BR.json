@@ -93,6 +93,9 @@
     "attachmentsUploaded": "[Anexos Enviados]",
     "streamingConnected": "{{provider}} conectado, entendendo sua pergunta",
     "showEarlierMessages": "Mostrar {{count}} mensagens anteriores",
+    "showEarlierTurns": "Mostrar {{count}} turnos anteriores (restam {{remaining}} carregados)",
+    "loadEarlierTurns": "Carregar {{count}} turnos anteriores do disco (restam {{remaining}} de {{total}})",
+    "loadingEarlierTurns": "Carregando turnos anteriores...",
     "totalDuration": "Esta resposta levou",
     "tokenUsage": "{{input}} entrada / {{output}} saída",
     "tokenUsageDetail": "Total do turno — entrada {{input}} · gravação de cache {{cacheWrite}} · leitura de cache {{cacheRead}} · saída {{output}}",
@@ -672,6 +675,8 @@
         "modelMapping": "Mapeamento de Modelos (será injetado no env do JSON)",
         "mainModel": "Modelo Principal",
         "mainModelPlaceholder": "ex: claude-sonnet-4-6",
+        "fableModel": "Modelo Padrão Fable",
+        "fableModelPlaceholder": "ex: claude-fable-5",
         "haikuModel": "Modelo Padrão Haiku",
         "haikuModelPlaceholder": "ex: claude-haiku-4-5",
         "sonnetModel": "Modelo Padrão Sonnet",
@@ -1584,6 +1589,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Modelo aprimorado do Sonnet 4.6"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · Usar o modelo padrão"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · Upgrade mais recente do Opus"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · Modelo de raciocínio de alta performance"
@@ -1594,7 +1607,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · O mais recente e capaz"
+        "description": "Opus 4.8 · Geração anterior do Opus"
       },
       "fable5": {
         "label": "Fable 5",

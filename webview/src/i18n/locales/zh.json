@@ -93,6 +93,9 @@
     "attachmentsUploaded": "[已上传附件]",
     "streamingConnected": "{{provider}} 已成功连接，正在理解问题",
     "showEarlierMessages": "显示之前的 {{count}} 条消息",
+    "showEarlierTurns": "显示更早的 {{count}} 轮对话（当前已加载还剩 {{remaining}} 轮）",
+    "loadEarlierTurns": "从磁盘加载更早的 {{count}} 轮（共 {{total}} 轮，尚有 {{remaining}} 轮）",
+    "loadingEarlierTurns": "正在加载更早的对话...",
     "totalDuration": "本次耗时",
     "tokenUsage": "输入 {{input}} / 输出 {{output}}",
     "tokenUsageDetail": "本轮合计 — 输入 {{input}} · 缓存写入 {{cacheWrite}} · 缓存读取 {{cacheRead}} · 输出 {{output}}",
@@ -686,6 +689,8 @@
         "modelMapping": "模型映射（会注入到 JSON 的 env 里）",
         "mainModel": "主模型",
         "mainModelPlaceholder": "例如：claude-sonnet-4-6",
+        "fableModel": "Fable 默认模型",
+        "fableModelPlaceholder": "例如：claude-fable-5",
         "haikuModel": "Haiku 默认模型",
         "haikuModelPlaceholder": "例如：claude-haiku-4-5",
         "sonnetModel": "Sonnet 默认模型",
@@ -1661,6 +1666,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Sonnet 4.6 升级模型"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · 默认推荐模型"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · Opus 最新升级模型"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · 高性能推理模型"
@@ -1671,7 +1684,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · 最新最强大的模型"
+        "description": "Opus 4.8 · 保留的前代 Opus 模型"
       },
       "fable5": {
         "label": "Fable 5",
