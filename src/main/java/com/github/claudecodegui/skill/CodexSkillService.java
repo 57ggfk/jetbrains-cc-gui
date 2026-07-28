@@ -23,6 +23,7 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -42,6 +43,12 @@ public class CodexSkillService {
     private static final Logger LOG = Logger.getInstance(CodexSkillService.class);
     private static final Gson gson = new Gson();
     private static final int MAX_SCAN_LEVELS = 3;
+    private static final int MAX_SKILL_SCAN_DEPTH = 8;
+    private static final int MAX_SKILL_SCAN_NODES = 10_000;
+    private static final int MAX_DISCOVERED_SKILLS = 1_000;
+    private static final Set<String> SKIPPED_SKILL_SCAN_DIRECTORIES = Set.of(
+            "node_modules", "build", "target", "dist", "out", "coverage"
+    );
 
     // Shared instance to avoid repeated instantiation (I1)
     private static final CodexSettingsManager codexSettingsManager = new CodexSettingsManager(gson);
@@ -188,21 +195,37 @@ public class CodexSkillService {
         }
 
         List<File> entries = new ArrayList<>();
+        int[] visitedNodes = {0};
+        boolean[] limitReached = {false};
         try {
-            Files.walkFileTree(rootDir, new SimpleFileVisitor<>() {
+            Files.walkFileTree(rootDir, EnumSet.noneOf(FileVisitOption.class), MAX_SKILL_SCAN_DEPTH,
+                    new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path currentDir, BasicFileAttributes attrs) {
-                    if (!currentDir.equals(rootDir) && containsHiddenPathSegment(rootDir, currentDir)) {
+                    if (!currentDir.equals(rootDir) && (containsHiddenPathSegment(rootDir, currentDir)
+                            || isSkippedSkillScanDirectory(currentDir))) {
                         return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    if (++visitedNodes[0] > MAX_SKILL_SCAN_NODES) {
+                        limitReached[0] = true;
+                        return FileVisitResult.TERMINATE;
                     }
                     return FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (++visitedNodes[0] > MAX_SKILL_SCAN_NODES) {
+                        limitReached[0] = true;
+                        return FileVisitResult.TERMINATE;
+                    }
                     if (attrs.isRegularFile() && isSkillDefinitionFile(file)) {
                         Path skillDir = file.getParent();
                         if (skillDir != null && !skillDir.equals(rootDir)) {
+                            if (entries.size() >= MAX_DISCOVERED_SKILLS) {
+                                limitReached[0] = true;
+                                return FileVisitResult.TERMINATE;
+                            }
                             entries.add(skillDir.toFile());
                         }
                     }
@@ -218,6 +241,9 @@ public class CodexSkillService {
         } catch (IOException e) {
             LOG.warn("[CodexSkills] Failed to scan skills directory: " + dirPath, e);
             return skills;
+        }
+        if (limitReached[0]) {
+            LOG.warn("[CodexSkills] Skill scan limit reached: " + dirPath);
         }
 
         for (File entry : entries.stream().distinct().sorted().toList()) {
@@ -267,6 +293,13 @@ public class CodexSkillService {
 
         LOG.info("[CodexSkills] Scanned " + skills.size() + " skills from " + scope + ": " + dirPath);
         return skills;
+    }
+
+    private static boolean isSkippedSkillScanDirectory(Path directory) {
+        Path fileName = directory.getFileName();
+        return fileName != null && SKIPPED_SKILL_SCAN_DIRECTORIES.contains(
+                fileName.toString().toLowerCase(Locale.ROOT)
+        );
     }
 
     private static boolean isSkillDefinitionFile(Path path) {

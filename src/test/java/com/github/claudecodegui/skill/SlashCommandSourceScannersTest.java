@@ -198,4 +198,35 @@ public class SlashCommandSourceScannersTest {
         assertTrue(skill.get("userInvocable").getAsBoolean());
         assertEquals(skillDir.toString(), Path.of(skill.get("path").getAsString()).toString());
     }
+
+    @Test
+    public void codexSkillScannerSkipsGeneratedAndExcessivelyDeepDirectories() throws IOException {
+        Path root = Files.createTempDirectory("codex-skill-bounded-scanner");
+        Path generatedSkill = Files.createDirectories(
+                root.resolve("package").resolve("node_modules").resolve("dependency")
+        );
+        Path deepSkill = root;
+        for (int depth = 0; depth < 10; depth++) {
+            deepSkill = deepSkill.resolve("level-" + depth);
+        }
+        Files.createDirectories(deepSkill);
+        Files.writeString(generatedSkill.resolve("SKILL.md"), validSkill("generated-skill"));
+        Files.writeString(deepSkill.resolve("SKILL.md"), validSkill("deep-skill"));
+
+        JsonObject skills = CodexSkillService.scanSkillsDirectory(root.toString(), "user");
+
+        assertEquals(0, skills.size());
+    }
+
+    private String validSkill(String name) {
+        return """
+                ---
+                name: %s
+                description: Test skill
+                userInvocable: true
+                ---
+
+                Test skill.
+                """.formatted(name);
+    }
 }
