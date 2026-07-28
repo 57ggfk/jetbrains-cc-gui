@@ -1,10 +1,15 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { memo, useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { memo, useMemo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import katex from 'katex';
 import markedKatex from 'marked-katex-extension';
 import { openBrowser, openClass, openFile } from '../utils/bridge';
+import {
+  captureRangeOffsets,
+  restoreRangeOffsets,
+  type TextSelectionOffsets,
+} from '../utils/selectionOffsets';
 import { useMarkdownFileLinkTooltip } from '../hooks/useMarkdownFileLinkTooltip';
 import {
   decorateExistingAnchors,
@@ -561,8 +566,15 @@ function renderStreamingProseSegment(
         return `<h${level}>${headingMatch[2]}</h${level}>`;
       }
 
-      const lines = block.split('\n').join('<br/>');
-      return `<p>${lines}</p>`;
+      // Match marked's `breaks: false` (MarkdownBlock line ~220): a single
+      // newline inside a paragraph flows as whitespace, NOT a <br>. The full
+      // pipeline collapses single newlines this way, so emitting <br> here
+      // made the streaming HTML taller than the final HTML - and since the
+      // thinking block flips between these renderers on every sub-turn (each
+      // tool call ends and restarts the stream), that height gap surfaced as
+      // a visible collapse-then-reexpand plus a scroll jump. Keeping the two
+      // renderers height-aligned lets the renderer switch happen invisibly.
+      return `<p>${block}</p>`;
     })
     .join('');
 }
@@ -936,6 +948,43 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
     }
   }, [normalizedContent, isStreaming, i18n.language, linkifyCapabilities, t]);
 
+  // ── Streaming selection preservation ─────────────────────────────────────
+  // Every streaming delta rewrites the container's innerHTML, which destroys
+  // the text nodes underneath an active selection. We don't freeze the DOM
+  // (freezing would also stall the visible content mid-stream); instead we
+  // ferry the selection across the rebuild. Because streaming only appends,
+  // the prefix the user selected keeps its character offsets stable, so we
+  // capture them *before* React commits the new HTML — i.e. during render,
+  // while the old text nodes are still in place — then re-anchor the Range on
+  // the rebuilt text nodes in a layout effect, before paint, so there is no
+  // flicker.
+  //
+  // committedHtmlRef is read here but only mutated inside the layout effect
+  // below, so a discarded concurrent render can't poison the "last committed"
+  // comparison. rescuedSelectionRef is written during render as a deferred
+  // payload for that effect; the value is idempotent across double-invoked
+  // renders and never influences render output.
+  const committedHtmlRef = useRef(html);
+  const rescuedSelectionRef = useRef<TextSelectionOffsets | null>(null);
+
+  if (committedHtmlRef.current !== html) {
+    if (containerRef.current) {
+      rescuedSelectionRef.current = captureRangeOffsets(containerRef.current);
+    }
+  }
+
+  // After React commits the new HTML (rebuilding the text nodes), re-anchor
+  // any captured selection onto the fresh nodes. useLayoutEffect runs
+  // synchronously before paint, so the user never sees the selection drop.
+  useLayoutEffect(() => {
+    committedHtmlRef.current = html;
+    const rescued = rescuedSelectionRef.current;
+    if (rescued && containerRef.current) {
+      restoreRangeOffsets(containerRef.current, rescued);
+    }
+    rescuedSelectionRef.current = null;
+  }, [html]);
+
   // Force DOM refresh when streaming ends to fix potential layout corruption from streaming render
   useEffect(() => {
     if (prevIsStreamingRef.current && !isStreaming && containerRef.current) {
@@ -946,7 +995,14 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
       const applyRefresh = () => {
         if (done || !containerRef.current) return;
         done = true;
+        // The forced innerHTML rewrite destroys any active selection's text
+        // nodes just like a streaming delta does. Capture the offsets on the
+        // pre-rewrite DOM, then re-anchor them on the fresh nodes.
+        const rescued = captureRangeOffsets(containerRef.current);
         containerRef.current.innerHTML = html;
+        if (rescued) {
+          restoreRangeOffsets(containerRef.current, rescued);
+        }
         renderMermaidDiagrams();
       };
 
@@ -1051,6 +1107,10 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
     }
   };
 
+  // `html` is committed directly: streaming selection is preserved by
+  // re-anchoring the Range in the layout effect above, not by freezing the
+  // output, so the visible content keeps flowing while the user holds a
+  // selection.
   return (
     <>
       <div

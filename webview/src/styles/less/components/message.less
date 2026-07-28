@@ -972,6 +972,28 @@
     word-wrap: break-word;
     overflow-wrap: break-word;
     max-width: 100%;
+    /* Accordion: animate the collapse so auto-folding the previous thinking
+       block (when a newer one arrives mid-stream) eases shut instead of
+       snapping. grid-template-rows tracks the streaming content height, so
+       the open state stays fluid while only the collapse is animated. */
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.2s ease;
+}
+
+.thinking-content.expanded {
+    grid-template-rows: 1fr;
+}
+
+.thinking-content-inner {
+    overflow: hidden;
+    min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thinking-content {
+        transition: none;
+    }
 }
 
 .thinking-content .markdown-content {
