@@ -640,11 +640,14 @@ public class HistoryMessageInjector {
             }
         }
 
+        String rawContent = "";
         String content = "";
         if (payload.has("message") && !payload.get("message").isJsonNull()) {
-            content = CodexMessageConverter.stripSystemTags(payload.get("message").getAsString());
+            rawContent = payload.get("message").getAsString();
+            content = CodexMessageConverter.stripSystemTags(rawContent);
         }
-        if ((content == null || content.isBlank()) && !hasLocalImages) {
+        JsonArray restoredImageBlocks = CodexMessageConverter.restoreCodexImagePlaceholderBlocks(rawContent);
+        if ((content == null || content.isBlank()) && !hasLocalImages && restoredImageBlocks.size() == 0) {
             return null;
         }
         if (content == null) {
@@ -657,7 +660,7 @@ public class HistoryMessageInjector {
 
         // Build raw structure compatible with MessageParser
         JsonObject rawObj = new JsonObject();
-        JsonArray contentBlocks = buildUserMessageContentBlocks(payload, content);
+        JsonArray contentBlocks = buildUserMessageContentBlocks(payload, restoredImageBlocks, content);
         rawObj.add("content", contentBlocks);
         rawObj.addProperty("role", "user");
         frontendMsg.add("raw", rawObj);
@@ -669,8 +672,8 @@ public class HistoryMessageInjector {
         return frontendMsg;
     }
 
-    private static JsonArray buildUserMessageContentBlocks(JsonObject payload, String content) {
-        JsonArray contentBlocks = new JsonArray();
+    private static JsonArray buildUserMessageContentBlocks(JsonObject payload, JsonArray restoredImageBlocks, String content) {
+        JsonArray contentBlocks = CodexMessageConverter.userContentBlocks(restoredImageBlocks, null);
         appendLocalImageBlocks(payload, contentBlocks);
 
         if (content != null && !content.isBlank()) {

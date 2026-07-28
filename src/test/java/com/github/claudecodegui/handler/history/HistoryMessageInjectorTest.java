@@ -131,7 +131,7 @@ public class HistoryMessageInjectorTest {
         List<JsonObject> result = HistoryMessageInjector.convertCodexMessagesToFrontendBatch(messages);
 
         assertEquals(1, result.size());
-        assertEquals("<image name=[Image #1]>\n</image>\nhello", result.get(0).get("content").getAsString());
+        assertEquals("hello", result.get(0).get("content").getAsString());
     }
 
     @Test

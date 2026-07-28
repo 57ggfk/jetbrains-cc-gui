@@ -6,6 +6,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.github.claudecodegui.util.UserMessageSanitizer;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -26,6 +29,8 @@ public class CodexMessageConverter {
 
     /** Maximum number of tracked file-writing sessions to prevent unbounded growth. */
     private static final int MAX_SESSION_ENTRIES = 256;
+    private static final Pattern CODEX_IMAGE_PATH_PATTERN =
+            Pattern.compile("<image\\b[^>]*\\bpath=\"([^\"]+)\"[^>]*>");
 
     // Tracks file-writing sessions so later write_stdin events can display the target file.
     // Uses a bounded LRU map to prevent memory leaks over long IDE sessions.
@@ -262,12 +267,14 @@ public class CodexMessageConverter {
         }
         boolean userMessage = "user".equals(role);
         boolean strippedSystemTags = false;
+        JsonArray restoredUserImages = new JsonArray();
 
         if (userMessage) {
             String originalContent = contentStr;
+            restoredUserImages = restoreCodexImagePlaceholderBlocks(originalContent);
             contentStr = stripSystemTags(originalContent);
             strippedSystemTags = originalContent != null && !originalContent.equals(contentStr);
-            if (contentStr == null || contentStr.isBlank()) {
+            if ((contentStr == null || contentStr.isBlank()) && restoredUserImages.size() == 0) {
                 return null;
             }
         }
@@ -285,8 +292,8 @@ public class CodexMessageConverter {
                 frontendMsg.addProperty("content", contentStr);
             }
 
-            JsonArray claudeContentBlocks = strippedSystemTags
-                    ? textContentBlocks(contentStr)
+            JsonArray claudeContentBlocks = userMessage && (strippedSystemTags || restoredUserImages.size() > 0)
+                    ? userContentBlocks(restoredUserImages, contentStr)
                     : convertToClaudeContentBlocks(payload.get("content"));
             JsonObject rawObj = new JsonObject();
             rawObj.add("content", claudeContentBlocks);
@@ -322,6 +329,38 @@ public class CodexMessageConverter {
         return UserMessageSanitizer.sanitizeUserFacingText(text);
     }
 
+    public static JsonArray restoreCodexImagePlaceholderBlocks(String text) {
+        JsonArray content = new JsonArray();
+        if (text == null || text.isBlank()) {
+            return content;
+        }
+
+        Matcher matcher = CODEX_IMAGE_PATH_PATTERN.matcher(text);
+        while (matcher.find()) {
+            JsonObject imageBlock = createLocalImageBlock(matcher.group(1));
+            if (imageBlock != null) {
+                content.add(imageBlock);
+            }
+        }
+        return content;
+    }
+
+    public static JsonArray userContentBlocks(JsonArray imageBlocks, String text) {
+        JsonArray content = new JsonArray();
+        if (imageBlocks != null) {
+            for (JsonElement block : imageBlocks) {
+                content.add(block.deepCopy());
+            }
+        }
+        if (text != null && !text.isBlank()) {
+            JsonObject textBlock = new JsonObject();
+            textBlock.addProperty("type", "text");
+            textBlock.addProperty("text", text);
+            content.add(textBlock);
+        }
+        return content;
+    }
+
     private static JsonArray textContentBlocks(String text) {
         JsonArray content = new JsonArray();
         JsonObject textBlock = new JsonObject();
@@ -329,6 +368,53 @@ public class CodexMessageConverter {
         textBlock.addProperty("text", text);
         content.add(textBlock);
         return content;
+    }
+
+    private static JsonObject createLocalImageBlock(String imagePath) {
+        if (imagePath == null || imagePath.trim().isEmpty()) {
+            return null;
+        }
+
+        try {
+            Path path = Path.of(imagePath);
+            if (!Files.isRegularFile(path)) {
+                return null;
+            }
+
+            String mediaType = Files.probeContentType(path);
+            if (mediaType == null || mediaType.isBlank()) {
+                mediaType = guessImageMediaType(path);
+            }
+            String base64Data = Base64.getEncoder().encodeToString(Files.readAllBytes(path));
+            JsonObject imageBlock = new JsonObject();
+            imageBlock.addProperty("type", "image");
+            imageBlock.addProperty("src", "data:" + mediaType + ";base64," + base64Data);
+            imageBlock.addProperty("mediaType", mediaType);
+            imageBlock.addProperty("alt", path.getFileName() != null ? path.getFileName().toString() : "image");
+            return imageBlock;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String guessImageMediaType(Path path) {
+        String fileName = path.getFileName() != null ? path.getFileName().toString().toLowerCase() : "";
+        if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        if (fileName.endsWith(".gif")) {
+            return "image/gif";
+        }
+        if (fileName.endsWith(".webp")) {
+            return "image/webp";
+        }
+        if (fileName.endsWith(".bmp")) {
+            return "image/bmp";
+        }
+        if (fileName.endsWith(".svg")) {
+            return "image/svg+xml";
+        }
+        return "image/png";
     }
 
     /**
