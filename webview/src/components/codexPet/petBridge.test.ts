@@ -158,6 +158,45 @@ describe('petBridge payload validation', () => {
     }))).toBeNull();
   });
 
+  it('evicts the oldest remote previews when the cache reaches its limit', () => {
+    const listener = vi.fn();
+    const unsubscribe = petBridge.subscribePreview(listener);
+    for (let index = 0; index < 25; index += 1) {
+      window.updatePetdexPreview?.(JSON.stringify({
+        slug: `cached-pet-${index}`,
+        dataUrl: 'data:image/png;base64,AAAA',
+      }));
+    }
+    vi.mocked(sendToJava).mockClear();
+    listener.mockClear();
+
+    petBridge.getPreview('cached-pet-0');
+    petBridge.getPreview('cached-pet-24');
+
+    expect(sendToJava).toHaveBeenCalledTimes(1);
+    expect(sendToJava).toHaveBeenCalledWith('get_petdex_preview', { slug: 'cached-pet-0' });
+    expect(listener).toHaveBeenCalledWith({
+      slug: 'cached-pet-24',
+      dataUrl: 'data:image/png;base64,AAAA',
+    });
+    unsubscribe();
+  });
+
+  it('allows remote preview retries after the catalog is refreshed', () => {
+    const unsubscribe = petBridge.subscribeCatalog(() => {});
+    petBridge.getPreview('retry-remote-pet');
+    petBridge.getPreview('retry-remote-pet');
+    expect(vi.mocked(sendToJava).mock.calls.filter((call) => call[0] === 'get_petdex_preview'))
+      .toHaveLength(1);
+
+    window.updatePetdexCatalog?.('{"pets":[],"total":0,"offset":0,"limit":12}');
+    petBridge.getPreview('retry-remote-pet');
+
+    expect(vi.mocked(sendToJava).mock.calls.filter((call) => call[0] === 'get_petdex_preview'))
+      .toHaveLength(2);
+    unsubscribe();
+  });
+
   it('keeps default bubble templates readable', () => {
     expect(DEFAULT_BUBBLE_TEMPLATES.task_started[0]).toBe('Task started: {tabTitle}');
     expect(DEFAULT_BUBBLE_TEMPLATES.task_success[0]).toBe('Task complete');

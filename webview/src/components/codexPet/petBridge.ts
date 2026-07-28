@@ -145,9 +145,26 @@ const previewCache = new Map<string, string>();
 const pendingPreviews = new Set<string>();
 const localPreviewCache = new Map<string, LocalPetPreviewPayload>();
 const pendingLocalPreviews = new Set<string>();
+const MAX_PREVIEW_CACHE_ENTRIES = 24;
+const MAX_PREVIEW_CACHE_CHARS = 8 * 1024 * 1024;
 const MAX_LOCAL_PREVIEW_CACHE_ENTRIES = 12;
 const MAX_LOCAL_PREVIEW_CACHE_CHARS = 8 * 1024 * 1024;
 let callbacksInstalled = false;
+
+function cachePreview(slug: string, dataUrl: string): void {
+  if (dataUrl.length > MAX_PREVIEW_CACHE_CHARS) return;
+  previewCache.delete(slug);
+  previewCache.set(slug, dataUrl);
+  let totalChars = 0;
+  previewCache.forEach((cached) => { totalChars += cached.length; });
+  while (previewCache.size > MAX_PREVIEW_CACHE_ENTRIES
+    || totalChars > MAX_PREVIEW_CACHE_CHARS) {
+    const oldestKey = previewCache.keys().next().value;
+    if (typeof oldestKey !== 'string') break;
+    totalChars -= previewCache.get(oldestKey)?.length ?? 0;
+    previewCache.delete(oldestKey);
+  }
+}
 
 function cacheLocalPreview(preview: LocalPetPreviewPayload): void {
   if (!preview.dataUrl || preview.dataUrl.length > MAX_LOCAL_PREVIEW_CACHE_CHARS) return;
@@ -409,13 +426,14 @@ function installCallbacks(): void {
   };
   window.updatePetdexCatalog = (json) => {
     const catalog = parseCatalog(json);
+    pendingPreviews.clear();
     catalogListeners.forEach((listener) => listener(catalog));
   };
   window.updatePetdexPreview = (json) => {
     const preview = parsePreview(json);
     if (!preview) return;
     pendingPreviews.delete(preview.slug);
-    if (preview.dataUrl) previewCache.set(preview.slug, preview.dataUrl);
+    if (preview.dataUrl) cachePreview(preview.slug, preview.dataUrl);
     previewListeners.forEach((listener) => listener(preview));
   };
   window.onCodexPetOperation = (json) => {
@@ -493,6 +511,8 @@ export const petBridge = {
   getPreview: (slug: string) => {
     const cached = previewCache.get(slug);
     if (cached) {
+      previewCache.delete(slug);
+      previewCache.set(slug, cached);
       previewListeners.forEach((listener) => listener({ slug, dataUrl: cached }));
       return;
     }
