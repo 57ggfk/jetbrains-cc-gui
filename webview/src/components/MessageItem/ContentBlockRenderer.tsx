@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 import type { ClaudeContentBlock, ToolResultBlock, CompactSummaryMetadata } from '../../types';
 
 import MarkdownBlock from '../MarkdownBlock';
+import CollapsibleTextBlock from '../CollapsibleTextBlock';
 import {
   BashToolBlock,
   EditToolBlock,
@@ -145,7 +146,7 @@ export function ContentBlockRenderer({
 }: ContentBlockRendererProps): React.ReactElement | null {
   if (block.type === 'text') {
     return messageType === 'user' ? (
-      <MarkdownBlock content={block.text ?? ''} />
+      <CollapsibleTextBlock content={block.text ?? ''} />
     ) : (
       <MarkdownBlock
         content={block.text ?? ''}

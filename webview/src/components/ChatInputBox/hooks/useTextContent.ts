@@ -96,28 +96,7 @@ export function useTextContent({
           node.childNodes.forEach(walk);
         } else if (element.classList.contains('file-tag')) {
           const filePath = element.getAttribute('data-file-path') || '';
-          // Render file references as clickable markdown links in chat messages.
-          // data-file-path examples:
-          //   "C:\path\to\file.ts"          — absolute path, no line number
-          //   "C:\path\to\file.ts#L10-20"   — with line number info (display format)
-          // Output: [@file.ts#L10-20](C:\path\to\file.ts:10-20)
-          // The href uses :line format for openFile/parseFileLinkTarget compatibility,
-          // while the display text keeps the user-friendly #L format.
-          const hashIndex = filePath.indexOf('#');
-          if (hashIndex !== -1 && /^#[Ll]\d/.test(filePath.slice(hashIndex))) {
-            // Has line number: extract filename + line info, build markdown link
-            const purePath = filePath.substring(0, hashIndex);
-            const lineInfo = filePath.substring(hashIndex);
-            const fileName = purePath.split(/[/\\]/).pop() || purePath;
-            // Convert #L10-20 → :10-20 for navigation href
-            const lineHref = lineInfo.replace(/^#[Ll]/i, ':');
-            textParts.push(`[@${fileName}${lineInfo}](${purePath}${lineHref})`);
-          } else {
-            // No line number — use simple markdown link with absolute path
-            const fileName = filePath.split(/[/\\]/).pop() || filePath;
-            const absolutePath = element.getAttribute('data-tooltip') || filePath;
-            textParts.push(`[@${fileName}](${absolutePath})`);
-          }
+          textParts.push(`@${filePath}`);
           endsWithNewline = false;
           // Don't traverse file-tag children to avoid duplicate filename and close button text
         } else {
