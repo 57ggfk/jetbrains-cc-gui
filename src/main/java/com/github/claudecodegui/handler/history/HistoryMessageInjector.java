@@ -18,10 +18,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
-import java.util.Base64;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
@@ -364,12 +368,122 @@ public class HistoryMessageInjector {
      */
     public static List<JsonObject> convertCodexMessagesToFrontendBatch(JsonArray messages) {
         List<JsonObject> frontendMessages = new ArrayList<>();
+        Set<String> internalToolCallIds = new HashSet<>();
+        Map<String, CodexExecHistoryReplay.Output> outputsByCallId = new HashMap<>();
+
+        for (JsonElement element : messages) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject message = element.getAsJsonObject();
+            JsonObject payload = getResponseItemPayload(message);
+            if (isInternalHistoryToolCall(payload)) {
+                String callId = getStringProperty(payload, "call_id");
+                if (callId != null && !callId.isBlank()) {
+                    internalToolCallIds.add(callId);
+                }
+            } else if (isToolOutputPayload(payload)) {
+                String callId = getStringProperty(payload, "call_id");
+                if (callId != null && !callId.isBlank()) {
+                    outputsByCallId.put(
+                        callId,
+                        new CodexExecHistoryReplay.Output(
+                            payload,
+                            getStringProperty(message, "timestamp")
+                        )
+                    );
+                }
+            }
+        }
+
         CodexFrontendMessageAccumulator accumulator = new CodexFrontendMessageAccumulator(frontendMessages::add);
         for (int i = 0; i < messages.size(); i++) {
-            accumulator.accept(messages.get(i).getAsJsonObject());
+            JsonElement element = messages.get(i);
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject msg = element.getAsJsonObject();
+            JsonObject payload = getResponseItemPayload(msg);
+
+            if (isInternalHistoryToolCall(payload)) {
+                if (CodexExecHistoryReplay.isExecCall(payload)) {
+                    String callId = getStringProperty(payload, "call_id");
+                    String timestamp = getStringProperty(msg, "timestamp");
+                    List<CodexExecHistoryReplay.Command> commands =
+                        CodexExecHistoryReplay.extractCommands(payload);
+                    if (!commands.isEmpty()) {
+                        accumulator.acceptConverted(
+                            CodexExecHistoryReplay.createToolUseMessage(callId, commands, timestamp)
+                        );
+                        CodexExecHistoryReplay.Output output =
+                            callId != null ? outputsByCallId.get(callId) : null;
+                        if (output != null) {
+                            accumulator.acceptConverted(
+                                CodexExecHistoryReplay.createToolResultMessage(
+                                    callId,
+                                    commands,
+                                    output,
+                                    timestamp
+                                )
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
+            if (isOutputForInternalHistoryTool(payload, internalToolCallIds)) {
+                continue;
+            }
+
+            accumulator.accept(msg);
         }
         accumulator.finish();
         return frontendMessages;
+    }
+
+    private static boolean isInternalHistoryToolCall(JsonObject payload) {
+        String payloadType = getStringProperty(payload, "type");
+        String toolName = getStringProperty(payload, "name");
+        if (payloadType == null || toolName == null) {
+            return false;
+        }
+
+        if (!"function_call".equals(payloadType) && !"custom_tool_call".equals(payloadType)) {
+            return false;
+        }
+        return CodexMessageConverter.isHiddenHistoryToolName(toolName);
+    }
+
+    private static boolean isToolOutputPayload(JsonObject payload) {
+        String payloadType = getStringProperty(payload, "type");
+        if (payloadType == null) {
+            return false;
+        }
+        return "function_call_output".equals(payloadType) || "custom_tool_call_output".equals(payloadType);
+    }
+
+    private static boolean isOutputForInternalHistoryTool(
+            JsonObject payload,
+            Set<String> internalToolCallIds
+    ) {
+        String callId = getStringProperty(payload, "call_id");
+        if (callId == null) {
+            return false;
+        }
+
+        return isToolOutputPayload(payload)
+            && internalToolCallIds.contains(callId);
+    }
+
+    private static JsonObject getResponseItemPayload(JsonObject message) {
+        if (message == null
+                || !message.has("type")
+                || !"response_item".equals(message.get("type").getAsString())
+                || !message.has("payload")
+                || !message.get("payload").isJsonObject()) {
+            return null;
+        }
+        return message.getAsJsonObject("payload");
     }
 
     private static final class CodexFrontendMessageAccumulator {
@@ -396,6 +510,18 @@ public class HistoryMessageInjector {
                 return;
             }
 
+            emitPending();
+            pending = incoming;
+        }
+
+        /**
+         * Accepts an already-converted frontend message (e.g. replayed exec tool
+         * cards) while preserving ordering with the buffered pending message.
+         */
+        private void acceptConverted(JsonObject incoming) {
+            if (incoming == null) {
+                return;
+            }
             emitPending();
             pending = incoming;
         }
@@ -472,7 +598,10 @@ public class HistoryMessageInjector {
     }
 
     private static String getStringProperty(JsonObject object, String propertyName) {
-        if (object == null || !object.has(propertyName) || object.get(propertyName).isJsonNull()) {
+        if (object == null
+                || !object.has(propertyName)
+                || object.get(propertyName).isJsonNull()
+                || !object.get(propertyName).isJsonPrimitive()) {
             return null;
         }
         return object.get(propertyName).getAsString();
