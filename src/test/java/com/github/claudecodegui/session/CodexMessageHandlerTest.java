@@ -4,6 +4,7 @@ import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession.Message;
 import com.github.claudecodegui.permission.PermissionRequest;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -245,8 +246,18 @@ public class CodexMessageHandlerTest {
             callbackHandler.setCallback(callback);
 
             CodexMessageHandler handler = new CodexMessageHandler(state, callbackHandler);
-            handler.onMessage("user", "{\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\","
-                    + "\"text\":\"<image name=[Image #1] path=\\\"" + imagePath + "\\\">\\n</image>\\n\\n测试通讯\"}]}}");
+            JsonObject textBlock = new JsonObject();
+            textBlock.addProperty("type", "text");
+            textBlock.addProperty("text", "<image name=[Image #1] path=\"" + imagePath
+                    + "\">\n</image>\n\n测试通讯");
+            JsonArray inputBlocks = new JsonArray();
+            inputBlocks.add(textBlock);
+            JsonObject inputMessage = new JsonObject();
+            inputMessage.addProperty("role", "user");
+            inputMessage.add("content", inputBlocks);
+            JsonObject payload = new JsonObject();
+            payload.add("message", inputMessage);
+            handler.onMessage("user", payload.toString());
 
             assertEquals(1, state.getMessages().size());
             Message message = state.getMessages().get(0);
