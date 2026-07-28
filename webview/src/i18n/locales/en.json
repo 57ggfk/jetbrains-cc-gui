@@ -93,6 +93,9 @@
     "attachmentsUploaded": "[Attachments Uploaded]",
     "streamingConnected": "{{provider}} connected, understanding your question",
     "showEarlierMessages": "Show {{count}} earlier messages",
+    "showEarlierTurns": "Show {{count}} earlier turns ({{remaining}} loaded turns remaining)",
+    "loadEarlierTurns": "Load {{count}} earlier turns from disk ({{remaining}} of {{total}} remaining)",
+    "loadingEarlierTurns": "Loading earlier turns...",
     "totalDuration": "This reply took",
     "tokenUsage": "{{input}} in / {{output}} out",
     "tokenUsageDetail": "Turn total — input {{input}} · cache write {{cacheWrite}} · cache read {{cacheRead}} · output {{output}}",
@@ -681,6 +684,8 @@
         "modelMapping": "Model Mapping (will be injected into JSON env)",
         "mainModel": "Main Model",
         "mainModelPlaceholder": "e.g., claude-sonnet-4-6",
+        "fableModel": "Fable Default Model",
+        "fableModelPlaceholder": "e.g., claude-fable-5",
         "haikuModel": "Haiku Default Model",
         "haikuModelPlaceholder": "e.g., claude-haiku-4-5",
         "sonnetModel": "Sonnet Default Model",
@@ -707,12 +712,17 @@
       "presets": {
         "custom": "Custom",
         "zhipu": "Zhipu GLM",
-        "kimi": "Kimi K2",
+        "kimi": "Kimi",
+        "kimiCoding": "Kimi Coding",
         "deepseek": "DeepSeek",
         "minimax": "MiniMax",
         "xiaomi": "Xiaomi MiMo",
         "xiaomiPlan": "Xiaomi MiMo Plan",
         "qwen": "Alibaba Qwen",
+        "bailian": "Bailian",
+        "bailianCoding": "Bailian Coding",
+        "longcat": "LongCat",
+        "opencodeGo": "OpenCode Go",
         "openrouter": "OpenRouter"
       }
     },
@@ -731,6 +741,9 @@
         "editTitle": "Edit Provider: {{name}}",
         "addDescription": "Configure new Codex provider, will be written to ~/.codex/ directory",
         "editDescription": "Changes will be applied immediately to ~/.codex/ directory",
+        "officialPreset": "OpenAI Official Direct",
+        "officialSectionHint": "Use your manually entered OPENAI_API_KEY with the official endpoint https://api.openai.com/v1.",
+        "presetHint": "These presets include only third-party or proxy endpoints that match the Claude Code provider set.",
         "providerName": "Provider Name",
         "providerNamePlaceholder": "e.g., Codex Official",
         "configJson": "Config",
@@ -1656,6 +1669,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Upgraded Sonnet model"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · Use the default model"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · Latest Opus upgrade"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · High-performance reasoning model"
@@ -1666,7 +1687,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · Latest and most capable"
+        "description": "Opus 4.8 · Previous Opus generation"
       },
       "fable5": {
         "label": "Fable 5",

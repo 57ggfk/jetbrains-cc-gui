@@ -93,6 +93,9 @@
     "attachmentsUploaded": "[Вложения загружены]",
     "streamingConnected": "{{provider}} обрабатывает запрос",
     "showEarlierMessages": "Показать предыдущие сообщения ({{count}})",
+    "showEarlierTurns": "Показать предыдущие ходы: {{count}} (загружено, осталось: {{remaining}})",
+    "loadEarlierTurns": "Загрузить с диска предыдущие ходы: {{count}} (осталось {{remaining}} из {{total}})",
+    "loadingEarlierTurns": "Загрузка предыдущих ходов...",
     "totalDuration": "Этот ответ занял",
     "tokenUsage": "вход {{input}} / выход {{output}}",
     "tokenUsageDetail": "Итог хода — вход {{input}} · запись кэша {{cacheWrite}} · чтение кэша {{cacheRead}} · выход {{output}}",
@@ -600,6 +603,8 @@
         "modelMapping": "Маппинг моделей (будет добавлен в JSON env)",
         "mainModel": "Основная модель",
         "mainModelPlaceholder": "например, claude-sonnet-4-6",
+        "fableModel": "Модель Fable по умолчанию",
+        "fableModelPlaceholder": "например, claude-fable-5",
         "haikuModel": "Модель Haiku по умолчанию",
         "haikuModelPlaceholder": "например, claude-haiku-4-5",
         "sonnetModel": "Модель Sonnet по умолчанию",
@@ -626,12 +631,17 @@
       "presets": {
         "custom": "Своё",
         "zhipu": "Zhipu GLM",
-        "kimi": "Kimi K2",
+        "kimi": "Kimi",
+        "kimiCoding": "Kimi Coding",
         "deepseek": "DeepSeek",
         "minimax": "MiniMax",
         "xiaomi": "Xiaomi MiMo",
         "xiaomiPlan": "Xiaomi MiMo Plan",
         "qwen": "Alibaba Qwen",
+        "bailian": "Bailian",
+        "bailianCoding": "Bailian Coding",
+        "longcat": "LongCat",
+        "opencodeGo": "OpenCode Go",
         "openrouter": "OpenRouter"
       }
     },
@@ -650,6 +660,9 @@
         "editTitle": "Редактировать провайдер: {{name}}",
         "addDescription": "Настройте нового провайдера Codex, данные записываются в ~/.codex/",
         "editDescription": "Изменения будут немедленно применены к ~/.codex/",
+        "officialPreset": "Прямое подключение OpenAI",
+        "officialSectionHint": "Используйте вручную введенный OPENAI_API_KEY с официальной конечной точкой https://api.openai.com/v1.",
+        "presetHint": "Эти пресеты включают только сторонние или прокси-конечные точки, совпадающие с набором провайдеров Claude Code.",
         "providerName": "Имя провайдера",
         "providerNamePlaceholder": "например, Codex Official",
         "configJson": "Конфигурация",
@@ -1438,6 +1451,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Обновленная модель Sonnet 4.6"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · Модель по умолчанию"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · Последнее обновление Opus"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · Высокопроизводительная модель рассуждений"
@@ -1448,7 +1469,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · Новейшая и самая мощная"
+        "description": "Opus 4.8 · Предыдущее поколение Opus"
       },
       "fable5": {
         "label": "Fable 5",

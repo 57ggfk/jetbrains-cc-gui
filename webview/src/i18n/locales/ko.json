@@ -93,6 +93,9 @@
     "attachmentsUploaded": "[첨부파일 업로드됨]",
     "streamingConnected": "{{provider}} 연결됨, 질문을 이해하는 중",
     "showEarlierMessages": "이전 메시지 {{count}}개 보기",
+    "showEarlierTurns": "이전 {{count}}개 대화 턴 표시 (로드된 턴 {{remaining}}개 남음)",
+    "loadEarlierTurns": "디스크에서 이전 {{count}}개 턴 불러오기 (전체 {{total}}개 중 {{remaining}}개 남음)",
+    "loadingEarlierTurns": "이전 대화를 불러오는 중...",
     "totalDuration": "이번 응답 소요 시간",
     "tokenUsage": "입력 {{input}} / 출력 {{output}}",
     "tokenUsageDetail": "턴 합계 — 입력 {{input}} · 캐시 쓰기 {{cacheWrite}} · 캐시 읽기 {{cacheRead}} · 출력 {{output}}",
@@ -619,6 +622,8 @@
         "modelMapping": "모델 매핑 (JSON env에 주입됨)",
         "mainModel": "기본 모델",
         "mainModelPlaceholder": "예: claude-sonnet-4-6",
+        "fableModel": "Fable 기본 모델",
+        "fableModelPlaceholder": "예: claude-fable-5",
         "haikuModel": "Haiku 기본 모델",
         "haikuModelPlaceholder": "예: claude-haiku-4-5",
         "sonnetModel": "Sonnet 기본 모델",
@@ -645,12 +650,17 @@
       "presets": {
         "custom": "사용자 지정",
         "zhipu": "Zhipu GLM",
-        "kimi": "Kimi K2",
+        "kimi": "Kimi",
+        "kimiCoding": "Kimi Coding",
         "deepseek": "DeepSeek",
         "minimax": "MiniMax",
         "xiaomi": "Xiaomi MiMo",
         "xiaomiPlan": "Xiaomi MiMo Plan",
         "qwen": "Alibaba Qwen",
+        "bailian": "Bailian",
+        "bailianCoding": "Bailian Coding",
+        "longcat": "LongCat",
+        "opencodeGo": "OpenCode Go",
         "openrouter": "OpenRouter"
       }
     },
@@ -669,6 +679,9 @@
         "editTitle": "제공자 편집: {{name}}",
         "addDescription": "새 Codex 제공자를 설정합니다. ~/.codex/ 디렉토리에 기록됩니다",
         "editDescription": "변경 사항은 즉시 ~/.codex/ 디렉토리에 적용됩니다",
+        "officialPreset": "OpenAI 공식 직접 연결",
+        "officialSectionHint": "직접 입력한 OPENAI_API_KEY를 사용하고 공식 엔드포인트 https://api.openai.com/v1에 연결합니다.",
+        "presetHint": "아래 프리셋은 Claude Code 제공자 세트와 일치하는 타사 또는 프록시 엔드포인트만 포함합니다.",
         "providerName": "제공자 이름",
         "providerNamePlaceholder": "예: Codex 공식",
         "configJson": "설정",
@@ -1529,6 +1542,14 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Sonnet 4.6 업그레이드 모델"
       },
+      "sonnet47": {
+        "label": "Sonnet 4.7",
+        "description": "Sonnet 4.7 · 기본 모델 사용"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · 최신 Opus 업그레이드"
+      },
       "opus46_1m": {
         "label": "Opus 4.6",
         "description": "Opus 4.6 · 고성능 추론 모델"
@@ -1539,7 +1560,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · 최신 및 가장 강력한 모델"
+        "description": "Opus 4.8 · 이전 세대 Opus 모델"
       },
       "fable5": {
         "label": "Fable 5",
