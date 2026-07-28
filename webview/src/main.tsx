@@ -625,15 +625,6 @@ if (typeof window !== 'undefined' && !window.updatePermissionDialogTimeout) {
   };
 }
 
-// Pre-register updateUsageStatistics to handle backend status responses that arrive before Settings/UsageStatisticsSection initializes
-if (typeof window !== 'undefined' && !window.updateUsageStatistics) {
-  debugLog('[Main] Pre-registering updateUsageStatistics placeholder');
-  window.updateUsageStatistics = (json: string) => {
-    debugLog('[Main] Storing pending usage statistics, length=' + (json ? json.length : 0));
-    window.__pendingUsageStatistics = json;
-  };
-}
-
 // Pre-register onModeReceived to avoid losing early backend push before React callbacks are ready.
 if (typeof window !== 'undefined' && !window.onModeReceived) {
   debugLog('[Main] Pre-registering onModeReceived placeholder');

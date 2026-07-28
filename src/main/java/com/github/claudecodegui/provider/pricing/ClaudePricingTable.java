@@ -7,7 +7,7 @@ import java.util.Map;
 
 /**
  * Single source of truth for Claude built-in pricing, model normalization, and
- * user-configured pricing resolution. Both {@code ClaudeUsageAggregator} (Usage
+ * user-configured pricing resolution. Usage-cost consumers (Usage
  * Statistics) and {@code UsageCostCalculator} (per-turn footer) resolve pricing
  * through here so the two can never disagree.
  */

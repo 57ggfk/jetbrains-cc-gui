@@ -571,9 +571,9 @@ const SettingsView = ({
             <DependencySection addToast={addToast} isActive={currentTab === 'dependencies'} />
           </div>
 
-          {/* Usage statistics */}
+          {/* Usage statistics (vendored TokenTracker dashboard) */}
           <div style={currentTab === 'usage' ? BLOCK_STYLE : NONE_STYLE}>
-            <UsageSection currentProvider={currentProvider} />
+            <UsageSection />
           </div>
 
           {/* MCP servers */}

@@ -475,14 +475,9 @@ interface Window {
   skillToggleResult?: (json: string) => void;
 
   /**
-   * Update usage statistics
+   * TokenTracker bridge response callback (correlated by requestId)
    */
-  updateUsageStatistics?: (json: string) => void;
-
-  /**
-   * Pending usage statistics before component mounts
-   */
-  __pendingUsageStatistics?: string;
+  onTokenTrackerResponse?: (json: string) => void;
 
   /**
    * Update slash commands list (from SDK)
