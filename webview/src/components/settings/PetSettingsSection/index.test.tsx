@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PetSettingsSection from './index';
+import en from '../../../i18n/locales/en.json';
+import zh from '../../../i18n/locales/zh.json';
 
 interface CatalogPayload {
   pets: Array<{
@@ -48,6 +50,15 @@ interface PetOperationPayload {
   operation: 'configure' | 'install' | 'uninstall' | 'alias' | 'open-directory' | 'skill-command';
   success: boolean;
   slug?: string;
+}
+
+function collectTranslationLeaves(value: unknown, prefix = ''): string[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return [prefix];
+  }
+  return Object.entries(value).flatMap(([key, child]) =>
+    collectTranslationLeaves(child, prefix ? `${prefix}.${key}` : key)
+  );
 }
 
 const mocks = vi.hoisted(() => ({
@@ -200,6 +211,15 @@ describe('PetSettingsSection catalog pagination', () => {
   const openPetdexTab = () => {
     fireEvent.click(screen.getByRole('tab', { name: 'settings.pet.tabs.petdex' }));
   };
+
+  it('keeps Simplified Chinese pet translations complete', () => {
+    expect(collectTranslationLeaves(zh.codexPet).sort())
+      .toEqual(collectTranslationLeaves(en.codexPet).sort());
+    expect(collectTranslationLeaves(zh.settings.pet).sort())
+      .toEqual(collectTranslationLeaves(en.settings.pet).sort());
+    expect(zh.settings.pet.title).toBe('Codex 宠物');
+    expect(zh.settings.pet.floatingTitle).toBe('IDE 悬浮宠物');
+  });
 
   it('renders all pet settings in one four-tab group', () => {
     render(<PetSettingsSection addToast={vi.fn()} />);
