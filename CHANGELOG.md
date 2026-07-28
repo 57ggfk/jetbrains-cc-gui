@@ -1,3 +1,157 @@
+##### **2026年7月27日（v0.4.8）**
+
+English:
+
+✨ Features
+- Add **async subagent lifecycle tracking** in the frontend: background Agent / Task runs now receive both in-turn and inter-turn task events, keep subagent internals out of the main chat stream, and show completion metadata such as duration, tokens and usage instead of staying stuck on "running" until reload (by @gadfly3173)
+- Add **Fable model tier support** across Claude provider configuration: `ANTHROPIC_DEFAULT_FABLE_MODEL` now flows through backend model mapping, provider presets, frontend model / reasoning selectors and localized labels (by @zhukunpenglinyutong)
+- Add **Codex GPT-5.6 max reasoning** and **Codex model alias** support, preserving native `max` reasoning effort for GPT-5.6 models and letting Codex configs resolve model aliases without losing user settings (by @EzioX1459, @GGMGG)
+
+🐛 Fixes
+- Fix **Codex custom exec patch file changes** not being restored correctly, so generated file diffs and Apply Patch results are preserved for review / accept flows (by @elexiang)
+- Fix **Codex history and long-stream stability**: complete user turns stay intact during pagination, prepended pages remain aligned, large webview transports and long conversation updates are bounded, and dense message anchors are capped (by @GGMGG)
+- Fix **Codex session and config safety**: session trees are deleted safely, interrupt-state races are guarded, provider updates preserve Codex config, prompt handlers remain backward-compatible, and Codex MCP stdio servers now run from the project working directory (by @GGMGG)
+- Fix **provider bridge output pollution** by moving diagnostics to stderr and keeping stdout reserved for JSON protocol responses, with safer Node service path loading and clearer Windows npm permission guidance (by @GGMGG)
+- Fix **JCEF / WebView lifecycle failures**: prevent false JCEF startup failures, support Android Studio remote browser, stop leaking JCEF JS bridges, serialize webview dispatch against disposal, free the JCEF UI thread from dispose deadlocks, and stop the watchdog from spinning on a dead CefServer (by @gadfly3173, @anjiemo, @zhukunpenglinyutong)
+- Fix **Claude same-session resume and replay edge cases**: same-session resume now soft-reloads, replay status panels cover the right scope, Claude session file paths are unified, and family-specific model mappings are preferred (by @gadfly3173, @GGMGG)
+- Fix **tab and session lifecycle races**: new tabs preserve provider preferences without copying old conversation state, history restore waits until the webview is ready, empty tabs repaint on activation, and cleared sessions no longer resurrect stale lists (by @GGMGG, @gadfly3173)
+- Fix **message rendering and action polish**: empty Bash tool placeholders are hidden, terminal selection actions update on a background thread, commit diffs normalize line endings, and Codex AskUserQuestion prompts are labeled correctly (by @GGMGG)
+
+中文：
+
+✨ 新功能
+- 新增**异步 subagent 生命周期跟踪**：后台 Agent / Task 现在可同时接收当前轮次与轮次外的 task 事件，subagent 内部消息不会污染主聊天流，并能显示耗时、token、用量等完成元数据，不再需要手动 reload 才从「running」恢复（by @gadfly3173）
+- 新增 **Fable 模型层级支持**：`ANTHROPIC_DEFAULT_FABLE_MODEL` 贯通 Claude provider 的后端模型映射、provider 预设、前端模型 / reasoning 选择器与本地化标签（by @zhukunpenglinyutong）
+- 新增 **Codex GPT-5.6 max reasoning** 与 **Codex 模型别名**支持：GPT-5.6 模型会原生保留 `max` 推理力度，Codex 配置也能解析模型别名且不丢失用户设置（by @EzioX1459、@GGMGG）
+
+🐛 修复
+- 修复 **Codex custom exec patch 的文件变更**未正确恢复，确保生成的文件 diff 与 Apply Patch 结果能进入 review / accept 流程（by @elexiang）
+- 修复 **Codex 历史与长流稳定性**：分页时保留完整用户轮次，前置分页保持对齐，大型 webview 传输与长对话更新被限制在安全范围内，并限制高密度消息锚点数量（by @GGMGG）
+- 修复 **Codex 会话与配置安全性**：安全删除 session tree，保护 interrupt 状态竞争，provider 更新时保留 Codex 配置，恢复 prompt handler 兼容性，并让 Codex MCP stdio server 在项目工作目录中运行（by @GGMGG）
+- 修复 **provider bridge 输出污染**：诊断日志改走 stderr，stdout 只保留 JSON 协议响应，同时更安全地加载 Node service 路径，并提供更清晰的 Windows npm 权限指引（by @GGMGG）
+- 修复 **JCEF / WebView 生命周期问题**：避免误报 JCEF 启动失败，支持 Android Studio remote browser，停止泄漏 JCEF JS bridge，串行化 webview dispatch 与 dispose，解除 JCEF UI 线程 dispose 死锁，并阻止 watchdog 在已死亡的 CefServer 上空转（by @gadfly3173、@anjiemo、@zhukunpenglinyutong）
+- 修复 **Claude 同会话 resume 与 replay 边界问题**：同会话 resume 改为 soft reload，replay 状态面板覆盖正确范围，统一 Claude session 文件路径，并优先使用 family-specific 模型映射（by @gadfly3173、@GGMGG）
+- 修复 **tab 与 session 生命周期竞争**：新 tab 只继承 provider 偏好而不复制旧会话状态，历史恢复会等待 webview ready，空 tab 激活时会重绘，已清空的 session 不再复活陈旧列表（by @GGMGG、@gadfly3173）
+- 修复**消息渲染与 action 细节**：隐藏空 Bash tool 占位块，终端选择 action 改到后台线程更新，commit diff 统一换行符，并为 Codex AskUserQuestion 提示补上正确标签（by @GGMGG）
+
+---
+
+##### **2026年7月19日（v0.4.7-fix2）**
+
+English:
+
+✨ Features
+- Add a **Detailed output in message footer** setting: users can choose whether per-message footers show expanded metadata such as model, duration and working directory, while token/cost essentials stay easy to scan (by @EzioX1459)
+
+🐛 Fixes
+- Restore **IntelliJ 2026.2 plugin loading** by registering tool-window/editor actions with the platform-compatible extension points (by @zkpaiminmin)
+- Fix **Codex resumed-session replay leaking historical tool calls**: JSONL replay now captures a pre-turn baseline and waits for the current turn's `turn_context`, so old commands/results are not re-emitted as if they belonged to the new turn (by @MrHuapen)
+- Fix **multi-tab and streaming transcript merge edge cases**: empty assistant placeholders are filled in place, final snapshots are pushed to the right tab/session, and current-turn metadata is reconstructed more reliably after reloads (by @gadfly3173, @vitas13)
+- Fix **message rendering regressions** across collapsed text, normalized content blocks, Read/Bash/generic tool output, ANSI stripping, copied text, and image-bearing tool results (by @vitas13)
+- Fix **usage and cost display drift**: Claude/Codex costs now come from shared pricing tables, Codex cached-token aliases are accepted, cache hits and per-turn USD cost are preserved in frontend transport, and custom/unpriced models avoid bogus costs (by @EzioX1459, @zkpaiminmin)
+- Fix the **Codex quota popup being clipped** by the provider dropdown container (by @elexiang)
+- Fix **Keep All** using stale file-change state and resurrecting old changes after the user accepted the current set (by @hebulin)
+
+中文：
+
+✨ 新功能
+- 新增**消息底部详细输出**设置：用户可选择是否在每条消息底部显示模型、耗时、工作目录等扩展元数据，同时保留 token / 费用等核心信息的可读性（by @EzioX1459）
+
+🐛 修复
+- 恢复 **IntelliJ 2026.2 插件加载**：将工具窗口 / 编辑器 action 注册到兼容新版平台的扩展点（by @zkpaiminmin）
+- 修复 **Codex 恢复会话时历史工具调用被重新回放**：JSONL replay 现在会记录当前轮次开始前的基线，并等待本轮 `turn_context` 后才回放，避免旧命令 / 旧结果被当成本轮内容再次下发（by @MrHuapen）
+- 修复**多标签页与流式转录合并边界问题**：空的助手占位块会原地填充，最终快照会推送到正确 tab / session，reload 后也能更可靠地重建当前轮次元数据（by @gadfly3173、@vitas13）
+- 修复**消息渲染回归**，覆盖折叠文本、标准化 content block、Read / Bash / 通用工具输出、ANSI 清理、复制文本以及带图片的工具结果（by @vitas13）
+- 修复**用量与费用显示不一致**：Claude / Codex 费用统一走共享定价表，Codex 兼容 cached-token 别名，cache hit 与单轮美元费用会保留到前端传输，自定义 / 未定价模型不会显示虚假费用（by @EzioX1459、@zkpaiminmin）
+- 修复 **Codex 配额弹窗被 provider 下拉容器裁剪**（by @elexiang）
+- 修复 **Keep All** 使用过期文件变更状态，导致接受当前变更后旧变更又被带回来的问题（by @hebulin）
+
+---
+
+##### **2026年7月9日（v0.4.7-fix1）**
+
+English:
+
+✨ Features
+- Add the **GPT-5.6 model family** (Sol / Terra / Luna) as built-in Codex models: 1.05M context windows, usage pricing for cost estimation, `gpt-5.6` prefix/alias matching resolving to Sol, and localized labels and descriptions across all 10 languages (by @zkpaiminmin)
+
+🔧 Improvements
+- Trim the built-in Codex model dropdown to the current lineup — GPT-5.6 Sol / Terra / Luna, GPT-5.5 and GPT-5.4 — removing the retired `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2` and `gpt-5.1-codex-mini` entries (by @zkpaiminmin)
+
+中文：
+
+✨ 新功能
+- 新增 **GPT-5.6 系列模型**（Sol / Terra / Luna）为 Codex 内置模型：1.05M 上下文窗口、用于费用估算的用量计价、`gpt-5.6` 前缀/别名匹配解析到 Sol，以及覆盖全部 10 种语言的本地化标签与描述（by @zkpaiminmin）
+
+🔧 优化
+- Codex 内置模型下拉列表精简为当前阵容——GPT-5.6 Sol / Terra / Luna、GPT-5.5 与 GPT-5.4，移除已下线的 `gpt-5.2-codex`、`gpt-5.1-codex-max`、`gpt-5.4-mini`、`gpt-5.3-codex`、`gpt-5.3-codex-spark`、`gpt-5.2` 和 `gpt-5.1-codex-mini`（by @zkpaiminmin）
+
+---
+
+##### **2026年7月9日（v0.4.7）**
+
+English:
+
+✨ Features
+- Add an **MCP Marketplace**: a new "Add from MCP market" entry in the MCP add menu, with switchable sources (built-in presets, the official MCP Registry, the GitHub MCP Registry, the official GitHub org). The selected source is persisted and restored on reopen, responses are disk-cached with stale fallback, and registry entries now render their real package / runtime arguments, environment variables and transport type instead of a bare `uvx <package>` — previously every registry entry mapped to a null name and was silently dropped (by @Miguel0888)
+- Add **Import from GitHub Copilot** for MCP servers: paste a Copilot MCP config, preview it, and save through the same path as a manual add — `requestInit.headers` merged with `headers`, transport type inferred (command → stdio, `/sse` URL → sse, else http), conflicting ids renamed instead of overwritten (by @Miguel0888)
+- Add **custom pricing for custom models**: configure input / output / cache rates for Claude and Codex custom models, persisted to the plugin config and used by usage aggregation. Routed Claude model ids such as `ppio/pa/gpt-5.5` now match history usage recorded under the routed id (`pa/gpt-5.5`), preserving exact-match precedence rather than guessing between candidates (by @EzioX1459)
+- Add an **"Ask User Question notification" toggle** to Basic Settings → Behavior: when enabled, an opt-in system toast (same slide-in style as the task-completion notification) fires whenever Claude triggers an AskUserQuestion, so you won't miss a pending question. Defaults to off; localized for all 10 languages (by @adminkk)
+
+🔒 Security Hardening
+- Default permission mode no longer yields every tool to the SDK. Read-only tools (now including `NotebookRead` and `BashOutput`) still yield, so `settings.json` deny-rules such as `Read(./.env)` keep applying, while side-effect tools (`Bash` / `Write` / `Agent`) return `ask`, which takes precedence over allow-rules. Since `settingSources` includes the project and local scopes, a malicious repository's `.claude/settings.json` could otherwise silently auto-approve `Bash` (by @zkpaiminmin)
+
+🐛 Fixes
+- Fix **Auto (`bypassPermissions`) having no effect when switched mid-session**: `allowDangerouslySkipPermissions` is an argv flag frozen at process launch, so a live `set_permission_mode` control request could never add it to an already-running subprocess. Switching into or out of Auto now forces a runtime rebuild instead of endlessly re-prompting (by @toxeh)
+- Fix the **permission mode resetting to Default after a plugin reinstall**: boot no longer pushes the wiped webview `localStorage` snapshot over Java's app-level `PropertiesComponent`, which survives reinstall and is the real source of truth (by @toxeh)
+- Fix **background-turn answers never rendering live**: when the agent delegates a sub-agent to the background, its prompts and replies were persisted to the session JSONL but held back until the long foreground stream ended. The reload is now deferred to stream end and routed as a live update (by @toxeh)
+- Fix the **1M-context toggle silently doing nothing on a live runtime**: the `[1m]` state is now part of the runtime signature, so toggling it rebuilds the runtime with a fresh env snapshot, and `setModel` receives the resolved model id rather than the SDK short name — so settings-side model remaps (`sonnet` → `"MiniMax-M2.5"`) also reach subprocesses whose env was frozen at spawn (by @toxeh)
+- Fix three chat-transcript rendering glitches, each with a distinct root cause in the optimistic-add / streaming / snapshot-reconcile interaction: a user message not shown though the agent answered it, a duplicated assistant answer, and a hidden "API request failed" bubble (by @toxeh)
+- Fix the same swallowed error bubble on Codex: `CodexMessageHandler.onError` pushed the error snapshot before signalling stream-end, so the webview's `onStreamEnd` rAF-cancel could drop it. Stream-end is now emitted first on streaming turns (by @zkpaiminmin)
+- Fix an **empty History panel whenever the custom working directory is a relative path** such as `..`: the GUI keyed history on the IDE project base path while Claude/Codex key sessions on the normalized working directory they actually run in, and `..` was never collapsed. History now resolves against the canonical normalized directory (by @tc-imba)
+- Fix **plugin skills and slash commands missing when the project, Node.js and `~/.claude` live in WSL** but the IDE runs on Windows: the Java-side `~/.claude` scan resolved the wrong paths across the `\\wsl.localhost\<distro>\...` UNC share and silently returned nothing, leaving only the built-in commands in the `/` menu (by @tikitaka721, closes #1400)
+- Fix a **WSL-style `HOME` (`/mnt/c/Users/<user>`) leaking into the daemon on native Windows**, where it is inherited by every subprocess. The Bash tool there is Git Bash (MSYS), whose mount prefix is `/c/...` — most visibly `git` could not lock `<HOME>/.gitconfig` and kept reporting "credentials incorrect or have expired" on push (by @Mickyzh)
+- Fix `HOME` / `CODEX_HOME` not being normalized against the selected Node runtime before bridge child processes launch: polluted `/mnt/<drive>/...` values are converted back to native Windows paths for native Windows Node/Codex processes, and WSL path conversion stays scoped to WSL runtimes (by @selfdcl)
+- Fix **Codex custom models showing no reasoning**: the Codex SDK only enables reasoning for models on its hardcoded allowlist, so custom models sent a null thinking parameter. `model_supports_reasoning_summaries` is now forced on for all models (by @codexvn, closes #1375)
+- Fix a **partial custom price wildly over-estimating cost**: dimensions the user left unset now fall back to that model's own built-in rate instead of 0, so custom pricing overrides only what was explicitly configured. Also fix an Escape-key listener leak in the MCP import dialog (by @zkpaiminmin, closes #1450)
+- Fix **"Always allow" re-prompting every turn for Bash/Agent**: restore tool-level approval memory and honor user-configured `settings.json` allow-rules, reverting the parts of the v0.4.6 hardening that broke permissions for normal users. `acceptEdits` command confirmation is unchanged (by @zkpaiminmin)
+
+🔧 Improvements
+- `ServerToolsPanel` now shows the concrete `toolsInfo.error` text under "Load failed" instead of a generic message (by @Miguel0888)
+- Complete the custom-model pricing translations for es / fr / hi / ja / ko / pt-BR / ru, and drop the dead `getCustomModelPricing` chain in `CodemossSettingsService` (by @zkpaiminmin)
+
+中文：
+
+✨ 新功能
+- 新增 **MCP 应用市场**：MCP 添加菜单新增「Add from MCP market」入口，可在内置预设、官方 MCP Registry、GitHub MCP Registry 和官方 GitHub 组织之间切换数据源。选中的数据源会持久化并在重新打开时恢复，请求结果落盘缓存并支持过期回退；注册表条目现在会渲染真实的 package / runtime 参数、环境变量和传输类型，而不是一条干瘪的 `uvx <package>`——此前每个注册表条目都会映射出空名称并被静默丢弃（by @Miguel0888）
+- MCP 新增**从 GitHub Copilot 导入**：粘贴 Copilot 的 MCP 配置，预览确认后走与手动添加相同的保存路径——合并 `requestInit.headers` 与 `headers`、推断传输类型（command → stdio、`/sse` URL → sse、其余 http）、id 冲突时重命名而非覆盖（by @Miguel0888）
+- 新增**自定义模型的自定义计价**：可为 Claude 和 Codex 自定义模型配置输入 / 输出 / 缓存单价，持久化到插件配置并用于用量统计。形如 `ppio/pa/gpt-5.5` 的路由模型 id 现在能匹配到历史中按路由 id（`pa/gpt-5.5`）记录的用量，且保留精确匹配优先，不在多个候选间瞎猜（by @EzioX1459）
+- 基础设置 → 行为设置新增 **「AskUserQuestion 提醒通知」开关**：开启后，Claude 每次触发 AskUserQuestion 都会弹出系统通知（与任务完成通知同样的滑入样式），不再错过待回答的问题。默认关闭，已覆盖全部 10 种语言（by @adminkk）
+
+🔒 安全加固
+- 默认权限模式不再把所有工具一律交给 SDK 评估。只读工具（新增 `NotebookRead` 和 `BashOutput`）仍然交由 SDK，以便 `settings.json` 中 `Read(./.env)` 这类 deny 规则继续生效；而有副作用的工具（`Bash` / `Write` / `Agent`）返回 `ask`，优先级高于 allow 规则。由于 `settingSources` 包含 project 与 local 作用域，否则一个恶意仓库的 `.claude/settings.json` 就能静默自动放行 `Bash`（by @zkpaiminmin）
+
+🐛 修复
+- 修复**会话中途切到 Auto（`bypassPermissions`）不生效**：`allowDangerouslySkipPermissions` 是进程启动时冻结的 argv 参数，运行时的 `set_permission_mode` 控制请求无法给已启动的子进程补上它。现在切入 / 切出 Auto 会强制重建 runtime，不再每一步都继续弹确认（by @toxeh）
+- 修复**重装插件后权限模式被重置为 Default**：启动时不再用被清空的 webview `localStorage` 快照去覆盖 Java 应用级 `PropertiesComponent`——后者能在重装后存活，才是真正的事实来源（by @toxeh）
+- 修复**后台轮次的回答不实时渲染**：agent 把子任务派发到后台运行时，其提问与回复虽已写入会话 JSONL，却要等前台长流结束才一次性刷出。现在把 reload 推迟到 stream end 并作为实时更新下发（by @toxeh）
+- 修复 **1M 上下文开关在运行中的 runtime 上静默失效**：`[1m]` 状态现已纳入 runtime 签名，切换后会以新的环境快照重建 runtime；同时 `setModel` 接收解析后的完整模型 id 而非 SDK 短名，使设置侧的模型重映射（`sonnet` → `"MiniMax-M2.5"`）也能送达那些环境已在 spawn 时冻结的子进程（by @toxeh）
+- 修复三个聊天记录渲染异常（根因各自独立，位于乐观插入 / 流式 / 快照对账的交互处）：用户消息未显示但 agent 已作答、助手回答重复、「API request failed」气泡被吞（by @toxeh）
+- 修复 Codex 侧同样的错误气泡被吞：`CodexMessageHandler.onError` 先推错误快照再发 stream-end，导致 webview 的 `onStreamEnd` rAF 取消把它丢掉。流式轮次现在先发 stream-end（by @zkpaiminmin）
+- 修复**自定义工作目录为 `..` 这类相对路径时历史面板恒为空**：GUI 按 IDE 项目根路径读取历史，而 Claude/Codex 按其实际运行的规范化工作目录存储会话，且 `..` 从未被折叠。历史现在按规范化后的目录解析（by @tc-imba）
+- 修复 **IDE 跑在 Windows、而项目 / Node.js / `~/.claude` 都在 WSL 时插件技能与斜杠命令全部消失**：Java 侧扫描 `~/.claude` 时无法正确解析 `\\wsl.localhost\<distro>\...` UNC 路径，静默返回空，`/` 菜单里只剩内置命令（by @tikitaka721，关闭 #1400）
+- 修复 **WSL 风格的 `HOME`（`/mnt/c/Users/<user>`）泄漏进原生 Windows 的 daemon**，并被所有子进程继承。这里的 Bash 工具是 Git Bash（MSYS），挂载前缀是 `/c/...`——最直观的表现是 `git` 无法锁定 `<HOME>/.gitconfig`，push 时反复报「credentials incorrect or have expired」（by @Mickyzh）
+- 修复启动 bridge 子进程前未按所选 Node runtime 规范化 `HOME` / `CODEX_HOME`：被污染的 `/mnt/<drive>/...` 会为原生 Windows 的 Node/Codex 进程转回原生 Windows 路径，WSL 路径转换则限定在 WSL runtime 内（by @selfdcl）
+- 修复 **Codex 自定义模型不显示思考过程**：Codex SDK 只对硬编码白名单中的模型启用 reasoning，自定义模型的 thinking 参数因此为 null。现在对所有模型强制开启 `model_supports_reasoning_summaries`（by @codexvn，关闭 #1375）
+- 修复**只填了部分维度的自定义单价会把费用估算撑爆**：未填写的维度现在回退到该模型自身的内置单价而非 0，自定义计价只覆盖用户显式设置的部分。同时修复 MCP 导入对话框 Escape 监听器泄漏（by @zkpaiminmin，关闭 #1450）
+- 修复 **Bash/Agent 的「始终允许」每轮都重新弹窗**：恢复工具级授权记忆，并重新尊重用户在 `settings.json` 中配置的 allow 规则，回退 v0.4.6 中影响正常用户的过度加固。`acceptEdits` 的命令确认保持不变（by @zkpaiminmin）
+
+🔧 优化
+- `ServerToolsPanel` 的「Load failed」下方改为展示具体的 `toolsInfo.error` 文案，不再只给一句通用提示（by @Miguel0888）
+- 补齐 es / fr / hi / ja / ko / pt-BR / ru 七种语言的自定义模型定价文案，并删除 `CodemossSettingsService` 中无人调用的 `getCustomModelPricing` 死代码链（by @zkpaiminmin）
+
+---
+
 ##### **2026年7月6日（v0.4.6-fix1）**
 
 English:
@@ -21,7 +175,6 @@ English:
 ✨ Features
 - Add live permission-mode hot-swap: switching the permission mode mid-turn now takes effect immediately for the current turn's subsequent tool calls — no runtime restart, no waiting for the next message. Claude pushes the new mode straight to the live runtime; Codex rebuilds thread options per turn (by @gadfly3173, closes #1380)
 - Add a GitHub Star button to the open-source promo banner: click to copy the repository URL for pasting into a browser; the main copy now reads "100% open-source and free", with full localization across 10 languages (by @zkpaiminmin)
-- Add an "Ask User Question notification" toggle to Basic Settings → Behavior: when enabled, an opt-in system toast (same slide-in style as the task-completion notification) fires whenever Claude triggers an AskUserQuestion, so you won't miss a pending question. Defaults to off; localized for all 10 languages.
 
 🔒 Security Hardening
 - Change the default permission mode from `bypassPermissions` to `default`, so tool calls are confirmed by default instead of auto-approved
