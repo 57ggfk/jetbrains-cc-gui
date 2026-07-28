@@ -703,12 +703,17 @@
       "presets": {
         "custom": "Personalizado",
         "zhipu": "Zhipu GLM",
-        "kimi": "Kimi K2",
+        "kimi": "Kimi",
+        "kimiCoding": "Kimi Coding",
         "deepseek": "DeepSeek",
         "minimax": "MiniMax",
         "xiaomi": "Xiaomi MiMo",
         "xiaomiPlan": "Xiaomi MiMo Plan",
         "qwen": "Alibaba Qwen",
+        "bailian": "Bailian",
+        "bailianCoding": "Bailian Coding",
+        "longcat": "LongCat",
+        "opencodeGo": "OpenCode Go",
         "openrouter": "OpenRouter"
       }
     },
@@ -727,6 +732,9 @@
         "editTitle": "Editar Provedor: {{name}}",
         "addDescription": "Configurar novo provedor Codex, será gravado no diretório ~/.codex/",
         "editDescription": "As alterações serão aplicadas imediatamente ao diretório ~/.codex/",
+        "officialPreset": "OpenAI Oficial Direto",
+        "officialSectionHint": "Use sua OPENAI_API_KEY inserida manualmente com o endpoint oficial https://api.openai.com/v1.",
+        "presetHint": "Esses presets incluem apenas endpoints de terceiros ou proxy alinhados ao conjunto de provedores do Claude Code.",
         "providerName": "Nome do Provedor",
         "providerNamePlaceholder": "ex: Codex Oficial",
         "configJson": "Configuração",

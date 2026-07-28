@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ProviderConfig } from '../types/provider';
 import { CLAUDE_MODEL_MAPPING_ENV_KEYS, PROVIDER_PRESETS } from '../types/provider';
+import { ProviderModelIcon } from './shared/ProviderModelIcon';
 
 const INFO_ICON_STYLE: React.CSSProperties = { fontSize: '12px', marginRight: '4px' };
 const NOTICE_MT_STYLE: React.CSSProperties = { marginTop: '8px' };
@@ -511,6 +512,9 @@ export default function ProviderDialog({
                 className={`preset-btn ${activePreset === OFFICIAL_DIRECT_PRESET_ID ? 'active' : ''}`}
                 onClick={() => handlePresetClick(OFFICIAL_DIRECT_PRESET_ID)}
               >
+                <span aria-hidden="true" className="preset-btn-icon">
+                  <ProviderModelIcon providerId="claude" size={16} colored />
+                </span>
                 {t('settings.provider.dialog.officialPreset')}
               </button>
             </div>
@@ -529,6 +533,9 @@ export default function ProviderDialog({
                   className={`preset-btn ${activePreset === preset.id ? 'active' : ''}`}
                   onClick={() => handlePresetClick(preset.id)}
                 >
+                  <span aria-hidden="true" className="preset-btn-icon">
+                    <ProviderModelIcon providerId={preset.id} size={16} colored />
+                  </span>
                   {t(preset.nameKey)}
                 </button>
               ))}

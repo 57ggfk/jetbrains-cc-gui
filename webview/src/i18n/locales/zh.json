@@ -717,12 +717,17 @@
       "presets": {
         "custom": "自定义配置",
         "zhipu": "智谱GLM",
-        "kimi": "Kimi K2",
+        "kimi": "Kimi",
+        "kimiCoding": "Kimi Coding",
         "deepseek": "DeepSeek",
         "minimax": "MiniMax",
         "xiaomi": "Xiaomi MiMo",
         "xiaomiPlan": "Xiaomi MiMo Plan",
         "qwen": "阿里千问",
+        "bailian": "Bailian",
+        "bailianCoding": "Bailian Coding",
+        "longcat": "LongCat",
+        "opencodeGo": "OpenCode Go",
         "openrouter": "OpenRouter"
       }
     },
@@ -741,6 +746,9 @@
         "editTitle": "编辑供应商: {{name}}",
         "addDescription": "配置新的 Codex 供应商信息，将写入 ~/.codex/ 目录",
         "editDescription": "更新配置后将立即应用到 ~/.codex/ 目录",
+        "officialPreset": "OpenAI 官方直连",
+        "officialSectionHint": "使用您手动填写的 OPENAI_API_KEY，并直接连接到官方端点 https://api.openai.com/v1。",
+        "presetHint": "以下预设仅包含与 Claude Code 供应商一致的第三方或代理端点。",
         "providerName": "供应商名称",
         "providerNamePlaceholder": "例如：Codex 官方",
         "configJson": "配置",
