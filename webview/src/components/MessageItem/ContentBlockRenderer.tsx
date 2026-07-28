@@ -191,13 +191,24 @@ export function ContentBlockRenderer({
   onToggleThinking,
   findToolResult,
 }: ContentBlockRendererProps): React.ReactElement | null {
+  // `isStreaming` arriving here is message-level: it stays true for the whole
+  // assistant turn, including tool round-trips and the wait for tool results.
+  // But only the LAST block of a streaming message is still receiving tokens —
+  // every earlier text/thinking block is already closed. Feeding those closed
+  // blocks the full marked pipeline (instead of the lightweight streaming
+  // renderer, which knows no tables/lists) lets block-level syntax render the
+  // moment a later block such as a tool call arrives, instead of waiting for
+  // the entire turn to end. The two renderers are height-aligned (breaks:
+  // false), so switching between them stays invisible.
+  const isActivelyStreaming = isStreaming && isLastBlock;
+
   if (block.type === 'text') {
     return messageType === 'user' ? (
       <CollapsibleTextBlock content={block.text ?? ''} />
     ) : (
       <MarkdownBlock
         content={block.text ?? ''}
-        isStreaming={isStreaming}
+        isStreaming={isActivelyStreaming}
       />
     );
   }
@@ -284,7 +295,7 @@ export function ContentBlockRenderer({
           <div className="thinking-content-inner">
             <MarkdownBlock
               content={block.thinking ?? block.text ?? t('chat.noThinkingContent')}
-              isStreaming={isStreaming}
+              isStreaming={isActivelyStreaming}
             />
           </div>
         </div>
