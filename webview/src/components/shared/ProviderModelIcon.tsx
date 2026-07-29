@@ -56,6 +56,8 @@ export interface ProviderModelIconProps {
   providerId?: string;
   /** Model ID for vendor-specific icon resolution (e.g. "qwen3.5-plus") */
   modelId?: string;
+  /** Provider base URL (e.g. ANTHROPIC_BASE_URL); strongest brand signal when present */
+  baseUrl?: string;
   /** Icon size in pixels */
   size?: number;
   /** Whether to use colored variant (true) or avatar/mono variant (false) */
@@ -153,17 +155,19 @@ const VENDOR_ICON_MAP: Record<
  * Renders the appropriate vendor icon based on provider and model context.
  *
  * Resolution priority:
- * 1. modelId pattern match (most specific)
- * 2. providerId lookup
- * 3. Claude default
+ * 1. baseUrl host match (strongest brand signal)
+ * 2. modelId pattern match (most specific model-level signal)
+ * 3. providerId lookup
+ * 4. Claude default
  */
 export const ProviderModelIcon = ({
   providerId,
   modelId,
+  baseUrl,
   size = 16,
   colored = false,
 }: ProviderModelIconProps) => {
-  const vendor = resolveIconVendor(providerId, modelId);
+  const vendor = resolveIconVendor(providerId, modelId, baseUrl);
   const renderer = VENDOR_ICON_MAP[vendor];
   return renderer(size, colored);
 };
