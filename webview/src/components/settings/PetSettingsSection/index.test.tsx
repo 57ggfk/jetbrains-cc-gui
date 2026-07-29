@@ -244,7 +244,7 @@ describe('PetSettingsSection catalog pagination', () => {
     render(<PetSettingsSection addToast={vi.fn()} />);
 
     const actions = screen.getByTestId('pet-basic-actions');
-    expect(actions.contains(screen.getByText('settings.pet.enabled'))).toBe(true);
+    expect(actions.contains(screen.getByText('settings.pet.disabled'))).toBe(true);
     expect(actions.contains(screen.getByText('settings.pet.showStatusIndicator'))).toBe(true);
     expect(actions.contains(screen.getByRole('button', { name: 'settings.pet.resetPosition' }))).toBe(true);
   });

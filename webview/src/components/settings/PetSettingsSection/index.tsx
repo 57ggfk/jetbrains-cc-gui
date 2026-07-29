@@ -23,7 +23,7 @@ interface PetSettingsSectionProps {
 }
 
 const DEFAULT_CONFIG: CodexPetConfig = {
-  enabled: true,
+  enabled: false,
   selectedPetId: 'builtin',
   size: 96,
   opacity: 1,

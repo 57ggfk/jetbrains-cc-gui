@@ -1284,7 +1284,7 @@ public final class CodexPetFloatingService
 
     public static final class PetState {
         public String scope = SCOPE_PROJECT;
-        public boolean enabled = true;
+        public boolean enabled = false;
         public String selectedPetId = "builtin";
         public int size = 96;
         public double opacity = 1.0d;

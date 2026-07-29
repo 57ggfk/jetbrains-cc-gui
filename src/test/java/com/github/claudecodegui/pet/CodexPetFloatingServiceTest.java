@@ -239,7 +239,11 @@ public class CodexPetFloatingServiceTest {
                     }
                     return null;
                 });
-        return new CodexPetFloatingService(project);
+        CodexPetFloatingService service = new CodexPetFloatingService(project);
+        JsonObject enablePet = new JsonObject();
+        enablePet.addProperty("enabled", true);
+        service.applyConfig(enablePet);
+        return service;
     }
 
     private static JsonObject bubblePayload(String sourceId) {
