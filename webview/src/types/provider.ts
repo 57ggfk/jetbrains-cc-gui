@@ -530,10 +530,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     env: {
       ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
       ANTHROPIC_AUTH_TOKEN: '',
-      ANTHROPIC_DEFAULT_FABLE_MODEL: 'glm-4.7',
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7',
-      ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-4.7',
-      ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.7',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'glm-5.2',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.2',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.2',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.2',
     },
   },
   {
