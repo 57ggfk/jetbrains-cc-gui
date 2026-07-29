@@ -290,6 +290,12 @@
         "reset": "Redefinir",
         "hint": "Personalize a cor de fundo da área de chat. Deixe vazio para seguir o padrão do tema."
       },
+      "chatBarColor": {
+        "label": "Cor do cabeçalho e da barra de status",
+        "custom": "Personalizada",
+        "reset": "Redefinir",
+        "hint": "Use uma cor de tema para o cabeçalho da sessão e a barra de status das tarefas. Deixe vazio para seguir o tema atual."
+      },
       "diffTheme": {
         "label": "Tema do Diff",
         "follow": "Seguir UI",

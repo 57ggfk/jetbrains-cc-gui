@@ -429,6 +429,12 @@
         "reset": "Reset",
         "hint": "Customize the chat area background color. Leave empty to follow the theme default."
       },
+      "chatBarColor": {
+        "label": "Header & Status Bar Color",
+        "custom": "Custom",
+        "reset": "Reset",
+        "hint": "Use one theme color for the session header and task status bar. Leave empty to follow the current UI theme."
+      },
       "diffTheme": {
         "label": "Diff Theme",
         "follow": "Follow UI",
