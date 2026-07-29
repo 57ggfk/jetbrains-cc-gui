@@ -24,8 +24,11 @@ import { extractMarkdownContent } from '../utils/copyUtils';
 import type { ClaudeMessage, TodoItem, ToolResultBlock } from '../types';
 import type { useMessageProcessing, useFileChanges, useSubagents, useFileChangesManagement, useModelProviderState, useMessageQueue } from '../hooks';
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
+import { CodexPetStatusBridge } from './codexPet/CodexPetStatusBridge';
+import { shouldToggleCodexPet } from './codexPet/petState';
+import { useCodexPetPreference } from './codexPet/useCodexPetPreference';
 
-type SubagentHistoryGetter = (key: string) => ReturnType<typeof useMessages>['subagentHistories'][string] | undefined;
+type SubagentHistoryMap = ReturnType<typeof useMessages>['subagentHistories'];
 type ProviderState = ReturnType<typeof useModelProviderState>;
 type MessageQueueValue = ReturnType<typeof useMessageQueue>['queue'];
 type SubagentList = ReturnType<typeof useSubagents>;
@@ -35,6 +38,7 @@ type FileChangeMgmt = ReturnType<typeof useFileChangesManagement>;
 export interface ChatScreenProps {
   // Computed message data
   mergedMessages: ClaudeMessage[];
+  sessionTitle: string;
   getMessageText: (message: ClaudeMessage) => string;
   getContentBlocks: ReturnType<typeof useMessageProcessing>['getContentBlocks'];
   findToolResult: (toolUseId?: string, messageIndex?: number) => ToolResultBlock | null;
@@ -44,7 +48,7 @@ export interface ChatScreenProps {
   subagents: SubagentList;
   globalTodos: TodoItem[];
   filteredFileChanges: FileChangeList;
-  subagentHistoryCtxValue: SubagentHistoryGetter;
+  subagentHistoryCtxValue: SubagentHistoryMap;
   sessionIdCtxValue: { currentSessionId: string | null };
 
   // Refs
@@ -122,7 +126,7 @@ export interface ChatScreenProps {
  * Stage 5 of TASK-P1-01.
  */
 export const ChatScreen = ({
-  mergedMessages, getMessageText, getContentBlocks, findToolResult, getToolResultRaw,
+  mergedMessages, sessionTitle, getMessageText, getContentBlocks, findToolResult, getToolResultRaw,
   subagents, globalTodos, filteredFileChanges,
   subagentHistoryCtxValue, sessionIdCtxValue,
   chatInputRef, messagesContainerRef, messagesEndRef, inputAreaRef,
@@ -143,7 +147,7 @@ export const ChatScreen = ({
   messageQueue, onRemoveFromQueue,
 }: ChatScreenProps) => {
   const { t } = useTranslation();
-  const { messages, loading, isThinking, streamingActive, loadingStartTime, subagentHistories } = useMessages();
+  const { messages, status, loading, isThinking, streamingActive, loadingStartTime, subagentHistories } = useMessages();
   const { currentSessionId } = useSession();
   const {
     setSettingsInitialTab, setCurrentView,
@@ -154,6 +158,23 @@ export const ChatScreen = ({
     openChangelogDialog,
     searchOpen, setSearchOpen,
   } = useUIState();
+  const { enabled: petEnabled, toggle: togglePet } = useCodexPetPreference();
+  const codexPetErrorCount = useMemo(
+    () => messages.reduce((count, message) => count + (message.type === 'error' ? 1 : 0), 0),
+    [messages],
+  );
+  const handleSubmit = useCallback((content: string, attachments?: Attachment[]) => {
+    if (shouldToggleCodexPet(currentProvider, content, attachments?.length ?? 0)) {
+      togglePet();
+      setDraftInput('');
+      addToast(
+        petEnabled ? t('codexPet.hidden', 'Codex pet hidden') : t('codexPet.shown', 'Codex pet shown'),
+        'success',
+      );
+      return;
+    }
+    onSubmit(content, attachments);
+  }, [addToast, currentProvider, onSubmit, petEnabled, setDraftInput, t, togglePet]);
 
   // Signal that the search hook can listen to for re-scanning. Combines
   // length + last timestamp + streaming flag + last-message content size.
@@ -252,11 +273,23 @@ export const ChatScreen = ({
                     setCurrentView('settings');
                   }}
                   currentProvider={currentProvider}
+                  currentSessionId={currentSessionId}
                 />
               </ToolResultRawContext.Provider>
             </SubagentHistoryContext.Provider>
           </SessionIdContext.Provider>
         </div>
+        <CodexPetStatusBridge
+          active={currentProvider === 'codex' && petEnabled}
+          loading={loading}
+          streamingActive={streamingActive}
+          isThinking={isThinking}
+          status={status}
+          errorCount={codexPetErrorCount}
+          provider={currentProvider}
+          model={selectedModel}
+          tabTitle={sessionTitle.trim() || undefined}
+        />
       </div>
 
       <ScrollControl containerRef={messagesContainerRef} inputAreaRef={inputAreaRef} />
@@ -297,7 +330,7 @@ export const ChatScreen = ({
           }}
           value={draftInput}
           onInput={setDraftInput}
-          onSubmit={onSubmit}
+          onSubmit={handleSubmit}
           onStop={onInterrupt}
           onModeSelect={onModeSelect}
           onModelSelect={onModelSelect}

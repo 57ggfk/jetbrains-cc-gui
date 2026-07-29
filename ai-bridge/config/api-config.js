@@ -126,6 +126,7 @@ function isEnvFlagEnabled(value) {
 // process.env by setModelEnvironmentVariables() each turn.
 const MODEL_ROUTING_ENV_VARS = [
   'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',

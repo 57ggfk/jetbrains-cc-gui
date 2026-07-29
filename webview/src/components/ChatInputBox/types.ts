@@ -295,13 +295,27 @@ export function strip1MContextSuffix(modelId: string | undefined | null): string
   return modelId.replace(/\[1m\]$/i, '');
 }
 
+/**
+ * Fallback Claude model when nothing valid is saved. Must stay in sync with the
+ * entry marked "Use the default model" in CLAUDE_MODELS — never derive this from
+ * CLAUDE_MODELS[0], which is the newest tier and the most likely to be missing
+ * from a user's API relay.
+ */
+export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-4-7';
+
+/**
+ * Retired model IDs → their current-generation replacement. Lookup happens after
+ * the [1m] suffix is stripped, so keys must be base IDs. Without an entry here a
+ * saved retired model fails validation and silently resets to the fallback.
+ */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
-  'claude-opus-4-6[1m]': 'claude-opus-4-6',
+  'claude-sonnet-4-6': 'claude-sonnet-4-7',
+  'claude-opus-4-6': 'claude-opus-4-8',
 };
 
 export function normalizeClaudeModelId(modelId: string | undefined | null): string {
   if (!modelId) {
-    return 'claude-sonnet-4-6';
+    return DEFAULT_CLAUDE_MODEL_ID;
   }
   // First strip any [1m] suffix
   const stripped = strip1MContextSuffix(modelId);
@@ -314,9 +328,19 @@ export function normalizeClaudeModelId(modelId: string | undefined | null): stri
  */
 export const CLAUDE_MODELS: ModelInfo[] = [
   {
+    id: 'claude-fable-5',
+    label: 'Fable 5',
+    description: 'Fable 5 · Most powerful · Mythos-class',
+  },
+  {
+    id: 'claude-opus-5',
+    label: 'Opus 5',
+    description: 'Opus 5 · Latest Opus upgrade',
+  },
+  {
     id: 'claude-opus-4-8',
     label: 'Opus 4.8',
-    description: 'Opus 4.8 · Latest and most capable',
+    description: 'Opus 4.8 · Previous Opus generation',
   },
   {
     id: 'claude-sonnet-5',
@@ -324,14 +348,9 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     description: 'Sonnet 5 · Upgraded Sonnet model',
   },
   {
-    id: 'claude-fable-5',
-    label: 'Fable 5',
-    description: 'Fable 5 · Most powerful · Mythos-class',
-  },
-  {
-    id: 'claude-sonnet-4-6',
-    label: 'Sonnet 4.6',
-    description: 'Sonnet 4.6 · Use the default model',
+    id: 'claude-sonnet-4-7',
+    label: 'Sonnet 4.7',
+    description: 'Sonnet 4.7 · Use the default model',
   },
   {
     id: 'claude-haiku-4-5',
@@ -402,10 +421,12 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
  */
 export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
   'claude-sonnet-5',
+  'claude-sonnet-4-7',
   'claude-sonnet-4-6',
 ]);
 
@@ -414,6 +435,7 @@ export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
  */
 export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
 ]);
 
@@ -422,10 +444,12 @@ export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
  */
 export const MAX_EFFORT_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
   'claude-sonnet-5',
+  'claude-sonnet-4-7',
   'claude-sonnet-4-6',
 ]);
 

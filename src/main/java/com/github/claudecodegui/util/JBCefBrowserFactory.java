@@ -1,10 +1,8 @@
 package com.github.claudecodegui.util;
 
-import com.intellij.ide.plugins.IdeaPluginDescriptor;
-import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.openapi.application.ApplicationInfo;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.jcef.JBCefBrowser;
@@ -36,7 +34,6 @@ public final class JBCefBrowserFactory {
     private static final Logger LOG = Logger.getInstance(JBCefBrowserFactory.class);
     private static final int CONTROL_CHAR_MAX = 0x1F;
     private static final String JCEF_ENABLED_REGISTRY_KEY = "ide.browser.jcef.enabled";
-    private static final PluginId JCEF_PLUGIN_ID = PluginId.getId("com.intellij.modules.jcef");
     private static final ConcurrentMap<Class<?>, Optional<Method>> IS_CLOSED_METHODS = new ConcurrentHashMap<>();
 
     /**
@@ -315,11 +312,13 @@ public final class JBCefBrowserFactory {
     }
 
     private static boolean isAndroidStudioJcefPluginMissing() {
-        String productCode = ApplicationInfo.getInstance().getBuild().getProductCode();
+        var build = ApplicationInfo.getInstance().getBuild();
         boolean supportedOs = SystemInfo.isWindows || SystemInfo.isMac;
-        IdeaPluginDescriptor descriptor = PluginManagerCore.getPlugin(JCEF_PLUGIN_ID);
-        boolean pluginUnavailable = descriptor == null || !descriptor.isEnabled();
-        return "AI".equals(productCode) && supportedOs && pluginUnavailable;
+        boolean separateJcefModule = build.getBaselineVersion() >= 262;
+        return "AI".equals(build.getProductCode())
+                && supportedOs
+                && separateJcefModule
+                && ApplicationManager.getApplication().getService(JcefModuleAvailability.class) == null;
     }
 
     /**

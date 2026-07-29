@@ -31,6 +31,8 @@ public class ClaudeSession {
 
     private final Gson gson = new Gson();
     private final Project project;
+    /** Start time of the latest submitted turn, retained across Webview rebuilds. */
+    private volatile long lastTurnStartedAtMillis;
 
     // Session state manager
     private final com.github.claudecodegui.session.SessionState state;
@@ -130,6 +132,21 @@ public class ClaudeSession {
         }
 
         default void onUserMessageUuidPatched(String content, String uuid) {
+        }
+
+        /**
+         * Called when a Claude Code task_* SDK system event is received
+         * (task_started / task_progress / task_notification).
+         *
+         * <p>Async subagents (Agent/Task tool invoked with run_in_background:true) run
+         * in a background sidechain whose detailed
+         * messages never enter the main SDK stream. The main stream only carries these
+         * lightweight system events, which carry the agent's lifecycle signals: launch,
+         * per-tool progress, and terminal completion (with result + usage). Forwarding
+         * them to the frontend lets the subagent list reflect real running/completed
+         * state instead of being stuck on the launch summary.</p>
+         */
+        default void onTaskEvent(String eventJson) {
         }
     }
 
@@ -457,6 +474,7 @@ public class ClaudeSession {
             String requestedReasoningEffort,
             String requestedCodexFastMode
     ) {
+        lastTurnStartedAtMillis = System.currentTimeMillis();
         String normalizedInput = (input != null) ? input.trim() : "";
         Message userMessage = contextService.buildUserMessage(normalizedInput, attachments);
         sendService.updateSessionStateForSend(userMessage, normalizedInput);
@@ -631,6 +649,14 @@ public class ClaudeSession {
      */
     public String getModel() {
         return state.getModel();
+    }
+
+    /**
+     * Returns the start time of the latest submitted turn, or {@code 0} when
+     * no turn has been submitted yet.
+     */
+    public long getLastTurnStartedAtMillis() {
+        return lastTurnStartedAtMillis;
     }
 
     /**

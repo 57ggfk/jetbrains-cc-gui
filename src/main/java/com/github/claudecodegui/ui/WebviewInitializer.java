@@ -292,19 +292,7 @@ public class WebviewInitializer {
                 return new JBCefJSQuery.Response("ok");
             });
 
-            HtmlLoader htmlLoader = host.getHtmlLoader();
-            String htmlContent = htmlLoader.loadChatHtml();
-
-            // Per-tab provider/model injection: each tab's WebView reads the
-            // same global localStorage snapshot, so without this every tab on
-            // IDE startup overrides the per-tab provider that
-            // ClaudeChatWindow.restorePersistedTabSessionState already wrote to
-            // the session — see issue #1353.
-            ClaudeSession session =
-                    host.getHandlerContext() != null ? host.getHandlerContext().getSession() : null;
-            String tabProvider = session != null ? session.getProvider() : null;
-            String tabModel = session != null ? session.getModel() : null;
-            htmlContent = htmlLoader.injectInitialTabState(htmlContent, tabProvider, tabModel);
+            String htmlContent = loadChatHtmlWithInitialTabState();
 
             // LoadHandler must be registered before loadHTML, otherwise the
             // first frame's onLoadEnd is missed and the JS bridge injection
@@ -725,6 +713,10 @@ public class WebviewInitializer {
     }
 
     private void showJcefNotSupportedPanel(JBCefBrowserFactory.JcefSupportStatus status) {
+        // Terminal state: JCEF is unavailable, so the watchdog has no webview to
+        // monitor. Stop it to avoid spurious recovery cycles after the user
+        // enables JCEF (which requires a restart anyway).
+        host.getWebviewWatchdog().stop();
         String title;
         String solution;
         switch (status) {
@@ -769,10 +761,29 @@ public class WebviewInitializer {
     }
 
     private void showJcefRemoteModeErrorPanel() {
+        // Terminal state: the remote CefServer process is unhealthy, so every
+        // reload/recreate against it will keep throwing the same NPE. Stop the
+        // watchdog so it does not loop back into recreate every cooldown and
+        // re-flash this panel. Recovery requires an IDE restart.
+        host.getWebviewWatchdog().stop();
         JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
             "⚠️",
             ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteError"),
             ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteSolution")
+        );
+        replaceMainContent(panel);
+    }
+
+    /**
+     * Show a generic restart-required panel when webview recovery failed
+     * for non-JCEF-specific reasons (e.g., panel removal, dispose errors).
+     */
+    private void showWebviewRecoveryFailedPanel() {
+        host.getWebviewWatchdog().stop();
+        JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
+            "⚠️",
+            ClaudeCodeGuiBundle.message("toolwindow.jcefRestartRequired"),
+            ClaudeCodeGuiBundle.message("toolwindow.jcefRestartRequiredSolution")
         );
         replaceMainContent(panel);
     }
@@ -917,7 +928,8 @@ public class WebviewInitializer {
             }
             host.setFrontendReady(false);
             try {
-                browser.loadHTML(host.getHtmlLoader().loadChatHtml());
+                LOG.info("[WebviewWatchdog] Reloading webview (" + reason + ")");
+                browser.loadHTML(loadChatHtmlWithInitialTabState());
                 BrowserBridges currentBridges;
                 synchronized (this.bridgeLock) {
                     currentBridges = this.bridges;
@@ -925,12 +937,27 @@ public class WebviewInitializer {
                 if (currentBridges != null && currentBridges.belongsTo(browser)) {
                     scheduleBridgeInjectionRetries(browser, currentBridges);
                 }
+                host.getWebviewWatchdog().resetTimestamps();
                 host.getMainPanel().revalidate();
                 host.getMainPanel().repaint();
             } catch (Exception e) {
-                LOG.warn("[WebviewWatchdog] Reload failed: " + e.getMessage(), e);
+                LOG.warn("[WebviewWatchdog] Reload failed, escalating to recreate: " + e.getMessage(), e);
+                recreateWebview(reason + "_reload_failed");
             }
         });
+    }
+
+    private String loadChatHtmlWithInitialTabState() {
+        HtmlLoader htmlLoader = host.getHtmlLoader();
+        String htmlContent = htmlLoader.loadChatHtml();
+
+        // Each tab reads the same localStorage snapshot. Preserve the session's
+        // provider and model on both initial load and watchdog recovery.
+        ClaudeSession session = host.getHandlerContext() != null
+                ? host.getHandlerContext().getSession() : null;
+        String tabProvider = session != null ? session.getProvider() : null;
+        String tabModel = session != null ? session.getModel() : null;
+        return htmlLoader.injectInitialTabState(htmlContent, tabProvider, tabModel);
     }
 
     /**
@@ -968,6 +995,14 @@ public class WebviewInitializer {
                 mainPanel.repaint();
             } catch (Exception e) {
                 LOG.warn("[WebviewWatchdog] Recreate failed: " + e.getMessage(), e);
+                // An exception reaching here escaped createUIComponents' internal
+                // handler (which already routes JCEF remote NPEs to the restart
+                // panel). mainPanel was already cleared above, so without a
+                // terminal panel the tab would be left permanently blank.
+                // Use a generic restart panel instead of JCEF-remote-specific,
+                // since the error could be from remove/dispose/revalidate rather
+                // than JCEF itself.
+                showWebviewRecoveryFailedPanel();
             }
         });
     }
