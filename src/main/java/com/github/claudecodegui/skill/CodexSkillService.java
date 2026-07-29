@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
@@ -186,6 +187,10 @@ public class CodexSkillService {
      * Scans a directory for skill subdirectories and returns skill metadata as JsonObject.
      */
     public static JsonObject scanSkillsDirectory(String dirPath, String scope) {
+        return scanSkillsDirectory(dirPath, scope, MAX_SKILL_SCAN_NODES);
+    }
+
+    static JsonObject scanSkillsDirectory(String dirPath, String scope, int maxScanNodes) {
         JsonObject skills = new JsonObject();
         Path rootDir = Paths.get(dirPath).toAbsolutePath().normalize();
         File dir = rootDir.toFile();
@@ -206,28 +211,26 @@ public class CodexSkillService {
                             || isSkippedSkillScanDirectory(currentDir))) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
-                    if (++visitedNodes[0] > MAX_SKILL_SCAN_NODES) {
+                    if (++visitedNodes[0] > maxScanNodes) {
                         limitReached[0] = true;
                         return FileVisitResult.TERMINATE;
+                    }
+                    if (!currentDir.equals(rootDir) && locateSkillDefinition(currentDir) != null) {
+                        if (entries.size() >= MAX_DISCOVERED_SKILLS) {
+                            limitReached[0] = true;
+                            return FileVisitResult.TERMINATE;
+                        }
+                        entries.add(currentDir.toFile());
+                        return FileVisitResult.SKIP_SUBTREE;
                     }
                     return FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (++visitedNodes[0] > MAX_SKILL_SCAN_NODES) {
+                    if (++visitedNodes[0] > maxScanNodes) {
                         limitReached[0] = true;
                         return FileVisitResult.TERMINATE;
-                    }
-                    if (attrs.isRegularFile() && isSkillDefinitionFile(file)) {
-                        Path skillDir = file.getParent();
-                        if (skillDir != null && !skillDir.equals(rootDir)) {
-                            if (entries.size() >= MAX_DISCOVERED_SKILLS) {
-                                limitReached[0] = true;
-                                return FileVisitResult.TERMINATE;
-                            }
-                            entries.add(skillDir.toFile());
-                        }
                     }
                     return FileVisitResult.CONTINUE;
                 }
@@ -271,11 +274,8 @@ public class CodexSkillService {
             }
 
             // Store skillPath (SKILL.md path) for config.toml operations
-            Path skillMd = entry.toPath().resolve("SKILL.md");
-            if (!Files.exists(skillMd)) {
-                skillMd = entry.toPath().resolve("skill.md");
-            }
-            if (Files.exists(skillMd)) {
+            Path skillMd = locateSkillDefinition(entry.toPath());
+            if (skillMd != null) {
                 skill.addProperty("skillPath", skillMd.toString());
             }
 
@@ -302,13 +302,13 @@ public class CodexSkillService {
         );
     }
 
-    private static boolean isSkillDefinitionFile(Path path) {
-        Path fileNamePath = path.getFileName();
-        if (fileNamePath == null) {
-            return false;
+    private static Path locateSkillDefinition(Path skillDir) {
+        Path upper = skillDir.resolve("SKILL.md");
+        if (Files.isRegularFile(upper, LinkOption.NOFOLLOW_LINKS)) {
+            return upper;
         }
-        String fileName = fileNamePath.toString();
-        return "SKILL.md".equals(fileName) || "skill.md".equals(fileName);
+        Path lower = skillDir.resolve("skill.md");
+        return Files.isRegularFile(lower, LinkOption.NOFOLLOW_LINKS) ? lower : null;
     }
 
     private static boolean containsHiddenPathSegment(Path rootDir, Path skillDir) {
