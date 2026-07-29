@@ -295,13 +295,27 @@ export function strip1MContextSuffix(modelId: string | undefined | null): string
   return modelId.replace(/\[1m\]$/i, '');
 }
 
+/**
+ * Fallback Claude model when nothing valid is saved. Must stay in sync with the
+ * entry marked "Use the default model" in CLAUDE_MODELS — never derive this from
+ * CLAUDE_MODELS[0], which is the newest tier and the most likely to be missing
+ * from a user's API relay.
+ */
+export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-4-7';
+
+/**
+ * Retired model IDs → their current-generation replacement. Lookup happens after
+ * the [1m] suffix is stripped, so keys must be base IDs. Without an entry here a
+ * saved retired model fails validation and silently resets to the fallback.
+ */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
-  'claude-opus-4-6[1m]': 'claude-opus-4-6',
+  'claude-sonnet-4-6': 'claude-sonnet-4-7',
+  'claude-opus-4-6': 'claude-opus-4-8',
 };
 
 export function normalizeClaudeModelId(modelId: string | undefined | null): string {
   if (!modelId) {
-    return 'claude-sonnet-4-7';
+    return DEFAULT_CLAUDE_MODEL_ID;
   }
   // First strip any [1m] suffix
   const stripped = strip1MContextSuffix(modelId);
