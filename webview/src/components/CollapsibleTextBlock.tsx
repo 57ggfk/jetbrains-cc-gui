@@ -97,7 +97,8 @@ function extractAtFilePath(
   return { rawPath, lineStart, lineEnd };
 }
 
-function convertAtFileRefsToLinks(text: string): string {
+/** @visibleForTesting */
+export function convertAtFileRefsToLinks(text: string): string {
   if (!text || !text.includes('@')) {
     return escapeHtml(text);
   }
