@@ -91,7 +91,9 @@ public class ClaudeHistoryReader {
 
         public ProjectInfo(String path) {
             this.path = path;
-            this.name = path != null ? Paths.get(path).getFileName().toString() : "Root";
+            // getFileName() returns null for filesystem roots ("/", "C:\", UNC share roots)
+            Path fileName = path != null ? Paths.get(path).getFileName() : null;
+            this.name = fileName != null ? fileName.toString() : "";
             if (this.name.isEmpty()) {
                 this.name = "Root";
             }
