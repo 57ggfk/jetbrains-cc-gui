@@ -304,6 +304,7 @@
       "manage": "मॉडल प्रबंधन",
       "pricing": {
         "title": "मूल्य (USD प्रति 1M tokens)",
+        "optionalLabel": "वैकल्पिक",
         "hint": "वैकल्पिक। उस token प्रकार के लिए डिफ़ॉल्ट दर उपयोग करने हेतु फ़ील्ड खाली छोड़ें।",
         "inputLabel": "इनपुट",
         "outputLabel": "आउटपुट",

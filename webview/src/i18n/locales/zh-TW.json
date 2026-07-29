@@ -304,6 +304,7 @@
       "manage": "管理模型",
       "pricing": {
         "title": "價格（美元/百萬 tokens）",
+        "optionalLabel": "非必填",
         "hint": "選填。留空某項會使用該 token 類型的預設費率。",
         "inputLabel": "輸入",
         "outputLabel": "輸出",

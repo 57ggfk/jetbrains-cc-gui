@@ -304,6 +304,7 @@
       "manage": "Gestionar modelos",
       "pricing": {
         "title": "Precio (USD por 1M tokens)",
+        "optionalLabel": "Opcional",
         "hint": "Opcional. Deja un campo vacío para usar la tarifa predeterminada de ese tipo de token.",
         "inputLabel": "Entrada",
         "outputLabel": "Salida",

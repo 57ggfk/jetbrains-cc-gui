@@ -326,6 +326,7 @@
       "manage": "모델 관리",
       "pricing": {
         "title": "가격(USD/100만 토큰)",
+        "optionalLabel": "선택",
         "hint": "선택 사항입니다. 비워 두면 해당 토큰 유형의 기본 요금을 사용합니다.",
         "inputLabel": "입력",
         "outputLabel": "출력",

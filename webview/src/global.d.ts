@@ -1050,6 +1050,20 @@ interface Window {
   import_preview_result?: (dataOrStr: string | { providers?: unknown }) => void;
 
   /**
+   * Codex cc-switch import preview result callback. Mirrors import_preview_result
+   * but is Codex-scoped so the Codex panel (mounted alongside the Claude panel)
+   * owns its own import channel without colliding with the Claude flow.
+   */
+  codex_import_preview_result?: (dataOrStr: string | { providers?: unknown }) => void;
+
+  /**
+   * Codex cc-switch import notification callback (type, title, message),
+   * used for success/error/info toasts during Codex import. Codex-scoped to
+   * avoid double toasts from the shared backend_notification channel.
+   */
+  codex_cc_switch_notification?: (...args: unknown[]) => void;
+
+  /**
    * Backend notification callback (variadic for backward compatibility).
    * Modern callers pass (type, title, message); legacy callers pass a single
    * JSON string or object with shape { type, title, message }.

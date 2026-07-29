@@ -304,6 +304,7 @@
       "manage": "モデル管理",
       "pricing": {
         "title": "料金（USD/100万トークン）",
+        "optionalLabel": "任意",
         "hint": "任意です。空欄の項目はそのトークン種別の既定レートを使用します。",
         "inputLabel": "入力",
         "outputLabel": "出力",
