@@ -7,13 +7,13 @@ import java.util.Map;
 
 /**
  * Single source of truth for Claude built-in pricing, model normalization, and
- * user-configured pricing resolution. Both {@code ClaudeUsageAggregator} (Usage
+ * user-configured pricing resolution. Usage-cost consumers (Usage
  * Statistics) and {@code UsageCostCalculator} (per-turn footer) resolve pricing
  * through here so the two can never disagree.
  */
 public final class ClaudePricingTable {
 
-    public static final String DEFAULT_MODEL = "claude-sonnet-4-6";
+    public static final String DEFAULT_MODEL = "claude-sonnet-4-7";
 
     private static final ClaudePricing DEFAULT_PRICING = new ClaudePricing(3.0, 15.0, 3.75, 0.30);
     private static final ClaudePricing TIERED_SONNET_PRICING = new ClaudePricing(3.0, 15.0, 3.75, 0.30, 6.0, 22.5, 7.5, 0.60);

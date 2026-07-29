@@ -9,6 +9,12 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+vi.mock('./shared/ProviderModelIcon', () => ({
+  ProviderModelIcon: ({ providerId }: { providerId?: string }) => (
+    <span data-provider-icon={providerId} />
+  ),
+}));
+
 const createProvider = (): ProviderConfig => ({
   id: 'provider-zhipu',
   name: 'Zhipu',
@@ -90,6 +96,9 @@ describe('ProviderDialog', () => {
 
     // Model mapping should remain visible
     expect(screen.getByText('settings.provider.dialog.modelMapping')).toBeTruthy();
+    expect(screen.queryByRole('radio', { name: 'settings.provider.presets.qwen' })).toBeNull();
+    expect(document.querySelector('[data-provider-icon="bailian-coding"]')).toBeTruthy();
+    expect(document.querySelector('[data-provider-icon="opencode-go"]')).toBeTruthy();
   });
 
   it('editing provider with unrecognized proxy URL still shows model mapping', () => {

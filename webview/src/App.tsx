@@ -148,6 +148,7 @@ const App = () => {
   const {
     currentProvider, selectedModel, permissionMode,
     selectedAgent, sdkStatusLoaded, currentSdkInstalled,
+    claudeSdkMeetsMinimum,
     currentProviderRef,
     activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
     reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
@@ -263,7 +264,7 @@ const App = () => {
     loadHistorySession, deleteHistorySession, deleteHistorySessions, exportHistorySession,
     toggleFavoriteSession, updateHistoryTitle, applyHistoryTitleLocal, convertToCliSession,
   } = useSessionManagement({
-    messages, loading, historyData, currentSessionId, currentSessionIdRef,
+    messages, loading, historyData, currentSessionId, currentSessionIdRef, currentProvider,
     setHistoryData, setMessages, setCurrentView, setCurrentSessionId,
     setCustomSessionTitle, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens,
     setStatus, setLoading, setIsThinking, setStreamingActive,
@@ -413,6 +414,34 @@ const App = () => {
     setCurrentView('settings');
   }, [setSettingsInitialTab, setCurrentView]);
 
+  const handleNavigateToSdkSettings = useCallback(() => {
+    setSettingsInitialTab('dependencies');
+    setCurrentView('settings');
+  }, [setSettingsInitialTab, setCurrentView]);
+
+  // Warn once when the installed Claude SDK is below the Fable minimum (0.3.182)
+  // and the Fable tier is selected. Old CLIs don't recognize the 'fable' alias
+  // and pass it through as a literal model name, which 401s on third-party relays
+  // ("model fable" / "No available channel"). `claudeSdkMeetsMinimum` is `undefined`
+  // until the backend reports status or when the SDK isn't installed — never warn
+  // in those cases to avoid false positives.
+  const fableSdkWarningShownRef = useRef(false);
+  useEffect(() => {
+    if (
+      currentProvider === 'claude' &&
+      currentSdkInstalled &&
+      claudeSdkMeetsMinimum === false &&
+      /fable/i.test(selectedModel ?? '') &&
+      !fableSdkWarningShownRef.current
+    ) {
+      fableSdkWarningShownRef.current = true;
+      addToast(t('chat.sdkTooLowForFable'), 'warning', {
+        label: t('chat.updateSdk'),
+        onClick: handleNavigateToSdkSettings,
+      });
+    }
+  }, [currentProvider, currentSdkInstalled, claudeSdkMeetsMinimum, selectedModel, addToast, t, handleNavigateToSdkSettings]);
+
   // ── Rewind handlers ──
   const {
     handleRewindConfirm, handleRewindCancel,
@@ -468,6 +497,7 @@ const App = () => {
       ) : currentView === 'chat' ? (
         <ChatScreen
           mergedMessages={mergedMessages}
+          sessionTitle={sessionTitle}
           getMessageText={getMessageText}
           getContentBlocks={getContentBlocks}
           findToolResult={findToolResult}

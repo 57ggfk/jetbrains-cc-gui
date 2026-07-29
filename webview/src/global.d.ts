@@ -205,6 +205,16 @@ interface Window {
    * Show AskUserQuestion dialog
    */
   showAskUserQuestionDialog?: (json: string) => void;
+  updateCodexPets?: (json: string) => void;
+  updateCodexPetPreview?: (json: string) => void;
+  onCodexPetAssetsChanged?: () => void;
+  updateCodexPetConfig?: (json: string) => void;
+  updatePetdexCatalog?: (json: string) => void;
+  updatePetdexPreview?: (json: string) => void;
+  onCodexPetOperation?: (json: string) => void;
+  updateHatchPetStatus?: (json: string) => void;
+  updateHatchPetReference?: (json: string) => void;
+  onHatchPetCommandPrepared?: (json: string) => void;
 
   /**
    * Show PlanApproval dialog
@@ -294,6 +304,9 @@ interface Window {
    * Update MCP server tools list
    */
   updateMcpServerTools?: (json: string) => void;
+
+  /** Update Codex MCP server tools list. */
+  updateCodexMcpServerTools?: (json: string) => void;
 
   mcpServerToggled?: (json: string) => void;
 
@@ -475,14 +488,9 @@ interface Window {
   skillToggleResult?: (json: string) => void;
 
   /**
-   * Update usage statistics
+   * TokenTracker bridge response callback (correlated by requestId)
    */
-  updateUsageStatistics?: (json: string) => void;
-
-  /**
-   * Pending usage statistics before component mounts
-   */
-  __pendingUsageStatistics?: string;
+  onTokenTrackerResponse?: (json: string) => void;
 
   /**
    * Update slash commands list (from SDK)
@@ -1040,6 +1048,20 @@ interface Window {
    * parsed payload describing the providers detected during import preview.
    */
   import_preview_result?: (dataOrStr: string | { providers?: unknown }) => void;
+
+  /**
+   * Codex cc-switch import preview result callback. Mirrors import_preview_result
+   * but is Codex-scoped so the Codex panel (mounted alongside the Claude panel)
+   * owns its own import channel without colliding with the Claude flow.
+   */
+  codex_import_preview_result?: (dataOrStr: string | { providers?: unknown }) => void;
+
+  /**
+   * Codex cc-switch import notification callback (type, title, message),
+   * used for success/error/info toasts during Codex import. Codex-scoped to
+   * avoid double toasts from the shared backend_notification channel.
+   */
+  codex_cc_switch_notification?: (...args: unknown[]) => void;
 
   /**
    * Backend notification callback (variadic for backward compatibility).
