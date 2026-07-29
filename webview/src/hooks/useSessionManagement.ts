@@ -18,6 +18,7 @@ interface UseSessionManagementOptions {
   historyData: HistoryData | null;
   currentSessionId: string | null;
   currentSessionIdRef?: React.MutableRefObject<string | null>;
+  currentProvider?: string;
   setHistoryData: React.Dispatch<React.SetStateAction<HistoryData | null>>;
   setMessages: React.Dispatch<React.SetStateAction<ClaudeMessage[]>>;
   setCurrentView: (view: ViewMode) => void;
@@ -69,6 +70,7 @@ export function useSessionManagement({
   historyData,
   currentSessionId,
   currentSessionIdRef,
+  currentProvider,
   setHistoryData,
   setMessages,
   setCurrentView,
@@ -247,7 +249,7 @@ export function useSessionManagement({
   // Load history session
   const loadHistorySession = useCallback((sessionId: string, provider?: string) => {
     const session = historyDataRef.current?.sessions?.find(s => s.sessionId === sessionId);
-    const effectiveProvider = provider || session?.provider || 'claude';
+    const effectiveProvider = provider || session?.provider || currentProvider || 'claude';
 
     // Re-opening the very session already active: don't interrupt the in-flight
     // turn or wipe the view - just ask the backend to soft-reload the transcript
@@ -277,7 +279,7 @@ export function useSessionManagement({
       provider: effectiveProvider,
     }));
     setCurrentView('chat');
-  }, [beginSessionTransition, loading, setCurrentView, currentSessionId]);
+  }, [beginSessionTransition, currentProvider, loading, setCurrentView, currentSessionId]);
 
   // Delete history session
   const deleteHistorySession = useCallback((sessionId: string) => {
