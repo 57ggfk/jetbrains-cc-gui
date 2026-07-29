@@ -578,6 +578,16 @@ public class DependencyManager {
                 String version = getInstalledVersion(sdk.getId());
                 status.addProperty("installedVersion", version);
                 status.addProperty("version", version); // Also add the version field
+
+                // Surface whether the installed version meets the SDK's minimum required
+                // version (e.g. Claude SDK >= 0.3.182 for the Fable tier). The frontend uses
+                // this to warn users before they hit a "model fable" 401 on old CLIs that
+                // don't recognize the alias.
+                String minRequired = sdk.getMinRequiredVersion();
+                if (minRequired != null && version != null && !version.isEmpty()) {
+                    status.addProperty("minimumVersion", minRequired);
+                    status.addProperty("meetsMinimumVersion", compareVersions(version, minRequired) >= 0);
+                }
             }
 
             result.add(sdk.getId(), status);
