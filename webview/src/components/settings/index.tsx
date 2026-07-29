@@ -198,6 +198,8 @@ const SettingsView = ({
     askUserQuestionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
     handleAskUserQuestionNotificationEnabledChange,
+    detailedOutputEnabled,
+    handleDetailedOutputEnabledChange,
     permissionDialogTimeoutSeconds,
     handlePermissionDialogTimeoutChange,
     commitAiConfig,
@@ -536,6 +538,8 @@ const SettingsView = ({
               onTaskCompletionNotificationEnabledChange={handleTaskCompletionNotificationEnabledChange}
               askUserQuestionNotificationEnabled={askUserQuestionNotificationEnabled}
               onAskUserQuestionNotificationEnabledChange={handleAskUserQuestionNotificationEnabledChange}
+              detailedOutputEnabled={detailedOutputEnabled}
+              onDetailedOutputEnabledChange={handleDetailedOutputEnabledChange}
               permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}
               onPermissionDialogTimeoutChange={handlePermissionDialogTimeoutChange}
             />
@@ -567,9 +571,9 @@ const SettingsView = ({
             <DependencySection addToast={addToast} isActive={currentTab === 'dependencies'} />
           </div>
 
-          {/* Usage statistics */}
+          {/* Usage statistics (vendored TokenTracker dashboard) */}
           <div style={currentTab === 'usage' ? BLOCK_STYLE : NONE_STYLE}>
-            <UsageSection currentProvider={currentProvider} />
+            <UsageSection />
           </div>
 
           {/* MCP servers */}
@@ -633,6 +637,7 @@ const SettingsView = ({
           {/* Prompts */}
           <div style={currentTab === 'prompts' ? BLOCK_STYLE : NONE_STYLE}>
             <PromptSection
+              currentProvider={currentProvider}
               onSuccess={(msg) => addToast(msg, 'success')}
             />
           </div>

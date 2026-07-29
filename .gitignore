@@ -80,3 +80,6 @@ logs/*.log
 
 .codex
 .opencode
+
+# Playwright MCP local test artifacts
+.playwright-mcp/
