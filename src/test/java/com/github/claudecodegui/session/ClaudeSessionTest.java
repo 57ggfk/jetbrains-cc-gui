@@ -27,6 +27,13 @@ public class ClaudeSessionTest {
     }
 
     @Test
+    public void hasNoTurnStartTimestampBeforeFirstSubmission() {
+        ClaudeSession session = new ClaudeSession(null, null, null);
+
+        assertEquals(0L, session.getLastTurnStartedAtMillis());
+    }
+
+    @Test
     public void interruptDoesNotResetAReplacementChannel() throws Exception {
         BlockingCodexBridge bridge = new BlockingCodexBridge(false);
         ClaudeSession session = new ClaudeSession(null, null, bridge);
