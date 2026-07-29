@@ -20,6 +20,7 @@ import java.util.List;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class CodexHistoryReaderRefactorTest {
@@ -72,6 +73,29 @@ public class CodexHistoryReaderRefactorTest {
             assertTrue(session.title.contains("review"));
             assertTrue(session.title.endsWith("..."));
             assertTrue(parser.isValidSession(session));
+        } finally {
+            deleteDirectory(sessionsDir);
+        }
+    }
+
+    @Test
+    public void parserSkipsSubagentSession() throws IOException {
+        Path sessionsDir = Files.createTempDirectory("codex-history-subagent-parser");
+        try {
+            Path sessionFile = writeSessionFile(
+                    sessionsDir,
+                    "session-subagent",
+                    line("2026-03-10T10:00:00Z", "session_meta",
+                            "{\"cwd\":\"/workspace/demo\",\"source\":{\"subagent\":{\"thread_spawn\":{"
+                                    + "\"parent_thread_id\":\"session-parent\",\"depth\":1}}}}"),
+                    line("2026-03-10T10:01:00Z", "event_msg",
+                            "{\"type\":\"user_message\",\"message\":\"Inherited parent context\"}"),
+                    line("2026-03-10T10:02:00Z", "response_item", "{\"type\":\"message\"}")
+            );
+
+            CodexHistoryParser parser = new CodexHistoryParser(new Gson());
+
+            assertNull(parser.parseSessionFile(sessionFile));
         } finally {
             deleteDirectory(sessionsDir);
         }
