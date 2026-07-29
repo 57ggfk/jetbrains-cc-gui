@@ -147,6 +147,7 @@
     "pet": {
       "title": "Codex Pet",
       "description": "Manage the pet that floats across the current IDE window.",
+      "temporarilyUnavailable": "The pet feature is temporarily unavailable. Stay tuned.",
       "scopeLabel": "Configuration scope",
       "scopeDescriptions": {
         "project": "Use independent pet, size, opacity, and bubble settings for this project.",

@@ -72,10 +72,11 @@ const SettingsView = ({
 }: SettingsViewProps) => {
   const { t } = useTranslation();
   const isCodexMode = currentProvider === 'codex';
-  // Codex mode: align with Claude capabilities for settings tabs
+  // Codex mode: align with Claude capabilities for settings tabs.
+  // The Codex pet entry is temporarily disabled (grayed out, not clickable).
   const disabledTabs = useMemo<SettingsTab[]>(
-    () => [],
-    [isCodexMode]
+    () => ['pet'],
+    []
   );
 
   // Page state: tabs, toasts, sidebar collapse, alert dialog
@@ -455,7 +456,12 @@ const SettingsView = ({
           isCollapsed={isCollapsed}
           onToggleCollapse={toggleManualCollapse}
           disabledTabs={disabledTabs}
-          onDisabledTabClick={() => addToast(t('settings.codexFeatureUnavailable'), 'warning')}
+          onDisabledTabClick={(tab) =>
+            addToast(
+              t(tab === 'pet' ? 'settings.pet.temporarilyUnavailable' : 'settings.codexFeatureUnavailable'),
+              'warning'
+            )
+          }
         />
 
         {/* Content area */}

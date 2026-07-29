@@ -147,6 +147,7 @@
     "pet": {
       "title": "Codex 宠物",
       "description": "管理悬浮在当前 IDE 窗口中的宠物。",
+      "temporarilyUnavailable": "宠物功能暂时不可用，敬请期待。",
       "scopeLabel": "配置范围",
       "scopeDescriptions": {
         "project": "为当前项目单独设置宠物、大小、透明度和气泡。",
