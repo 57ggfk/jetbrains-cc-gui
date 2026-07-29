@@ -179,10 +179,11 @@ public class ClaudeChatWindow {
         this.webviewWatchdog = new WebviewWatchdog(
                 mainPanel,
                 () -> browser,
-                htmlLoader,
+                () -> webviewInitializer.reloadWebview("watchdog_reload"),
                 () -> webviewInitializer.recreateWebview("watchdog_recreate"),
                 () -> disposed,
-                () -> streamCoalescer.isStreamActive()
+                () -> streamCoalescer.isStreamActive(),
+                () -> frontendReady
         );
 
         this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge);
@@ -380,7 +381,7 @@ public class ClaudeChatWindow {
             if (disposed || !isSelectedContent()) {
                 return;
             }
-            webviewWatchdog.resetTimestamps();
+            webviewWatchdog.markTabActivated();
 
             JBCefBrowser currentBrowser = browser;
             if (currentBrowser != null) {
