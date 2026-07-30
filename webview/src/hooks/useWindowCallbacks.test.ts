@@ -51,6 +51,7 @@ describe('useWindowCallbacks integration', () => {
     setPermissionDialogTimeoutSeconds: vi.fn(),
     setSdkStatus: vi.fn(),
     setSdkStatusLoaded: vi.fn(),
+    setSdkStatusError: vi.fn(),
     setIsRewinding: vi.fn(),
     setRewindDialogOpen: vi.fn(),
     setCurrentRewindRequest: vi.fn(),
@@ -111,10 +112,14 @@ describe('useWindowCallbacks integration', () => {
     window.__pendingSessionTransitionToast = undefined;
     window.__deniedToolIds = new Set();
     window.sendToJava = vi.fn();
+    window.updateDependencyStatus = undefined;
+    delete (window as unknown as Record<string, unknown>)._appUpdateDependencyStatus;
     // The drain test inspects this slot; if a prior test (or earlier suite run)
     // leaked a value onto window we'd see a false-positive drain. Wipe it here
     // so each test starts from a clean pending state.
     delete (window as unknown as Record<string, unknown>).__pendingPermissionDialogTimeout;
+    delete (window as unknown as Record<string, unknown>).__pendingDependencyStatus;
+    window.__dependencyStatusState = 'pending';
   });
 
   /** Stub timer/rAF globals to execute synchronously for streaming tests. */
@@ -130,6 +135,53 @@ describe('useWindowCallbacks integration', () => {
     });
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
   };
+
+  it('settles dependency status errors without reporting an SDK installation state', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify({
+        success: false,
+        error: 'status unavailable',
+      }));
+    });
+
+    expect(opts.setSdkStatus).not.toHaveBeenCalled();
+    expect(opts.setSdkStatusLoaded).toHaveBeenCalledWith(false);
+    expect(opts.setSdkStatusError).toHaveBeenCalledWith('status unavailable');
+    expect(window.__dependencyStatusState).toBe('error');
+  });
+
+  it('clears a dependency status error after a valid response', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+    const status = {
+      'codex-sdk': { status: 'installed' },
+    };
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify(status));
+    });
+
+    expect(opts.setSdkStatus).toHaveBeenCalledWith(status);
+    expect(opts.setSdkStatusLoaded).toHaveBeenCalledWith(true);
+    expect(opts.setSdkStatusError).toHaveBeenCalledWith(null);
+    expect(window.__dependencyStatusState).toBe('ready');
+  });
+
+  it('settles malformed dependency status payloads as errors', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateDependencyStatus?.('{invalid');
+    });
+
+    expect(opts.setSdkStatusLoaded).toHaveBeenCalledWith(false);
+    expect(opts.setSdkStatusError).toHaveBeenCalledWith(expect.any(String));
+    expect(window.__dependencyStatusState).toBe('error');
+  });
 
   afterEach(() => {
     vi.unstubAllGlobals();

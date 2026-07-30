@@ -81,6 +81,8 @@
     "disabled": "Deshabilitado",
     "sdkNotInstalled": "{{provider}} SDK no está instalado. Instala el SDK para comenzar a chatear.",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "No se pudo comprobar el estado del SDK.",
+    "retrySdkStatus": "Reintentar",
     "openSourceBanner": "Este proyecto garantiza ser 100% de código abierto y gratuito (cuidado con los proyectos pirateados)",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "Enlace copiado al portapapeles — pégalo en el navegador para acceder ⭐",

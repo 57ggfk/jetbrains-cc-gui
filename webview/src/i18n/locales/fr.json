@@ -81,6 +81,8 @@
     "disabled": "Désactivé",
     "sdkNotInstalled": "{{provider}} SDK n'est pas installé. Veuillez installer le SDK pour commencer à discuter.",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "Impossible de vérifier l'état du SDK.",
+    "retrySdkStatus": "Réessayer",
     "openSourceBanner": "Ce projet est garanti 100% open source et gratuit (méfiez-vous des projets piratés)",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "Lien copié dans le presse-papiers — collez-le dans votre navigateur pour y accéder ⭐",

@@ -7,6 +7,12 @@ const DEPENDENCY_STATUS_FAST_RETRY_ATTEMPTS = 3;
 const DEPENDENCY_STATUS_FAST_RETRY_INTERVAL_MS = 2000;
 const DEPENDENCY_STATUS_SLOW_RETRY_INTERVAL_MS = 5000;
 
+export const DEPENDENCY_STATUS_REQUEST_STARTED_EVENT = 'ccg:dependency-status-request-started';
+
+let cancelActiveDependencyStatusRequest: (() => void) | undefined;
+let dependencyStatusRefreshQueued = false;
+let dependencyStatusRefreshScheduled = false;
+
 export function waitForBridge(callback: () => void): () => void {
   let attempt = 0;
   let completed = false;
@@ -53,26 +59,55 @@ export function waitForBridge(callback: () => void): () => void {
   return cancel;
 }
 
-export function requestDependencyStatusUntilReady(): () => void {
+function startDependencyStatusRequest(force: boolean): () => void {
+  if (!force && cancelActiveDependencyStatusRequest) {
+    return () => {};
+  }
+
+  if (!force && (
+    window.__dependencyStatusState === 'ready'
+    || window.__dependencyStatusState === 'error'
+  )) {
+    return () => {};
+  }
+
+  cancelActiveDependencyStatusRequest?.();
+  window.__dependencyStatusState = 'pending';
+  window.dispatchEvent(new Event(DEPENDENCY_STATUS_REQUEST_STARTED_EVENT));
+
   let attempt = 0;
   let cancelled = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const cancel = () => {
+  const cancel = (event?: Event) => {
+    if (cancelled) {
+      return;
+    }
     cancelled = true;
+    if (event?.type === 'pagehide') {
+      dependencyStatusRefreshQueued = false;
+    }
     if (retryTimer !== undefined) {
       clearTimeout(retryTimer);
       retryTimer = undefined;
     }
+    window.removeEventListener('pagehide', cancel);
+    if (cancelActiveDependencyStatusRequest === cancel) {
+      cancelActiveDependencyStatusRequest = undefined;
+    }
   };
+
+  cancelActiveDependencyStatusRequest = cancel;
 
   const request = () => {
     if (cancelled) {
       return;
     }
-    if (window.__dependencyStatusReady) {
+    if (
+      window.__dependencyStatusState === 'ready'
+      || window.__dependencyStatusState === 'error'
+    ) {
       cancel();
-      window.removeEventListener('pagehide', cancel);
       return;
     }
 
@@ -91,6 +126,42 @@ export function requestDependencyStatusUntilReady(): () => void {
   window.addEventListener('pagehide', cancel, { once: true });
   request();
   return cancel;
+}
+
+export function requestDependencyStatusUntilSettled(): () => void {
+  return startDependencyStatusRequest(false);
+}
+
+export function retryDependencyStatusRequest(): () => void {
+  dependencyStatusRefreshQueued = false;
+  return startDependencyStatusRequest(true);
+}
+
+export function requestFreshDependencyStatus(): () => void {
+  if (cancelActiveDependencyStatusRequest && window.__dependencyStatusState === 'pending') {
+    dependencyStatusRefreshQueued = true;
+    return () => {
+      dependencyStatusRefreshQueued = false;
+    };
+  }
+  return retryDependencyStatusRequest();
+}
+
+export function settleDependencyStatusRequest(state: 'ready' | 'error'): void {
+  window.__dependencyStatusState = state;
+  cancelActiveDependencyStatusRequest?.();
+  if (!dependencyStatusRefreshQueued || dependencyStatusRefreshScheduled) {
+    return;
+  }
+  dependencyStatusRefreshScheduled = true;
+  queueMicrotask(() => {
+    dependencyStatusRefreshScheduled = false;
+    if (!dependencyStatusRefreshQueued) {
+      return;
+    }
+    dependencyStatusRefreshQueued = false;
+    startDependencyStatusRequest(true);
+  });
 }
 
 export function isDependencyStatusResponse(payload: unknown): boolean {

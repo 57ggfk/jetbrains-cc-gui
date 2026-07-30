@@ -81,6 +81,8 @@
     "disabled": "無効",
     "sdkNotInstalled": "{{provider}} SDKがインストールされていません。チャットを開始するにはSDKをインストールしてください。",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "SDK の状態を確認できませんでした。",
+    "retrySdkStatus": "再試行",
     "openSourceBanner": "このプロジェクトは100%オープンソースかつ無料を保証します（海賊版プロジェクトにご注意ください）",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "リポジトリのURLをクリップボードにコピーしました。ブラウザに貼り付けてアクセスできます ⭐",

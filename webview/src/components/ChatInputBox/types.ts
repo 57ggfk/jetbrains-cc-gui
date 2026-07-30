@@ -663,6 +663,10 @@ export interface ChatInputBoxProps {
   sdkInstalled?: boolean;
   /** SDK status loading state */
   sdkStatusLoading?: boolean;
+  /** SDK status query failed; chat remains available until the user retries */
+  sdkStatusError?: boolean;
+  /** Retry SDK status query callback */
+  onRetrySdkStatus?: () => void;
   /** Go to install SDK callback */
   onInstallSdk?: () => void;
   /** Show toast message */

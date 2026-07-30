@@ -17,7 +17,7 @@ import { installRuntimeProviderDispatchers } from './utils/runtimeProviderCapabi
 import { sendBridgeEvent } from './utils/bridge';
 import { debugLog } from './utils/debug';
 import { forceWebviewRepaint } from './utils/forceWebviewRepaint';
-import { requestDependencyStatusUntilReady, waitForBridge } from './utils/bridgeStartup';
+import { requestDependencyStatusUntilSettled, waitForBridge } from './utils/bridgeStartup';
 import type { UiFontConfig, CodeFontConfig } from './types/uiFontConfig';
 
 // Silence noisy console output in production (including third-party libs).
@@ -583,7 +583,7 @@ if (typeof window !== 'undefined' && !window.setSessionId) {
 
 // Pre-register updateDependencyStatus to handle backend status responses that arrive before React initializes
 if (typeof window !== 'undefined' && !window.updateDependencyStatus) {
-  window.__dependencyStatusReady = false;
+  window.__dependencyStatusState = 'pending';
   debugLog('[Main] Pre-registering updateDependencyStatus placeholder');
   window.updateDependencyStatus = (json: string) => {
     debugLog('[Main] Storing pending dependency status, length=' + (json ? json.length : 0));
@@ -709,7 +709,7 @@ waitForBridge(() => {
 
   // Ensure SDK dependency status is fetched on initial load (not only after opening Settings).
   debugLog('[Main] Requesting dependency status');
-  requestDependencyStatusUntilReady();
+  requestDependencyStatusUntilSettled();
 
   sendBridgeEvent('get_linkify_capabilities');
 });

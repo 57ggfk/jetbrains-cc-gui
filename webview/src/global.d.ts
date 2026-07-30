@@ -941,7 +941,7 @@ interface Window {
    * Pending dependency status payload before React initialization
    */
   __pendingDependencyStatus?: string;
-  __dependencyStatusReady?: boolean;
+  __dependencyStatusState?: 'pending' | 'ready' | 'error';
   __ccgOnBridgeReady?: () => void;
 
   /**

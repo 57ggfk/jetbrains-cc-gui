@@ -87,7 +87,9 @@ export interface ChatScreenProps {
   selectedModel: ProviderState['selectedModel'];
   permissionMode: ProviderState['permissionMode'];
   selectedAgent: ProviderState['selectedAgent'];
-  sdkStatusLoaded: ProviderState['sdkStatusLoaded'];
+  sdkStatusLoading: ProviderState['sdkStatusLoading'];
+  sdkStatusError: ProviderState['sdkStatusError'];
+  onRetrySdkStatus: ProviderState['retrySdkStatus'];
   currentSdkInstalled: ProviderState['currentSdkInstalled'];
   activeProviderConfig: ProviderState['activeProviderConfig'];
   claudeSettingsAlwaysThinkingEnabled: ProviderState['claudeSettingsAlwaysThinkingEnabled'];
@@ -137,7 +139,7 @@ export const ChatScreen = ({
   onSubmit, onInterrupt, onRewind,
   onNavigateToProviderSettings, onProviderSelect,
   currentProvider, selectedModel, permissionMode, selectedAgent,
-  sdkStatusLoaded, currentSdkInstalled,
+  sdkStatusLoading, sdkStatusError, onRetrySdkStatus, currentSdkInstalled,
   activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
   reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
   longContextEnabled, usagePercentage, usageUsedTokens, usageMaxTokens,
@@ -323,7 +325,9 @@ export const ChatScreen = ({
           alwaysThinkingEnabled={activeProviderConfig?.settingsConfig?.alwaysThinkingEnabled ?? claudeSettingsAlwaysThinkingEnabled}
           placeholder={sendShortcut === 'cmdEnter' ? t('chat.inputPlaceholderCmdEnter') : t('chat.inputPlaceholderEnter')}
           sdkInstalled={currentSdkInstalled}
-          sdkStatusLoading={!sdkStatusLoaded}
+          sdkStatusLoading={sdkStatusLoading}
+          sdkStatusError={sdkStatusError !== null}
+          onRetrySdkStatus={onRetrySdkStatus}
           onInstallSdk={() => {
             setSettingsInitialTab('dependencies');
             setCurrentView('settings');
