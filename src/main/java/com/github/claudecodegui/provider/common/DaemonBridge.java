@@ -148,6 +148,10 @@ public class DaemonBridge {
                 isRunning.set(true);
                 lastSuccessfulStart.set(System.currentTimeMillis());
                 markDaemonActivity();
+                // Reset the heartbeat baseline so a stale timestamp from the previous
+                // (dead) daemon does not cause the watchdog to immediately kill this
+                // freshly spawned process before it has responded to its first heartbeat.
+                lastHeartbeatResponse.set(System.currentTimeMillis());
 
                 LOG.info("[DaemonBridge] Daemon process started, PID: " + daemonProcess.pid());
 
@@ -720,6 +724,15 @@ public class DaemonBridge {
         long uptime = System.currentTimeMillis() - lastSuccessfulStart.get();
         if (uptime > RESTART_WINDOW_MS) {
             restartAttempts.set(0);
+        }
+
+        // Interrupt the previous heartbeat thread (unless we ARE that thread)
+        // so it cannot wake up during the restart and kill the new process
+        // using a stale heartbeat timestamp. A new heartbeat thread is created
+        // by start().
+        Thread oldHeartbeat = heartbeatThread;
+        if (oldHeartbeat != null && oldHeartbeat != Thread.currentThread()) {
+            oldHeartbeat.interrupt();
         }
 
         int attempts = restartAttempts.incrementAndGet();
