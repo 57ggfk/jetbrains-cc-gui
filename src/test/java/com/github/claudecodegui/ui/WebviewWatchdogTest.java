@@ -63,6 +63,15 @@ public class WebviewWatchdogTest {
     }
 
     @Test
+    public void timestampResetDoesNotRestoreStartupRecoveryBudget() {
+        WebviewWatchdog watchdog = exhaustedWatchdog();
+
+        watchdog.resetTimestamps();
+
+        assertFalse(watchdog.tryAcquireRecoveryPermit(false));
+    }
+
+    @Test
     public void tabActivationRestoresStartupRecoveryBudget() {
         WebviewWatchdog watchdog = exhaustedWatchdog();
 

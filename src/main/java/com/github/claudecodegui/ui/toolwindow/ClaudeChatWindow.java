@@ -760,7 +760,7 @@ public class ClaudeChatWindow {
         });
     }
 
-    void handleJavaScriptMessage(String message) {
+    void handleJavaScriptMessage(int pageGeneration, String message) {
         if (message == null) {
             return;
         }
@@ -770,7 +770,8 @@ public class ClaudeChatWindow {
         // gate monitor is held only across dispatch - dispose runs its heavy teardown (browser
         // disposal, process cleanup) outside it, so the JCEF thread never waits on the EDT. That
         // keeps the old dispatch/dispose lifecycle exclusion without the EDT<->JCEF deadlock.
-        this.dispatchGate.runInDispatch(() -> this.handleJavaScriptMessageLocked(message));
+        this.dispatchGate.runInDispatch(
+                pageGeneration, () -> this.handleJavaScriptMessageLocked(message));
     }
 
     /**
@@ -1475,8 +1476,13 @@ public class ClaudeChatWindow {
             }
 
             @Override
-            public void handleJavaScriptMessage(String msg) {
-                ClaudeChatWindow.this.handleJavaScriptMessage(msg);
+            public void activatePageGeneration(int pageGeneration) {
+                dispatchGate.activatePageGeneration(pageGeneration);
+            }
+
+            @Override
+            public void handleJavaScriptMessage(int pageGeneration, String msg) {
+                ClaudeChatWindow.this.handleJavaScriptMessage(pageGeneration, msg);
             }
 
             @Override

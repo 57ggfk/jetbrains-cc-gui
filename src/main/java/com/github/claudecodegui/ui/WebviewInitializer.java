@@ -53,8 +53,9 @@ public class WebviewInitializer {
 
     private static final Logger LOG = Logger.getInstance(WebviewInitializer.class);
     private static final String NODE_PATH_PROPERTY_KEY = "claude.code.node.path";
-    private static final int BRIDGE_INJECTION_RETRY_INTERVAL_MS = 100;
-    private static final int BRIDGE_INJECTION_MAX_ATTEMPTS = 50;
+    private static final int BRIDGE_INJECTION_FAST_RETRY_INTERVAL_MS = 100;
+    private static final int BRIDGE_INJECTION_SLOW_RETRY_INTERVAL_MS = 1000;
+    private static final int BRIDGE_INJECTION_FAST_RETRY_ATTEMPTS = 50;
 
     /**
      * Host interface providing access to window-level dependencies.
@@ -69,7 +70,8 @@ public class WebviewInitializer {
         JBCefBrowser getBrowser();
         void setBrowser(JBCefBrowser browser);
         boolean isDisposed();
-        void handleJavaScriptMessage(String message);
+        void activatePageGeneration(int pageGeneration);
+        void handleJavaScriptMessage(int pageGeneration, String message);
         WebviewWatchdog getWebviewWatchdog();
         boolean isFrontendReady();
         void setFrontendReady(boolean ready);
@@ -85,6 +87,7 @@ public class WebviewInitializer {
      * native callback handles during a watchdog recreation.
      */
     private volatile BrowserBridges bridges;
+    private int pageGeneration;
 
     public WebviewInitializer(WebviewHost host) {
         this.host = host;
@@ -226,9 +229,14 @@ public class WebviewInitializer {
             }
             currentBridges.jsQuery.addHandler((msg) -> {
                 boolean dispatch;
+                int pageGeneration;
+                String message;
                 synchronized (this.bridgeLock) {
-                    dispatch = !host.isDisposed() && this.bridges == currentBridges
-                            && currentBridges.isCurrentFor(createdBrowser);
+                    pageGeneration = currentBridges.getPageGeneration();
+                    message = unwrapBridgeMessage(msg, pageGeneration);
+                    dispatch = message != null && !host.isDisposed()
+                            && this.bridges == currentBridges
+                            && currentBridges.isCurrentPage(createdBrowser, pageGeneration);
                 }
                 // Dispatch outside bridgeLock: handleJavaScriptMessage serializes on the dispatch
                 // gate (MessageDispatchGate), not the host window, and dispose() runs
@@ -239,9 +247,9 @@ public class WebviewInitializer {
                 // that races this gap is caught by the gate: runInDispatch refuses once
                 // beginTeardown has flipped disposed.
                 if (dispatch) {
-                    host.handleJavaScriptMessage(msg);
+                    host.handleJavaScriptMessage(pageGeneration, message);
                 }
-                return new JBCefJSQuery.Response(dispatch ? "ok" : "closed");
+                return new JBCefJSQuery.Response(dispatch ? "ok" : "stale");
             });
 
             currentBridges.clipboardPathQuery.addHandler((msg) -> {
@@ -292,7 +300,10 @@ public class WebviewInitializer {
                 return new JBCefJSQuery.Response("ok");
             });
 
-            String htmlContent = loadChatHtmlWithInitialTabState();
+            int initialPageGeneration = beginPageLoad(currentBridges);
+            host.activatePageGeneration(initialPageGeneration);
+            host.setFrontendReady(false);
+            String htmlContent = loadChatHtmlWithInitialTabState(initialPageGeneration);
 
             // LoadHandler must be registered before loadHTML, otherwise the
             // first frame's onLoadEnd is missed and the JS bridge injection
@@ -313,25 +324,29 @@ public class WebviewInitializer {
                     String injection;
                     String shiftEscInjection;
                     String clipboardPathInjection;
+                    int pageGeneration;
                     synchronized (WebviewInitializer.this.bridgeLock) {
                         if (WebviewInitializer.this.bridges != currentBridges
                                 || !currentBridges.isCurrentFor(createdBrowser)) {
                             return;
                         }
-                        injection = "window.sendToJava = function(msg) { "
-                                + currentBridges.jsQuery.inject("msg") + " };";
-                        shiftEscInjection = buildShiftEscInjection(
-                                currentBridges.hidePanelQuery.inject("''",
-                                        "function() {}",
-                                        "function() {}"));
-                        clipboardPathInjection =
+                        pageGeneration = currentBridges.getPageGeneration();
+                        injection = guardPageScript(pageGeneration,
+                                buildBridgeInjection(currentBridges.jsQuery.inject(
+                                        buildBridgeMessageExpression(pageGeneration))));
+                        shiftEscInjection = guardPageScript(pageGeneration,
+                                buildShiftEscInjection(
+                                        currentBridges.hidePanelQuery.inject("''",
+                                                "function() {}",
+                                                "function() {}")));
+                        clipboardPathInjection = guardPageScript(pageGeneration,
                             "window.getClipboardFilePath = function() {" +
                             "  return new Promise((resolve) => {" +
                             "    " + currentBridges.clipboardPathQuery.inject("''",
                                 "function(response) { resolve(response); }",
                                 "function(error_code, error_message) { console.error('Failed to get clipboard path:', error_message); resolve(''); }") +
                             "  });" +
-                            "};";
+                            "};");
                     }
 
                     try {
@@ -365,7 +380,7 @@ public class WebviewInitializer {
                             cefBrowser.executeJavaScript(consoleForward, cefBrowser.getURL(), 0);
                         }
 
-                        injectFrontendConfiguration(cefBrowser);
+                        injectFrontendConfiguration(cefBrowser, pageGeneration);
 
                         LOG.debug("onLoadEnd completed, waiting for frontend_ready signal");
                     } catch (Exception | LinkageError e) {
@@ -380,7 +395,7 @@ public class WebviewInitializer {
             // registered, so it is safe to load the HTML - the first frame's
             // onLoadEnd will fire and inject the sendToJava bridge as expected.
             createdBrowser.loadHTML(htmlContent);
-            scheduleBridgeInjectionRetries(createdBrowser, currentBridges);
+            scheduleBridgeInjectionRetries(createdBrowser, currentBridges, initialPageGeneration);
 
             JComponent browserComponent = createdBrowser.getComponent();
 
@@ -468,25 +483,60 @@ public class WebviewInitializer {
 
     private void scheduleBridgeInjectionRetries(
             JBCefBrowser browser,
-            BrowserBridges currentBridges
+            BrowserBridges currentBridges,
+            int pageGeneration
     ) {
         AtomicInteger attempts = new AtomicInteger();
-        Timer timer = new Timer(BRIDGE_INJECTION_RETRY_INTERVAL_MS, null);
+        Timer timer = new Timer(BRIDGE_INJECTION_FAST_RETRY_INTERVAL_MS, null);
         timer.addActionListener(event -> {
             int attempt = attempts.incrementAndGet();
-            if (host.isDisposed() || host.isFrontendReady()
-                    || attempt > BRIDGE_INJECTION_MAX_ATTEMPTS) {
-                currentBridges.stopBridgeInjectionTimer();
+            if (host.isDisposed() || host.isFrontendReady()) {
+                currentBridges.stopBridgeInjectionTimer(timer);
                 return;
             }
-            if (!injectBridgeFallback(browser, currentBridges, attempt)) {
-                currentBridges.stopBridgeInjectionTimer();
+            timer.setDelay(bridgeInjectionRetryDelayMs(attempt + 1));
+            if (!injectBridgeFallback(browser, currentBridges, pageGeneration, attempt)) {
+                currentBridges.stopBridgeInjectionTimer(timer);
             }
         });
-        timer.setInitialDelay(BRIDGE_INJECTION_RETRY_INTERVAL_MS);
+        timer.setInitialDelay(BRIDGE_INJECTION_FAST_RETRY_INTERVAL_MS);
         currentBridges.setBridgeInjectionTimer(timer);
-        LOG.info("[JCEF] Scheduled fallback bridge injection retries for remote-mode startup");
+        LOG.info("[JCEF] Scheduled fallback bridge injection retries until frontend readiness");
         timer.start();
+    }
+
+    private int beginPageLoad(BrowserBridges expectedBridges) {
+        synchronized (this.bridgeLock) {
+            if (this.bridges != expectedBridges) {
+                throw new IllegalStateException("Cannot load a page for stale browser bridges");
+            }
+            int nextPageGeneration = nextPageGeneration();
+            expectedBridges.beginPageLoad(nextPageGeneration);
+            return nextPageGeneration;
+        }
+    }
+
+    private int invalidateCurrentPage() {
+        synchronized (this.bridgeLock) {
+            int nextPageGeneration = nextPageGeneration();
+            if (this.bridges != null) {
+                this.bridges.beginPageLoad(nextPageGeneration);
+            }
+            return nextPageGeneration;
+        }
+    }
+
+    int nextPageGeneration() {
+        synchronized (this.bridgeLock) {
+            this.pageGeneration += 1;
+            return this.pageGeneration;
+        }
+    }
+
+    static int bridgeInjectionRetryDelayMs(int attempt) {
+        return attempt <= BRIDGE_INJECTION_FAST_RETRY_ATTEMPTS
+                ? BRIDGE_INJECTION_FAST_RETRY_INTERVAL_MS
+                : BRIDGE_INJECTION_SLOW_RETRY_INTERVAL_MS;
     }
 
     /**
@@ -494,34 +544,38 @@ public class WebviewInitializer {
      * browser-scoped onLoadEnd callback. Retry the minimum bootstrap directly
      * in the active page so the frontend can establish its Java bridge and
      * request dependency status. The timer stops as soon as frontend_ready is
-     * received, or after a bounded five-second startup window.
+     * received. Retries slow down after the initial five-second startup window.
      */
     private boolean injectBridgeFallback(
             JBCefBrowser browser,
             BrowserBridges currentBridges,
+            int pageGeneration,
             int attempt
     ) {
         String bridgeInjection;
         String shiftEscInjection;
         String clipboardPathInjection;
         synchronized (this.bridgeLock) {
-            if (this.bridges != currentBridges || !currentBridges.isCurrentFor(browser)) {
+            if (this.bridges != currentBridges
+                    || !currentBridges.isCurrentPage(browser, pageGeneration)) {
                 return false;
             }
-            bridgeInjection = "window.sendToJava = function(msg) { "
-                    + currentBridges.jsQuery.inject("msg") + " };";
-            shiftEscInjection = buildShiftEscInjection(
-                    currentBridges.hidePanelQuery.inject("''",
-                            "function() {}",
-                            "function() {}"));
-            clipboardPathInjection =
+            bridgeInjection = guardPageScript(pageGeneration,
+                    buildBridgeInjection(currentBridges.jsQuery.inject(
+                            buildBridgeMessageExpression(pageGeneration))));
+            shiftEscInjection = guardPageScript(pageGeneration,
+                    buildShiftEscInjection(
+                            currentBridges.hidePanelQuery.inject("''",
+                                    "function() {}",
+                                    "function() {}")));
+            clipboardPathInjection = guardPageScript(pageGeneration,
                     "window.getClipboardFilePath = function() {" +
                     "  return new Promise((resolve) => {" +
                     "    " + currentBridges.clipboardPathQuery.inject("''",
                             "function(response) { resolve(response); }",
                             "function(error_code, error_message) { console.error('Failed to get clipboard path:', error_message); resolve(''); }") +
                     "  });" +
-                    "};";
+                    "};");
         }
 
         try {
@@ -531,14 +585,17 @@ public class WebviewInitializer {
             cefBrowser.executeJavaScript(shiftEscInjection, url, 0);
             cefBrowser.executeJavaScript(clipboardPathInjection, url, 0);
 
-            injectFrontendConfiguration(cefBrowser);
+            injectFrontendConfiguration(cefBrowser, pageGeneration);
             if (attempt == 1) {
                 LOG.info("[JCEF] Executed first fallback bridge injection for remote-mode startup");
             }
             return true;
-        } catch (Exception | LinkageError e) {
+        } catch (Exception e) {
             LOG.debug("Fallback bridge injection failed on attempt " + attempt + ": " + e.getMessage(), e);
-            return attempt < BRIDGE_INJECTION_MAX_ATTEMPTS;
+            return true;
+        } catch (LinkageError e) {
+            LOG.warn("Fallback bridge injection is unavailable: " + e.getMessage(), e);
+            return false;
         }
     }
 
@@ -553,6 +610,31 @@ public class WebviewInitializer {
                 "    }" +
                 "  }, true);" +
                 "}";
+    }
+
+    static String buildBridgeInjection(String queryInvocation) {
+        return "window.sendToJava = function(msg) { " + queryInvocation + " };"
+                + "if (typeof window.__ccgOnBridgeReady === 'function') {"
+                + "  window.__ccgOnBridgeReady();"
+                + "}";
+    }
+
+    static String buildBridgeMessageExpression(int pageGeneration) {
+        return "'__CCG_PAGE_GENERATION__:" + pageGeneration + ":' + String(msg)";
+    }
+
+    static String unwrapBridgeMessage(String message, int expectedPageGeneration) {
+        String prefix = "__CCG_PAGE_GENERATION__:" + expectedPageGeneration + ":";
+        if (message == null || !message.startsWith(prefix)) {
+            return null;
+        }
+        return message.substring(prefix.length());
+    }
+
+    static String guardPageScript(int pageGeneration, String script) {
+        return "if (window.__CCG_PAGE_GENERATION__ === " + pageGeneration + ") {"
+                + script
+                + "}";
     }
 
     static List<String> buildConfigurationInjections(
@@ -585,7 +667,7 @@ public class WebviewInitializer {
         );
     }
 
-    private void injectFrontendConfiguration(CefBrowser cefBrowser) {
+    private void injectFrontendConfiguration(CefBrowser cefBrowser, int pageGeneration) {
         String editorFontConfig = FontConfigService.getEditorFontConfigJson();
         String uiFontConfig = FontConfigService.getResolvedUiFontConfigJson(
                 host.getHandlerContext().getSettingsService());
@@ -595,11 +677,20 @@ public class WebviewInitializer {
                 host.getHandlerContext().getSettingsService());
         String url = cefBrowser.getURL();
 
-        for (String injection : buildConfigurationInjections(
-                editorFontConfig, uiFontConfig, codeFontConfig, languageConfig)) {
-            cefBrowser.executeJavaScript(injection, url, 0);
-        }
-        LOG.info("[WebviewConfigSync] Frontend configuration injected");
+        String configurationScript = joinConfigurationInjections(buildConfigurationInjections(
+                editorFontConfig, uiFontConfig, codeFontConfig, languageConfig));
+        String idempotentConfigurationScript =
+                "if (window.__CCG_CONFIG_GENERATION__ !== " + pageGeneration + ") {"
+                + configurationScript
+                + "window.__CCG_CONFIG_GENERATION__ = " + pageGeneration + ";"
+                + "}";
+        cefBrowser.executeJavaScript(
+                guardPageScript(pageGeneration, idempotentConfigurationScript), url, 0);
+        LOG.debug("[WebviewConfigSync] Frontend configuration injected");
+    }
+
+    static String joinConfigurationInjections(List<String> injections) {
+        return String.join(";", injections) + ";";
     }
 
     private JBCefJSQuery.Response handleClipboardPathRequest() {
@@ -926,17 +1017,22 @@ public class WebviewInitializer {
                 recreateWebview(reason + "_no_browser");
                 return;
             }
-            host.setFrontendReady(false);
             try {
                 LOG.info("[WebviewWatchdog] Reloading webview (" + reason + ")");
-                browser.loadHTML(loadChatHtmlWithInitialTabState());
                 BrowserBridges currentBridges;
+                int pageGeneration;
                 synchronized (this.bridgeLock) {
                     currentBridges = this.bridges;
+                    if (currentBridges == null || !currentBridges.belongsTo(browser)) {
+                        recreateWebview(reason + "_stale_bridges");
+                        return;
+                    }
+                    pageGeneration = beginPageLoad(currentBridges);
                 }
-                if (currentBridges != null && currentBridges.belongsTo(browser)) {
-                    scheduleBridgeInjectionRetries(browser, currentBridges);
-                }
+                host.activatePageGeneration(pageGeneration);
+                host.setFrontendReady(false);
+                browser.loadHTML(loadChatHtmlWithInitialTabState(pageGeneration));
+                scheduleBridgeInjectionRetries(browser, currentBridges, pageGeneration);
                 host.getWebviewWatchdog().resetTimestamps();
                 host.getMainPanel().revalidate();
                 host.getMainPanel().repaint();
@@ -947,7 +1043,7 @@ public class WebviewInitializer {
         });
     }
 
-    private String loadChatHtmlWithInitialTabState() {
+    private String loadChatHtmlWithInitialTabState(int pageGeneration) {
         HtmlLoader htmlLoader = host.getHtmlLoader();
         String htmlContent = htmlLoader.loadChatHtml();
 
@@ -957,7 +1053,8 @@ public class WebviewInitializer {
                 ? host.getHandlerContext().getSession() : null;
         String tabProvider = session != null ? session.getProvider() : null;
         String tabModel = session != null ? session.getModel() : null;
-        return htmlLoader.injectInitialTabState(htmlContent, tabProvider, tabModel);
+        String htmlWithTabState = htmlLoader.injectInitialTabState(htmlContent, tabProvider, tabModel);
+        return htmlLoader.injectPageGeneration(htmlWithTabState, pageGeneration);
     }
 
     /**
@@ -967,6 +1064,8 @@ public class WebviewInitializer {
         ApplicationManager.getApplication().invokeLater(() -> {
             if (host.isDisposed()) { return; }
 
+            int invalidationGeneration = invalidateCurrentPage();
+            host.activatePageGeneration(invalidationGeneration);
             host.setFrontendReady(false);
             JPanel mainPanel = host.getMainPanel();
             JBCefBrowser browser = host.getBrowser();
@@ -1035,6 +1134,7 @@ public class WebviewInitializer {
         private final JBCefJSQuery clipboardPathQuery;
         private final JBCefJSQuery hidePanelQuery;
         private Timer bridgeInjectionTimer;
+        private int pageGeneration;
 
         private BrowserBridges(JBCefBrowser browser) {
             this.browser = browser;
@@ -1057,6 +1157,15 @@ public class WebviewInitializer {
             this.hidePanelQuery = createdHidePanelQuery;
         }
 
+        private synchronized void beginPageLoad(int newPageGeneration) {
+            stopBridgeInjectionTimer();
+            this.pageGeneration = newPageGeneration;
+        }
+
+        private synchronized int getPageGeneration() {
+            return pageGeneration;
+        }
+
         private boolean belongsTo(JBCefBrowser browser) {
             return this.browser == browser;
         }
@@ -1070,6 +1179,10 @@ public class WebviewInitializer {
             return this.belongsTo(browser);
         }
 
+        private synchronized boolean isCurrentPage(JBCefBrowser browser, int expectedPageGeneration) {
+            return this.belongsTo(browser) && pageGeneration == expectedPageGeneration;
+        }
+
         private synchronized void setBridgeInjectionTimer(Timer timer) {
             stopBridgeInjectionTimer();
             this.bridgeInjectionTimer = timer;
@@ -1078,6 +1191,13 @@ public class WebviewInitializer {
         private synchronized void stopBridgeInjectionTimer() {
             if (this.bridgeInjectionTimer != null) {
                 this.bridgeInjectionTimer.stop();
+                this.bridgeInjectionTimer = null;
+            }
+        }
+
+        private synchronized void stopBridgeInjectionTimer(Timer expectedTimer) {
+            expectedTimer.stop();
+            if (this.bridgeInjectionTimer == expectedTimer) {
                 this.bridgeInjectionTimer = null;
             }
         }

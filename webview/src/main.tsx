@@ -17,6 +17,7 @@ import { installRuntimeProviderDispatchers } from './utils/runtimeProviderCapabi
 import { sendBridgeEvent } from './utils/bridge';
 import { debugLog } from './utils/debug';
 import { forceWebviewRepaint } from './utils/forceWebviewRepaint';
+import { requestDependencyStatusUntilReady, waitForBridge } from './utils/bridgeStartup';
 import type { UiFontConfig, CodeFontConfig } from './types/uiFontConfig';
 
 // Silence noisy console output in production (including third-party libs).
@@ -582,6 +583,7 @@ if (typeof window !== 'undefined' && !window.setSessionId) {
 
 // Pre-register updateDependencyStatus to handle backend status responses that arrive before React initializes
 if (typeof window !== 'undefined' && !window.updateDependencyStatus) {
+  window.__dependencyStatusReady = false;
   debugLog('[Main] Pre-registering updateDependencyStatus placeholder');
   window.updateDependencyStatus = (json: string) => {
     debugLog('[Main] Storing pending dependency status, length=' + (json ? json.length : 0));
@@ -692,24 +694,6 @@ ReactDOM.createRoot(document.getElementById('app') as HTMLElement).render(
  */
 setupScaleRecovery();
 
-function waitForBridge(callback: () => void, maxAttempts = 50, interval = 100) {
-  let attempts = 0;
-
-  const check = () => {
-    attempts++;
-    if (window.sendToJava) {
-      debugLog('[Main] Bridge available after ' + attempts + ' attempts');
-      callback();
-    } else if (attempts < maxAttempts) {
-      setTimeout(check, interval);
-    } else {
-      console.error('[Main] Bridge not available after ' + maxAttempts + ' attempts');
-    }
-  };
-
-  check();
-}
-
 // Once the bridge is available, initialize slash commands
 waitForBridge(() => {
   debugLog('[Main] Bridge ready, setting up slash commands');
@@ -725,7 +709,7 @@ waitForBridge(() => {
 
   // Ensure SDK dependency status is fetched on initial load (not only after opening Settings).
   debugLog('[Main] Requesting dependency status');
-  sendBridgeEvent('get_dependency_status');
+  requestDependencyStatusUntilReady();
 
   sendBridgeEvent('get_linkify_capabilities');
 });

@@ -128,6 +128,18 @@ public class HtmlLoader {
         return html;
     }
 
+    /** Injects the page generation before the frontend bundle executes. */
+    public String injectPageGeneration(String html, int pageGeneration) {
+        String scriptInjection = "\n    <script>window.__CCG_PAGE_GENERATION__ = "
+                + pageGeneration + ";</script>";
+        int headIndex = html.indexOf("<head>");
+        if (headIndex == -1) {
+            return html;
+        }
+        int insertPos = headIndex + "<head>".length();
+        return html.substring(0, insertPos) + scriptInjection + html.substring(insertPos);
+    }
+
     private static String escapeForSingleQuotedJs(String value) {
         // Restricted set — provider/model IDs only contain safe chars in
         // practice, but a malicious settings.json provider list could carry

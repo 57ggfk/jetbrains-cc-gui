@@ -12,6 +12,7 @@ import { downloadJSON } from '../../../utils/exportMarkdown';
 import { releaseSessionTransition } from '../sessionTransition';
 import { drainAndRequestDependencyStatus } from '../settingsBootstrap';
 import { sendBridgeEvent } from '../../../utils/bridge';
+import { isDependencyStatusResponse } from '../../../utils/bridgeStartup';
 
 // Matches session-titles-service.cjs#updateTitle, which rejects longer titles.
 const CUSTOM_TITLE_MAX_LENGTH = 50;
@@ -92,8 +93,13 @@ export function registerSessionAndSdkCallbacks(
   window.updateDependencyStatus = (jsonStr: string) => {
     try {
       const data = JSON.parse(jsonStr);
+      if (!isDependencyStatusResponse(data)) {
+        console.error('[Frontend] Dependency status request failed:', data);
+        return;
+      }
       setSdkStatus(data);
       setSdkStatusLoaded(true);
+      window.__dependencyStatusReady = true;
     } catch (error) {
       console.error('[Frontend] Failed to parse dependency status:', error);
     }
