@@ -17,6 +17,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -672,7 +674,7 @@ public class HistoryMessageInjector {
     /**
      * 将前端统一消息结构恢复为会话内存消息结构。
      */
-    private static ClaudeSession.Message toSessionMessage(JsonObject frontendMsg) {
+    static ClaudeSession.Message toSessionMessage(JsonObject frontendMsg) {
         if (frontendMsg == null || !frontendMsg.has("type")) {
             return null;
         }
@@ -700,9 +702,40 @@ public class HistoryMessageInjector {
         JsonObject raw = frontendMsg.has("raw") && frontendMsg.get("raw").isJsonObject()
             ? frontendMsg.getAsJsonObject("raw")
             : null;
-        return raw != null
+        ClaudeSession.Message restored = raw != null
             ? new ClaudeSession.Message(messageType, content, raw.deepCopy())
             : new ClaudeSession.Message(messageType, content);
+        Long sourceTimestamp = parseFrontendTimestamp(frontendMsg);
+        if (sourceTimestamp != null) {
+            restored.timestamp = sourceTimestamp;
+        }
+        return restored;
+    }
+
+    private static Long parseFrontendTimestamp(JsonObject frontendMsg) {
+        if (!frontendMsg.has("timestamp") || frontendMsg.get("timestamp").isJsonNull()) {
+            return null;
+        }
+        JsonElement timestamp = frontendMsg.get("timestamp");
+        if (!timestamp.isJsonPrimitive()) {
+            return null;
+        }
+        try {
+            if (timestamp.getAsJsonPrimitive().isNumber()) {
+                return timestamp.getAsLong();
+            }
+            String value = timestamp.getAsString();
+            if (value == null || value.isBlank()) {
+                return null;
+            }
+            try {
+                return Long.parseLong(value);
+            } catch (NumberFormatException ignored) {
+                return Instant.parse(value).toEpochMilli();
+            }
+        } catch (NumberFormatException | DateTimeParseException ignored) {
+            return null;
+        }
     }
 
     /**

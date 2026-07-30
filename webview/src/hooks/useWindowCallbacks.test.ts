@@ -1200,6 +1200,30 @@ describe('useWindowCallbacks integration', () => {
     expect(updatedState['task-1'].messages[0].content[0].text).toBe('final result');
   });
 
+  it('reassembles oversized subagent history before updating state', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+    const payload = JSON.stringify({
+      success: true,
+      toolUseId: 'task-1',
+      messages: [{ type: 'assistant', content: 'large result' }],
+    });
+    const midpoint = Math.floor(payload.length / 2);
+
+    act(() => {
+      window.onSubagentHistoryChunk?.('transfer-1', payload.slice(0, midpoint), false);
+    });
+    expect(opts.setSubagentHistories).not.toHaveBeenCalled();
+
+    act(() => {
+      window.onSubagentHistoryChunk?.('transfer-1', payload.slice(midpoint), true);
+    });
+
+    expect(opts.setSubagentHistories).toHaveBeenCalledTimes(1);
+    const updater = (opts.setSubagentHistories as any).mock.calls[0][0] as (prev: Record<string, unknown>) => Record<string, any>;
+    expect(updater({})['task-1'].messages[0].content).toBe('large result');
+  });
+
   // ===== onStreamEnd idempotency (dual-path delivery) =====
 
   describe('onStreamEnd idempotency', () => {

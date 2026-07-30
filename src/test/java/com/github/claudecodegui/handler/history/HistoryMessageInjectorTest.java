@@ -1,6 +1,7 @@
 package com.github.claudecodegui.handler.history;
 
 import com.github.claudecodegui.handler.core.HandlerContext;
+import com.github.claudecodegui.session.ClaudeSession;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -98,6 +99,26 @@ public class HistoryMessageInjectorTest {
         assertEquals(1, result.size());
         assertEquals("user", result.get(0).get("type").getAsString());
         assertEquals("hello", result.get(0).get("content").getAsString());
+    }
+
+    @Test
+    public void restoresIsoTimestampWhenHydratingCodexMessagesIntoSessionState() {
+        JsonObject frontendMessage = frontendMessage("assistant", "done", "text");
+        frontendMessage.addProperty("timestamp", "2026-07-28T12:50:07.123Z");
+
+        ClaudeSession.Message restored = HistoryMessageInjector.toSessionMessage(frontendMessage);
+
+        assertEquals(1785243007123L, restored.timestamp);
+    }
+
+    @Test
+    public void restoresNumericStringTimestampWhenHydratingSessionState() {
+        JsonObject frontendMessage = frontendMessage("user", "hello", "text");
+        frontendMessage.addProperty("timestamp", "1785243007123");
+
+        ClaudeSession.Message restored = HistoryMessageInjector.toSessionMessage(frontendMessage);
+
+        assertEquals(1785243007123L, restored.timestamp);
     }
 
     @Test
