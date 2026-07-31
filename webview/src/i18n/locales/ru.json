@@ -81,6 +81,8 @@
     "disabled": "Отключено",
     "sdkNotInstalled": "SDK {{provider}} не установлен. Установите SDK для начала работы.",
     "sdkStatusLoading": "Проверка статуса SDK...",
+    "sdkStatusUnavailable": "Не удалось проверить состояние SDK.",
+    "retrySdkStatus": "Повторить",
     "openSourceBanner": "Этот проект гарантированно 100% с открытым исходным кодом и бесплатный (остерегайтесь пиратских проектов)",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "Ссылка скопирована в буфер обмена — вставьте её в браузере, чтобы открыть ⭐",

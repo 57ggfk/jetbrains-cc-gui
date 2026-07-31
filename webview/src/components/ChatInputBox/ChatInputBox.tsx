@@ -102,6 +102,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       onToggleStatusPanel,
       sdkInstalled = true, // Default to true to avoid disabling input box on initial state
       sdkStatusLoading = false, // SDK status loading state
+      sdkStatusError = false,
+      onRetrySdkStatus,
       onInstallSdk,
       addToast,
       messageQueue,
@@ -590,8 +592,10 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
 
         <ChatInputBoxHeader
           sdkStatusLoading={sdkStatusLoading}
+          sdkStatusError={sdkStatusError}
           sdkInstalled={sdkInstalled}
           currentProvider={currentProvider}
+          onRetrySdkStatus={onRetrySdkStatus}
           onInstallSdk={onInstallSdk}
           t={t}
           attachments={attachments}

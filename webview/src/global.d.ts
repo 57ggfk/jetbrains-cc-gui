@@ -941,6 +941,8 @@ interface Window {
    * Pending dependency status payload before React initialization
    */
   __pendingDependencyStatus?: string;
+  __dependencyStatusState?: 'pending' | 'ready' | 'error';
+  __ccgOnBridgeReady?: () => void;
 
   /**
    * Pending streaming enabled status before React initialization

@@ -81,6 +81,8 @@
     "disabled": "비활성화됨",
     "sdkNotInstalled": "{{provider}} SDK가 설치되어 있지 않습니다. 채팅을 시작하려면 SDK를 설치해주세요.",
     "sdkStatusLoading": "SDK 상태 확인 중...",
+    "sdkStatusUnavailable": "SDK 상태를 확인할 수 없습니다.",
+    "retrySdkStatus": "다시 시도",
     "openSourceBanner": "이 프로젝트는 100% 오픈소스이며 무료입니다 (유사품에 주의하세요)",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "저장소 주소를 클립보드에 복사했습니다. 브라우저에 붙여넣어 방문하세요 ⭐",
