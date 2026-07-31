@@ -280,6 +280,12 @@
         "reset": "Réinitialiser",
         "hint": "Personnaliser la couleur de fond de la zone de chat. Laisser vide pour suivre le thème par défaut."
       },
+      "chatBarColor": {
+        "label": "Couleur de l’en-tête et de la barre d’état",
+        "custom": "Personnalisée",
+        "reset": "Réinitialiser",
+        "hint": "Utilisez une couleur commune pour l’en-tête de session et la barre d’état des tâches. Laissez vide pour suivre le thème actuel."
+      },
       "userMsgColor": {
         "label": "Couleur des messages",
         "custom": "Personnalisé",

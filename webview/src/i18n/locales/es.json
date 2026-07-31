@@ -280,6 +280,12 @@
         "reset": "Restablecer",
         "hint": "Personalizar el color de fondo del área de chat. Dejar vacío para seguir el tema predeterminado."
       },
+      "chatBarColor": {
+        "label": "Color del encabezado y la barra de estado",
+        "custom": "Personalizado",
+        "reset": "Restablecer",
+        "hint": "Usa un color de tema para el encabezado de sesión y la barra de estado de tareas. Déjalo vacío para seguir el tema actual."
+      },
       "userMsgColor": {
         "label": "Color de mensajes del usuario",
         "custom": "Personalizado",
