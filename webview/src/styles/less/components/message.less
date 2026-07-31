@@ -902,6 +902,20 @@
     color: inherit;
 }
 
+/* @ file-reference links rendered by CollapsibleTextBlock live in
+   .plain-text-content, not .markdown-content — give them the same
+   treatment: inherit the bubble text color, dotted underline, pointer. */
+.message.user .plain-text-content a.file-link {
+    color: inherit;
+    text-decoration-style: dotted;
+    cursor: pointer;
+}
+
+.message.user .plain-text-content a.file-link:hover {
+    text-decoration-thickness: 2px;
+    opacity: 0.95;
+}
+
 /* 表格容器 - 处理溢出 */
 .markdown-content table {
     border-collapse: collapse;

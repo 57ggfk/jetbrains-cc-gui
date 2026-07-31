@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import DOMPurify from 'dompurify';
 import { openFile } from '../utils/bridge';
 
@@ -40,7 +40,7 @@ function escapeHtml(text: string): string {
  *
  * Scans forward character-by-character, allowing spaces inside the path
  * when the next word segment looks like a path continuation (contains
- * `\`, `/`, or a file extension).  A trailing `#L10-20` line marker is
+ * a path separator: `\` or `/`).  A trailing `#L10-20` line marker is
  * parsed into separate line-start / line-end groups.
  */
 function extractAtFilePath(
@@ -151,7 +151,7 @@ export function convertAtFileRefsToLinks(text: string): string {
       href = encodedPath;
     }
 
-    result += `<a class="file-link" data-linkify="file" href="${escapeHtml(href)}">${escapeHtml(displayText)}</a>`;
+    result += `<a class="file-link" data-linkify="file" href="${escapeHtml(href)}" title="${escapeHtml(rawPath)}">${escapeHtml(displayText)}</a>`;
 
     // Advance past the full match: @ + rawPath + optional #L suffix
     i += 1 + extracted.rawPath.length; // skip '@' + rawPath
@@ -192,10 +192,16 @@ const CollapsibleTextBlock: React.FC<CollapsibleTextBlockProps> = ({ content }) 
   // Sanitize the resulting HTML through DOMPurify as a defense-in-depth measure
   // (all content is already escaped by convertAtFileRefsToLinks, but
   // dangerouslySetInnerHTML warrants a final sanitization pass).
-  const htmlContent = DOMPurify.sanitize(convertAtFileRefsToLinks(displayContent), {
-    ALLOWED_TAGS: ['a'],
-    ALLOWED_ATTR: ['class', 'href', 'data-linkify'],
-  });
+  // Memoized: user messages re-render with every parent update, but the
+  // conversion only depends on displayContent.
+  const htmlContent = useMemo(
+    () =>
+      DOMPurify.sanitize(convertAtFileRefsToLinks(displayContent), {
+        ALLOWED_TAGS: ['a'],
+        ALLOWED_ATTR: ['class', 'href', 'data-linkify', 'title'],
+      }),
+    [displayContent],
+  );
 
   useEffect(() => {
     if (!contentRef.current) return;

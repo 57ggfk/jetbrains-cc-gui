@@ -170,7 +170,7 @@ export function useFileTags({
         // Fall back to simple pattern matching for paths not in pathMappingRef.
         // This handles absolute paths and paths with line numbers.
         // The helper scans forward allowing spaces when the next segment
-        // looks like path continuation (contains \ or / or a file extension).
+        // looks like a path continuation (contains a path separator: \ or /).
         const remainingText = currentText.substring(i);
         const afterAt = remainingText.slice(1); // text after '@'
         let endPos = 0;

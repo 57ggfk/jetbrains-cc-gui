@@ -7,42 +7,42 @@ describe('convertAtFileRefsToLinks', () => {
   it('converts Windows absolute paths', () => {
     const result = convertAtFileRefsToLinks('见 @C:\\src\\app.ts');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="C:\\src\\app.ts">@app.ts</a>'
+      '<a class="file-link" data-linkify="file" href="C:\\src\\app.ts" title="C:\\src\\app.ts">@app.ts</a>'
     );
   });
 
   it('converts POSIX absolute paths', () => {
     const result = convertAtFileRefsToLinks('见 @/home/user/app.ts');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="/home/user/app.ts">@app.ts</a>'
+      '<a class="file-link" data-linkify="file" href="/home/user/app.ts" title="/home/user/app.ts">@app.ts</a>'
     );
   });
 
   it('converts explicit relative paths', () => {
     const result = convertAtFileRefsToLinks('@./src/utils.ts');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="./src/utils.ts">@utils.ts</a>'
+      '<a class="file-link" data-linkify="file" href="./src/utils.ts" title="./src/utils.ts">@utils.ts</a>'
     );
   });
 
   it('converts parent-relative paths', () => {
     const result = convertAtFileRefsToLinks('@../common/base.ts');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="../common/base.ts">@base.ts</a>'
+      '<a class="file-link" data-linkify="file" href="../common/base.ts" title="../common/base.ts">@base.ts</a>'
     );
   });
 
   it('converts project-relative paths', () => {
     const result = convertAtFileRefsToLinks('@src/utils/bridge.ts');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="src/utils/bridge.ts">@bridge.ts</a>'
+      '<a class="file-link" data-linkify="file" href="src/utils/bridge.ts" title="src/utils/bridge.ts">@bridge.ts</a>'
     );
   });
 
   it('converts bare filenames with extension', () => {
     const result = convertAtFileRefsToLinks('@package.json');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="package.json">@package.json</a>'
+      '<a class="file-link" data-linkify="file" href="package.json" title="package.json">@package.json</a>'
     );
   });
 
@@ -51,14 +51,14 @@ describe('convertAtFileRefsToLinks', () => {
   it('converts path with single line number', () => {
     const result = convertAtFileRefsToLinks('@src/app.ts#L42');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="src/app.ts:42">@app.ts#L42</a>'
+      '<a class="file-link" data-linkify="file" href="src/app.ts:42" title="src/app.ts">@app.ts#L42</a>'
     );
   });
 
   it('converts path with line range', () => {
     const result = convertAtFileRefsToLinks('@src/app.ts#L10-20');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="src/app.ts:10-20">@app.ts#L10-20</a>'
+      '<a class="file-link" data-linkify="file" href="src/app.ts:10-20" title="src/app.ts">@app.ts#L10-20</a>'
     );
   });
 
@@ -67,21 +67,21 @@ describe('convertAtFileRefsToLinks', () => {
   it('preserves spaces inside file paths', () => {
     const result = convertAtFileRefsToLinks('@C:\\Users\\John Doe\\file.ts');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="C:\\Users\\John%20Doe\\file.ts">@file.ts</a>'
+      '<a class="file-link" data-linkify="file" href="C:\\Users\\John%20Doe\\file.ts" title="C:\\Users\\John Doe\\file.ts">@file.ts</a>'
     );
   });
 
   it('preserves spaces with line numbers', () => {
     const result = convertAtFileRefsToLinks('@C:\\Users\\John Doe\\file.ts#L10-20');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="C:\\Users\\John%20Doe\\file.ts:10-20">@file.ts#L10-20</a>'
+      '<a class="file-link" data-linkify="file" href="C:\\Users\\John%20Doe\\file.ts:10-20" title="C:\\Users\\John Doe\\file.ts">@file.ts#L10-20</a>'
     );
   });
 
   it('stops collecting at space that is not a path continuation', () => {
     const result = convertAtFileRefsToLinks('请在 @file.ts 中查看');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="file.ts">@file.ts</a>'
+      '<a class="file-link" data-linkify="file" href="file.ts" title="file.ts">@file.ts</a>'
     );
     // "中查看" 不是路径的一部分
     expect(result).toContain('中查看');
@@ -93,7 +93,7 @@ describe('convertAtFileRefsToLinks', () => {
     const result = convertAtFileRefsToLinks('@C:\\src\\C#\\App.cs#L10');
     // rawPath 应为 C:\src\C#\App.cs (lastIndexOf 取最后一个 #，匹配 #L10 格式)
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="C:\\src\\C#\\App.cs:10">@App.cs#L10</a>'
+      '<a class="file-link" data-linkify="file" href="C:\\src\\C#\\App.cs:10" title="C:\\src\\C#\\App.cs">@App.cs#L10</a>'
     );
   });
 
@@ -135,7 +135,7 @@ describe('convertAtFileRefsToLinks', () => {
     // @@ 之后的 src/app.ts 不是 @ 开头，不渲染
     // @src/utils.ts 渲染为链接
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="src/utils.ts">@utils.ts</a>'
+      '<a class="file-link" data-linkify="file" href="src/utils.ts" title="src/utils.ts">@utils.ts</a>'
     );
     expect(result).toContain('@@src/app.ts');
   });
@@ -147,17 +147,17 @@ describe('convertAtFileRefsToLinks', () => {
     expect(result).toContain('打开 ');
     expect(result).toContain(' 查看');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="src/app.ts">@app.ts</a>'
+      '<a class="file-link" data-linkify="file" href="src/app.ts" title="src/app.ts">@app.ts</a>'
     );
   });
 
   it('handles multiple @refs in one line', () => {
     const result = convertAtFileRefsToLinks('@a.ts 和 @b.ts');
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="a.ts">@a.ts</a>'
+      '<a class="file-link" data-linkify="file" href="a.ts" title="a.ts">@a.ts</a>'
     );
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="b.ts">@b.ts</a>'
+      '<a class="file-link" data-linkify="file" href="b.ts" title="b.ts">@b.ts</a>'
     );
   });
 
@@ -165,10 +165,10 @@ describe('convertAtFileRefsToLinks', () => {
     const result = convertAtFileRefsToLinks('@a.ts@b.ts');
     // 第一个 @ 消耗 a.ts，第二个 @ 消耗 b.ts
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="a.ts">@a.ts</a>'
+      '<a class="file-link" data-linkify="file" href="a.ts" title="a.ts">@a.ts</a>'
     );
     expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="b.ts">@b.ts</a>'
+      '<a class="file-link" data-linkify="file" href="b.ts" title="b.ts">@b.ts</a>'
     );
   });
 
