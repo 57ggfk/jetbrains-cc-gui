@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { ClaudeMessage, ClaudeRawMessage, ClaudeContentBlock, ToolResultBlock, SubagentHistoryResponse, SubagentInfo, SubagentStatus, TaskEvent, TaskEventMap } from '../types';
 import { normalizeToolInput } from '../utils/toolInputNormalization';
 import { normalizeToolName } from '../utils/toolConstants';
-import { extractResultText, isAsyncAgentInput } from '../utils/subagentResult';
+import { extractResultText, isAsyncAgentInput, parseSpawnAgentMeta } from '../utils/subagentResult';
 import { useTaskEvents } from '../contexts/SubagentContext';
 
 type GetToolResultRawFn = (toolUseId: string) => ClaudeRawMessage | null;
@@ -124,9 +124,10 @@ export function extractSubagentsFromMessages(
       const taskEvent = taskEvents[toolUseId];
       // isAsync is read via the shared isAsyncAgentInput helper so the
       // StatusPanel list and the inline Agent cards stay in lockstep.
-      const isAsync = isAsyncAgentInput(input);
+      const isAsync = isAsyncAgentInput(input, toolName);
       const status = determineStatus(result, isAsync, taskEvent);
       const resultMetadata = extractResultMetadata(result, getToolResultRaw, toolUseId, taskEvent);
+      const spawnMeta = toolName === 'spawn_agent' ? parseSpawnAgentMeta(input, result) : {};
 
       subagents.push({
         id,
@@ -137,6 +138,8 @@ export function extractSubagentsFromMessages(
         isAsync,
         messageIndex,
         ...resultMetadata,
+        ...(spawnMeta.agentId && { agentId: spawnMeta.agentId }),
+        ...(spawnMeta.agentPath && { agentPath: spawnMeta.agentPath }),
       });
     });
   });
@@ -152,6 +155,7 @@ export function applySubagentHistoryCompletion(
     if (!subagent.isAsync || subagent.status !== 'running') return subagent;
     const history = subagentHistories[subagent.id]
       ?? (subagent.agentId ? subagentHistories[subagent.agentId] : undefined);
+    if (history?.status === 'error') return { ...subagent, status: 'error' as const };
     return history?.completed ? { ...subagent, status: 'completed' as const } : subagent;
   });
 }

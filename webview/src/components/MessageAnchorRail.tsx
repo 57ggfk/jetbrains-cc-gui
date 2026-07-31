@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaudeMessage } from '../types';
-import { getMessageKey } from '../utils/messageUtils';
 
 interface AnchorItem {
   id: string;
@@ -10,6 +9,7 @@ interface AnchorItem {
 
 interface MessageAnchorRailProps {
   messages: ClaudeMessage[];
+  messageKeys: readonly string[];
   /** Number of messages hidden by the collapse feature. Anchors start after this offset. */
   collapsedCount?: number;
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -53,6 +53,7 @@ function getMessagePreview(message: ClaudeMessage): string {
 
 export const MessageAnchorRail = memo(function MessageAnchorRail({
   messages,
+  messageKeys,
   collapsedCount = 0,
   containerRef,
   messageNodeMap,
@@ -88,11 +89,13 @@ export const MessageAnchorRail = memo(function MessageAnchorRail({
     const userMessages: AnchorItem[] = [];
     const startIndex = collapsedCount;
     for (let i = startIndex; i < messages.length; i++) {
-      if (messages[i].type === 'user') {
+      const message = messages[i];
+      const messageKey = messageKeys[i];
+      if (message?.type === 'user' && messageKey) {
         userMessages.push({
-          id: getMessageKey(messages[i], i),
+          id: messageKey,
           position: 0,
-          preview: getMessagePreview(messages[i]),
+          preview: getMessagePreview(message),
         });
       }
     }
@@ -105,7 +108,13 @@ export const MessageAnchorRail = memo(function MessageAnchorRail({
       ...item,
       position: 0.04 + (idx / (visibleMessages.length - 1)) * 0.92,
     }));
-  }, [messages, collapsedCount]);
+  }, [messages, messageKeys, collapsedCount]);
+
+  useEffect(() => {
+    const anchorIds = new Set(anchors.map((anchor) => anchor.id));
+    setActiveAnchorId((current) => current && !anchorIds.has(current) ? null : current);
+    setTooltipAnchorId((current) => current && !anchorIds.has(current) ? null : current);
+  }, [anchors]);
 
   // Scroll to a specific anchor message
   const scrollToAnchor = useCallback((messageId: string) => {
@@ -156,6 +165,7 @@ export const MessageAnchorRail = memo(function MessageAnchorRail({
             return;
           }
         }
+        setActiveAnchorId(null);
       },
       {
         root: container,

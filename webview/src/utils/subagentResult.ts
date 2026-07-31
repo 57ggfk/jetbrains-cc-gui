@@ -34,10 +34,77 @@ export function extractResultText(result?: ToolResultBlock | null): string | und
  * camelCase `runInBackground` form is also checked as a guard against future
  * normalization changes. Shared by all three call sites so they cannot drift.
  */
-export function isAsyncAgentInput(input: unknown): boolean {
+export function isAsyncAgentInput(input: unknown, normalizedToolName?: string): boolean {
+  if (normalizedToolName?.split('.').at(-1) === 'spawn_agent') return true;
   if (!input || typeof input !== 'object') return false;
   const record = input as Record<string, unknown>;
   return record.run_in_background === true || record.runInBackground === true;
+}
+
+export interface SpawnAgentMeta {
+  agentId?: string;
+  agentPath?: string;
+  description?: string;
+  nickname?: string;
+  model?: string;
+  reasoningEffort?: string;
+}
+
+/** Parse Codex spawn_agent launch metadata without conflating task_name with an agent UUID. */
+export function parseSpawnAgentMeta(
+  input: Record<string, unknown>,
+  result?: ToolResultBlock | null,
+): SpawnAgentMeta {
+  const text = extractResultText(result)?.trim();
+  let parsed: Record<string, unknown> | null = null;
+
+  if (text && (text.startsWith('{') || text.startsWith('['))) {
+    try {
+      const candidate = JSON.parse(text);
+      if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+        parsed = candidate as Record<string, unknown>;
+      }
+    } catch {
+      parsed = null;
+    }
+  }
+
+  const getString = (...values: unknown[]): string | undefined => {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return undefined;
+  };
+  const modelMatch = text?.match(/\(([A-Za-z0-9._:-]+)(?:\s+(low|medium|high|xhigh))?\)/i);
+  const agentId = getString(parsed?.agent_id, parsed?.agentId, input.agent_id, input.agentId)
+    ?? text?.match(/\b([0-9a-f]{8}-[0-9a-f-]{27})\b/i)?.[1];
+  const agentPath = getString(
+      parsed?.agent_path,
+      parsed?.agentPath,
+      parsed?.task_name,
+      parsed?.taskName,
+      input.agent_path,
+      input.agentPath,
+      input.task_name,
+      input.taskName,
+    );
+  const description = getString(parsed?.description, input.description);
+  const nickname = getString(parsed?.nickname, parsed?.name, input.nickname);
+  const model = getString(parsed?.model, input.model) ?? modelMatch?.[1];
+  const reasoningEffort = getString(
+      parsed?.reasoning_effort,
+      parsed?.reasoningEffort,
+      input.reasoning_effort,
+      input.reasoningEffort,
+    ) ?? modelMatch?.[2];
+  return {
+    ...(agentId && { agentId }),
+    ...(agentPath && { agentPath }),
+    ...(description && { description }),
+    ...(nickname && { nickname }),
+    ...(model && { model }),
+    ...(reasoningEffort && { reasoningEffort }),
+  };
 }
 
 /**

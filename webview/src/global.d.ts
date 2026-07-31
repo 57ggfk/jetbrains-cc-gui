@@ -92,6 +92,7 @@ interface Window {
    * Add single history message (used for Codex session loading)
    */
   addHistoryMessage?: (message: any) => void;
+  onSubagentHistoryChunk?: (transferId: string, chunk: string, isFinal: string | boolean) => void;
   beginCodexHistoryPage?: (json: string) => void;
   appendCodexHistoryPageBatch?: (pageId: string, json: string) => void;
   appendCodexHistoryPageChunk?: (

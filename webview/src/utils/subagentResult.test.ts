@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isAsyncAgentInput, extractResultText, parseAgentToolMeta } from './subagentResult';
+import {
+  isAsyncAgentInput,
+  extractResultText,
+  parseAgentToolMeta,
+  parseSpawnAgentMeta,
+} from './subagentResult';
 
 describe('isAsyncAgentInput', () => {
   it('returns true for run_in_background: true (snake_case)', () => {
@@ -31,6 +36,35 @@ describe('isAsyncAgentInput', () => {
     expect(isAsyncAgentInput(undefined)).toBe(false);
     expect(isAsyncAgentInput('not-an-object')).toBe(false);
     expect(isAsyncAgentInput(42)).toBe(false);
+  });
+
+  it('treats Codex spawn_agent as asynchronous without a background flag', () => {
+    expect(isAsyncAgentInput({ task_name: 'audit_ui' }, 'spawn_agent')).toBe(true);
+    expect(isAsyncAgentInput({ task_name: 'audit_ui' }, 'functions.spawn_agent')).toBe(true);
+  });
+});
+
+describe('parseSpawnAgentMeta', () => {
+  it('uses Codex task_name as the stable agent path', () => {
+    expect(parseSpawnAgentMeta({
+      task_name: 'audit_ui',
+      model: 'gpt-5.6-terra',
+      reasoning_effort: 'high',
+    })).toEqual({
+      agentPath: 'audit_ui',
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'high',
+    });
+  });
+
+  it('keeps Claude agent_id and description metadata', () => {
+    expect(parseSpawnAgentMeta({
+      agent_id: 'agent-123',
+      description: 'Review the bridge',
+    })).toEqual({
+      agentId: 'agent-123',
+      description: 'Review the bridge',
+    });
   });
 });
 
