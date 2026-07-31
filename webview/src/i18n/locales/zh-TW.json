@@ -325,6 +325,13 @@
         "invalidValue": "價格必須是非負數字",
         "defaultPricing": "使用預設價格"
       },
+      "contextWindow": {
+        "label": "最大上下文（K tokens）",
+        "placeholder": "例如 500",
+        "hint": "選填。請輸入整數 K 值（500 = 500,000 tokens），僅用於外掛顯示上下文用量。",
+        "invalidValue": "最大上下文必須是正整數（單位 K）",
+        "summary": "上下文：{{value}} tokens"
+      },
       "configuredSectionTitle": "已設定的 Claude 模型",
       "configuredSectionDesc": "這些模型來自目前 Claude 供應商或 settings.json，已經會顯示在模型選擇器中。這裡只能修改價格。",
       "configuredEditHint": "此模型由目前 Claude 供應商或 settings.json 管理，只能在這裡修改價格。",

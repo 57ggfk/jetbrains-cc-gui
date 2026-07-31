@@ -2071,7 +2071,7 @@ public class CodemossSettingsService {
         codexProviderManager.saveProviderOrder(orderedIds);
     }
 
-    // ==================== User Model Pricing Management ====================
+    // ==================== User Model Metadata Management ====================
 
     /**
      * Persist user-configured model pricing for a provider family, replacing the whole map.
@@ -2103,6 +2103,46 @@ public class CodemossSettingsService {
         writeConfig(config);
         LOG.info("[CodemossSettings] Set user model pricing for " + provider
                 + ": " + (pricing == null ? 0 : pricing.size()) + " models");
+    }
+
+    /**
+     * Persist user-configured Codex model context windows, replacing the whole map.
+     */
+    public void setCustomModelContextWindows(String provider, Map<String, Integer> contextWindows) throws IOException {
+        if (!"codex".equalsIgnoreCase(provider)) {
+            LOG.warn("[CodemossSettings] Ignored custom context windows for unsupported provider: " + provider);
+            return;
+        }
+        JsonObject config = readConfig();
+
+        JsonObject root;
+        if (config.has("customModelContextWindows") && config.get("customModelContextWindows").isJsonObject()) {
+            root = config.getAsJsonObject("customModelContextWindows");
+        } else {
+            root = new JsonObject();
+            config.add("customModelContextWindows", root);
+        }
+
+        if (contextWindows == null || contextWindows.isEmpty()) {
+            root.remove("codex");
+        } else {
+            JsonObject providerNode = new JsonObject();
+            for (Map.Entry<String, Integer> entry : contextWindows.entrySet()) {
+                Integer value = entry.getValue();
+                if (value != null && value >= 1_000 && value % 1_000 == 0) {
+                    providerNode.addProperty(entry.getKey(), value);
+                }
+            }
+            if (providerNode.size() == 0) {
+                root.remove("codex");
+            } else {
+                root.add("codex", providerNode);
+            }
+        }
+
+        writeConfig(config);
+        LOG.info("[CodemossSettings] Set user model context windows for codex"
+                + ": " + (contextWindows == null ? 0 : contextWindows.size()) + " models");
     }
 
     private JsonObject serializeModelPricing(ModelPricing pricing) {

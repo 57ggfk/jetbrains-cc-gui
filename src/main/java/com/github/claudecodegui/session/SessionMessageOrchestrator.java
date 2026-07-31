@@ -283,13 +283,13 @@ public class SessionMessageOrchestrator {
 
     private void restoreTokenUsage(List<JsonObject> serverMessages) {
         try {
-            JsonObject lastUsage = TokenUsageUtils.findLastUsageFromRawMessages(serverMessages);
+            JsonObject lastUsage = TokenUsageUtils.findLastUsageFromRawMessages(serverMessages, state.getProvider());
             if (lastUsage == null) {
                 return;
             }
 
-            int usedTokens = TokenUsageUtils.extractUsedTokens(lastUsage, state.getProvider());
-            int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
+            int usedTokens = TokenUsageUtils.extractContextTokens(lastUsage, state.getProvider());
+            int maxTokens = SettingsHandler.getModelContextLimit(state.getProvider(), state.getModel());
             usageDisplay.show(usedTokens, maxTokens);
             LOG.debug("Restored token usage from history: " + usedTokens + " / " + maxTokens);
         } catch (Exception e) {

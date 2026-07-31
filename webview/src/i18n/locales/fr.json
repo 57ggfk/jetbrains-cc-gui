@@ -325,6 +325,13 @@
         "invalidValue": "Le tarif doit être un nombre non négatif",
         "defaultPricing": "Tarif par défaut utilisé"
       },
+      "contextWindow": {
+        "label": "Contexte maximal (K tokens)",
+        "placeholder": "ex. 500",
+        "hint": "Facultatif. Saisissez un nombre entier de milliers de tokens (500 = 500 000 tokens). Utilisé uniquement pour l’affichage dans le plugin.",
+        "invalidValue": "Le contexte maximal doit être un entier positif en unités K",
+        "summary": "Contexte : {{value}} tokens"
+      },
       "configuredSectionTitle": "Modèles Claude configurés",
       "configuredSectionDesc": "Les modèles du fournisseur Claude actif ou de settings.json figurent déjà dans le sélecteur. Seul le tarif peut être modifié ici.",
       "configuredEditHint": "Ce modèle est géré par le fournisseur Claude actif ou settings.json. Seul le tarif peut être modifié ici.",

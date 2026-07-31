@@ -410,7 +410,7 @@ public class CodexMessageHandlerTest {
     }
 
     @Test
-    public void tokenCountEventAttachesStatusBarUsageButNeverTurnUsage() {
+    public void tokenCountEventDoesNotExposeCumulativeUsageAsContext() {
         SessionState state = new SessionState();
 
         CallbackHandler callbackHandler = new CallbackHandler();
@@ -424,8 +424,53 @@ public class CodexMessageHandlerTest {
                 + "\"total_token_usage\":{\"input_tokens\":500000,\"output_tokens\":9000,\"cached_input_tokens\":480000}}}}");
 
         Message message = state.getMessages().get(0);
-        assertEquals(500000, message.raw.getAsJsonObject("usage").get("input_tokens").getAsInt());
+        assertFalse(message.raw.has("usage"));
         assertFalse(message.raw.has("turnUsage"));
+    }
+
+    @Test
+    public void tokenCountEventUsesLastTurnUsageForContextStatus() {
+        SessionState state = new SessionState();
+
+        CallbackHandler callbackHandler = new CallbackHandler();
+        RecordingCallback callback = new RecordingCallback();
+        callbackHandler.setCallback(callback);
+
+        CodexMessageHandler handler = new CodexMessageHandler(state, callbackHandler);
+        handler.onMessage("assistant", "{\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}");
+        handler.onMessage("event_msg", "{\"payload\":{\"type\":\"token_count\",\"info\":{"
+                + "\"total_token_usage\":{\"input_tokens\":311400,\"output_tokens\":9000,\"cached_input_tokens\":280000},"
+                + "\"last_token_usage\":{\"input_tokens\":180000,\"output_tokens\":2400,\"cached_input_tokens\":160000}"
+                + "}}}");
+
+        Message message = state.getMessages().get(0);
+        assertEquals(180000, message.raw.getAsJsonObject("usage").get("input_tokens").getAsInt());
+        assertEquals(2400, message.raw.getAsJsonObject("usage").get("output_tokens").getAsInt());
+        assertEquals(160000, message.raw.getAsJsonObject("usage").get("cache_read_input_tokens").getAsInt());
+        assertFalse(message.raw.has("turnUsage"));
+    }
+
+    @Test
+    public void resultUsageDoesNotReplaceCurrentTokenCountUsage() {
+        SessionState state = new SessionState();
+
+        CallbackHandler callbackHandler = new CallbackHandler();
+        RecordingCallback callback = new RecordingCallback();
+        callbackHandler.setCallback(callback);
+
+        CodexMessageHandler handler = new CodexMessageHandler(state, callbackHandler);
+        handler.onMessage("stream_start", "");
+        handler.onMessage("assistant", "{\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}");
+        handler.onMessage("event_msg", "{\"payload\":{\"type\":\"token_count\",\"info\":{"
+                + "\"total_token_usage\":{\"input_tokens\":13007800,\"output_tokens\":9000,\"cached_input_tokens\":12000000},"
+                + "\"last_token_usage\":{\"input_tokens\":180000,\"output_tokens\":2400,\"cached_input_tokens\":160000}"
+                + "}}}");
+        handler.onMessage("result", "{\"type\":\"result\",\"subtype\":\"usage\",\"usage\":{"
+                + "\"input_tokens\":13007800,\"output_tokens\":9000,\"cached_input_tokens\":12000000}}}");
+
+        Message message = state.getMessages().get(0);
+        assertEquals(180000, message.raw.getAsJsonObject("usage").get("input_tokens").getAsInt());
+        assertEquals(2400, message.raw.getAsJsonObject("usage").get("output_tokens").getAsInt());
     }
 
     @Test

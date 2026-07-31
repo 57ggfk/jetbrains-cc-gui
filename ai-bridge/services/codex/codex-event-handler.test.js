@@ -156,6 +156,116 @@ test('current-turn session replay emits custom_tool_call exec patches found only
   }
 });
 
+test('forwards Codex token_count events to the Java usage handler', async () => {
+  const emittedMessages = [];
+  const state = createInitialEventState((message) => emittedMessages.push(message));
+
+  await captureStdout(async () => {
+    await processCodexEventStream(
+      eventsFrom([
+        {
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: { input_tokens: 13007800, output_tokens: 9000 },
+              last_token_usage: { input_tokens: 180000, output_tokens: 2400 },
+            },
+          },
+        },
+      ]),
+      state,
+      makeConfig(),
+    );
+  });
+
+  assert.deepEqual(emittedMessages, [{
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: {
+        total_token_usage: { input_tokens: 13007800, output_tokens: 9000 },
+        last_token_usage: { input_tokens: 180000, output_tokens: 2400 },
+      },
+    },
+  }]);
+});
+
+test('recovers current context usage from the session when the SDK omits token_count events', async () => {
+  const tempDirectory = await mkdtemp(join(tmpdir(), 'codex-context-usage-'));
+  const tempSessionPath = join(tempDirectory, 'fixture-session.jsonl');
+  await writeFile(
+    tempSessionPath,
+    [
+      JSON.stringify({ type: 'turn_context', payload: { turn_id: 'old-turn' } }),
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: { input_tokens: 9000000, output_tokens: 30000 },
+            last_token_usage: { input_tokens: 90000, output_tokens: 30 },
+          },
+        },
+      }),
+    ].join('\n') + '\n',
+    'utf8',
+  );
+
+  try {
+    const emittedMessages = [];
+    const state = createInitialEventState((message) => emittedMessages.push(message));
+    state.sessionFilePath = tempSessionPath;
+    await prepareSessionReplayBoundary(state, 'fixture-thread');
+
+    await appendFile(
+      tempSessionPath,
+      [
+        JSON.stringify({ type: 'turn_context', payload: { turn_id: 'turn-1' } }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: { input_tokens: 22496533, output_tokens: 71502 },
+              last_token_usage: { input_tokens: 127886, output_tokens: 88 },
+            },
+          },
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    await captureStdout(async () => {
+      await processCodexEventStream(
+        eventsFrom([
+          { type: 'turn.started' },
+          {
+            type: 'turn.completed',
+            usage: { input_tokens: 22496533, output_tokens: 71502 },
+          },
+        ]),
+        state,
+        { ...makeConfig(), threadId: 'fixture-thread' },
+      );
+    });
+
+    assert.deepEqual(emittedMessages[0], {
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: { input_tokens: 22496533, output_tokens: 71502 },
+          last_token_usage: { input_tokens: 127886, output_tokens: 88 },
+        },
+      },
+    });
+    assert.equal(emittedMessages[1].type, 'result');
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+});
+
 test('Codex item.updated agent_message emits incremental content deltas before completion', async () => {
   const emittedMessages = [];
   const state = createInitialEventState((message) => emittedMessages.push(message));

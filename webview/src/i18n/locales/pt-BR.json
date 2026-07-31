@@ -374,6 +374,13 @@
         "invalidValue": "O preço deve ser um número não negativo",
         "defaultPricing": "Usando o preço padrão"
       },
+      "contextWindow": {
+        "label": "Contexto máximo (K tokens)",
+        "placeholder": "ex.: 500",
+        "hint": "Opcional. Informe um número inteiro de milhares de tokens (500 = 500.000 tokens). Usado apenas para exibir o uso de contexto no plugin.",
+        "invalidValue": "O contexto máximo deve ser um inteiro positivo em unidades K",
+        "summary": "Contexto: {{value}} tokens"
+      },
       "configuredSectionTitle": "Modelos Claude configurados",
       "configuredSectionDesc": "Os modelos do provedor Claude ativo ou do settings.json já aparecem no seletor. Aqui só é possível alterar o preço.",
       "configuredEditHint": "Este modelo é gerenciado pelo provedor Claude ativo ou pelo settings.json. Aqui só é possível alterar o preço.",
