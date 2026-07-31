@@ -2,6 +2,7 @@ package com.github.claudecodegui.service;
 
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+import com.github.claudecodegui.service.commit.CommitMessageCallback;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.LocalFilePath;
@@ -137,7 +138,7 @@ public class GitCommitMessageServiceCommitAiConfigTest {
         return config;
     }
 
-    private static class ResultCapture implements GitCommitMessageService.CommitMessageCallback {
+    private static class ResultCapture implements CommitMessageCallback {
         private String success;
         private String error;
 
