@@ -319,6 +319,11 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         // If determined empty (only zero-width characters), pass empty string to parent
         debouncedOnInput(isEmpty ? '' : text);
 
+        // Trigger file tag rendering so @path text is converted to chips.
+        // Covers non-keyboard input paths (history restore, paste, etc.)
+        // that don't fire the space-key listener.
+        debouncedRenderFileTags();
+
         timer.end();
       },
       [
@@ -326,6 +331,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         adjustHeight,
         debouncedDetectCompletion,
         debouncedOnInput,
+        debouncedRenderFileTags,
         invalidateCache,
         syncInlineCompletion,
       ]
