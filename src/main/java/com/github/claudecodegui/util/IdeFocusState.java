@@ -31,20 +31,7 @@ final class IdeFocusState {
     }
 
     private static boolean computeIdeApplicationFocused() {
-        Window activeWindow = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
-        if (activeWindow != null) {
-            return true;
-        }
-
-        return readApplicationActiveFallback();
-    }
-
-    private static boolean readApplicationActiveFallback() {
-        try {
-            return ApplicationManager.getApplication().isActive();
-        } catch (Exception e) {
-            LOG.debug("[IdeFocusState] Failed to read application active state: " + e.getMessage());
-            return false;
-        }
+        Window focusedWindow = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+        return focusedWindow != null && focusedWindow.isFocused();
     }
 }
