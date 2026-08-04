@@ -197,6 +197,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
 
       const syncToBackend = () => {
         if (window.sendToJava) {
+          // Native watchdog reload reuses the original HTML snapshot. Java
+          // pushes the current Session state after frontend_ready; echoing the
+          // stale boot snapshot would route the existing transcript incorrectly.
+          if (window.__CCGUI_RECOVERY_RELOAD__ === true) {
+            return;
+          }
           sendBridgeEvent('set_provider', restoredProvider);
           const modelToSync = restoredProvider === 'codex'
             ? restoredCodexModel
@@ -227,20 +233,49 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
 
   // Persist snapshot whenever any of the seven keys change.
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        provider: currentProvider,
-        claudeModel: selectedClaudeModel,
-        codexModel: selectedCodexModel,
-        claudePermissionMode,
-        codexPermissionMode,
-        longContextEnabled,
-        reasoningEffort,
-        codexFastMode,
-      }));
-    } catch {
-      // Failed to save model selection state — non-fatal.
-    }
+    let retryTimer: number | undefined;
+    let retryCount = 0;
+
+    const persistWhenPageContextIsReady = () => {
+      const pageContextPending = window.__CCGUI_PAGE_CONTEXT_READY__ !== true;
+      const recoveryStatePending = window.__CCGUI_RECOVERY_RELOAD__ === true
+        && window.__CCGUI_RECOVERY_STATE_APPLIED__ !== true;
+
+      // React may mount before onLoadEnd/fallback establishes the runtime page
+      // context. Never publish provisional HTML/default state to the localStorage
+      // snapshot shared by every tab. Keep the same fast-then-slow retry policy as
+      // bridge startup so delayed remote JCEF initialization can still settle.
+      if (pageContextPending || recoveryStatePending) {
+        retryCount += 1;
+        retryTimer = window.setTimeout(
+          persistWhenPageContextIsReady,
+          retryCount < 50 ? 100 : 1000,
+        );
+        return;
+      }
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          provider: currentProvider,
+          claudeModel: selectedClaudeModel,
+          codexModel: selectedCodexModel,
+          claudePermissionMode,
+          codexPermissionMode,
+          longContextEnabled,
+          reasoningEffort,
+          codexFastMode,
+        }));
+      } catch {
+        // Failed to save model selection state — non-fatal.
+      }
+    };
+
+    persistWhenPageContextIsReady();
+    return () => {
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+      }
+    };
   }, [
     currentProvider,
     selectedClaudeModel,

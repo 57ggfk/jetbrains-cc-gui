@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useModelStatePersistence, type UseModelStatePersistenceOptions } from './useModelStatePersistence';
 import { DEFAULT_CLAUDE_MODEL_ID } from '../../components/ChatInputBox/types';
@@ -42,12 +42,21 @@ describe('useModelStatePersistence — boot sync does not clobber the persisted 
     localStorage.clear();
     sendBridgeEventMock.mockClear();
     (window as unknown as { sendToJava?: unknown }).sendToJava = () => {};
+    window.__CCGUI_PAGE_CONTEXT_READY__ = true;
+    window.__CCGUI_PAGE_LOAD_KIND__ = 'initial_load';
+    window.__CCGUI_RECOVERY_RELOAD__ = false;
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.useRealTimers();
     delete (window as unknown as { sendToJava?: unknown }).sendToJava;
+    delete window.__CCGUI_PAGE_CONTEXT_READY__;
+    delete window.__CCGUI_PAGE_LOAD_KIND__;
+    delete window.__CCGUI_RECOVERY_RELOAD__;
+    delete window.__CCGUI_RECOVERY_STATE_APPLIED__;
+    delete window.__INITIAL_TAB_PROVIDER__;
+    delete window.__INITIAL_TAB_MODEL__;
   });
 
   it('does NOT send set_mode on boot when localStorage was wiped (reinstall)', () => {
@@ -96,6 +105,53 @@ describe('useModelStatePersistence — boot sync does not clobber the persisted 
     expect(bridgeEventsFor('set_provider')).toHaveLength(1);
     expect(bridgeEventsFor('set_mode')).toHaveLength(0);
   });
+
+  it('keeps frontend boot synchronization enabled for a pre-ready startup retry', () => {
+    window.__CCGUI_PAGE_LOAD_KIND__ = 'startup_retry';
+    window.__CCGUI_RECOVERY_RELOAD__ = false;
+
+    renderHook(() => useModelStatePersistence(makeOptions()));
+    vi.advanceTimersByTime(200);
+
+    expect(bridgeEventsFor('set_provider')).toHaveLength(1);
+    expect(bridgeEventsFor('set_model')).toHaveLength(1);
+    expect(bridgeEventsFor('set_codex_fast_mode')).toHaveLength(1);
+  });
+
+  it('does not echo the stale HTML provider or model during watchdog recovery', () => {
+    window.__CCGUI_RECOVERY_RELOAD__ = true;
+    window.__CCGUI_RECOVERY_STATE_APPLIED__ = false;
+    window.__INITIAL_TAB_PROVIDER__ = 'codex';
+    window.__INITIAL_TAB_MODEL__ = 'gpt-5.6-sol';
+
+    renderHook(() => useModelStatePersistence(makeOptions()));
+    vi.advanceTimersByTime(200);
+
+    expect(bridgeEventsFor('set_provider')).toHaveLength(0);
+    expect(bridgeEventsFor('set_model')).toHaveLength(0);
+    expect(bridgeEventsFor('set_codex_fast_mode')).toHaveLength(0);
+    expect(localStorage.getItem('model-selection-state')).toBeNull();
+  });
+
+  it('waits for runtime page context and authoritative recovery state before persisting', () => {
+    window.__CCGUI_PAGE_CONTEXT_READY__ = false;
+    delete window.__CCGUI_RECOVERY_RELOAD__;
+
+    renderHook(() => useModelStatePersistence(makeOptions()));
+    expect(localStorage.getItem('model-selection-state')).toBeNull();
+
+    act(() => vi.advanceTimersByTime(100));
+    expect(localStorage.getItem('model-selection-state')).toBeNull();
+
+    window.__CCGUI_PAGE_CONTEXT_READY__ = true;
+    window.__CCGUI_RECOVERY_RELOAD__ = true;
+    act(() => vi.advanceTimersByTime(100));
+    expect(localStorage.getItem('model-selection-state')).toBeNull();
+
+    window.__CCGUI_RECOVERY_STATE_APPLIED__ = true;
+    act(() => vi.advanceTimersByTime(100));
+    expect(JSON.parse(localStorage.getItem('model-selection-state') || '{}').provider).toBe('claude');
+  });
 });
 
 describe('useModelStatePersistence — retired model migration', () => {
@@ -103,12 +159,19 @@ describe('useModelStatePersistence — retired model migration', () => {
     localStorage.clear();
     sendBridgeEventMock.mockClear();
     (window as unknown as { sendToJava?: unknown }).sendToJava = () => {};
+    window.__CCGUI_PAGE_CONTEXT_READY__ = true;
+    window.__CCGUI_PAGE_LOAD_KIND__ = 'initial_load';
+    window.__CCGUI_RECOVERY_RELOAD__ = false;
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.useRealTimers();
     delete (window as unknown as { sendToJava?: unknown }).sendToJava;
+    delete window.__CCGUI_PAGE_CONTEXT_READY__;
+    delete window.__CCGUI_PAGE_LOAD_KIND__;
+    delete window.__CCGUI_RECOVERY_RELOAD__;
+    delete window.__CCGUI_RECOVERY_STATE_APPLIED__;
     delete (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__;
     delete (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__;
   });

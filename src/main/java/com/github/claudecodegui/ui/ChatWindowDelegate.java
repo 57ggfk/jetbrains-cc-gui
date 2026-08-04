@@ -21,12 +21,14 @@ import com.github.claudecodegui.handler.PermissionHandler;
 import com.github.claudecodegui.handler.PromptEnhancerHandler;
 import com.github.claudecodegui.handler.PromptHandler;
 import com.github.claudecodegui.handler.provider.CustomModelPricingHandler;
+import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.handler.provider.ProviderHandler;
 import com.github.claudecodegui.handler.RewindHandler;
 import com.github.claudecodegui.handler.SessionHandler;
 import com.github.claudecodegui.handler.SettingsHandler;
 import com.github.claudecodegui.handler.SkillHandler;
 import com.github.claudecodegui.handler.TabHandler;
+import com.github.claudecodegui.handler.UsagePushService;
 import com.github.claudecodegui.handler.WindowEventHandler;
 import com.github.claudecodegui.handler.file.FileExportHandler;
 import com.github.claudecodegui.handler.file.FileHandler;
@@ -99,6 +101,7 @@ public class ChatWindowDelegate {
         PermissionHandler getPermissionHandler();
         void interruptDueToPermissionDenial();
         boolean isFrontendReady();
+        boolean isRuntimeRecoveryPage();
         void setFrontendReady(boolean ready);
         void setSlashCommandsFetched(boolean fetched);
         void setFetchedSlashCommandsCount(int count);
@@ -505,6 +508,7 @@ public class ChatWindowDelegate {
 
     public void handleFrontendReady() {
         LOG.info("Received frontend_ready signal, frontend is now ready to receive data");
+        boolean runtimeRecovery = host.isRuntimeRecoveryPage();
         host.setFrontendReady(true);
         host.getWebviewWatchdog().markFrontendReady();
 
@@ -512,8 +516,14 @@ public class ChatWindowDelegate {
             "window.updateLinkifyCapabilities",
             JsUtils.escapeJs(OpenClassHandler.buildCapabilitiesJson())
         );
+        if (runtimeRecovery) {
+            pushCurrentTabStateToFrontend();
+        }
         host.getSessionLifecycleManager().sendCurrentPermissionMode();
         replayCurrentSessionStateToFrontend();
+        if (runtimeRecovery) {
+            refreshFrontendDerivedState();
+        }
         host.persistTabSessionState();
 
         if (pendingQuickFixPrompt != null && pendingQuickFixCallback != null) {
@@ -528,6 +538,99 @@ public class ChatWindowDelegate {
         }
 
         host.getStreamCoalescer().flush(null);
+    }
+
+    /**
+     * Pushes the current Java session configuration before replaying its transcript.
+     * A native JCEF reload reuses the tab's original HTML snapshot, so Java remains
+     * authoritative for provider and model selection during watchdog recovery.
+     */
+    private void pushCurrentTabStateToFrontend() {
+        ClaudeSession session = host.getSession();
+        if (session == null || host.isDisposed()) {
+            return;
+        }
+
+        String payload = buildBackendTabStateJson(
+                session.getProvider(),
+                session.getModel(),
+                session.getPermissionMode(),
+                session.getReasoningEffort(),
+                session.getCodexServiceTier()
+        );
+        host.callJavaScript("window.applyBackendTabState", JsUtils.escapeJs(payload));
+    }
+
+    /**
+     * Builds the authoritative tab-state snapshot consumed by the frontend recovery callback.
+     * Package-private visibility keeps serialization independently testable without JCEF.
+     */
+    static String buildBackendTabStateJson(
+            String provider,
+            String model,
+            String permissionMode,
+            String reasoningEffort,
+            String codexServiceTier
+    ) {
+        JsonObject state = new JsonObject();
+        state.addProperty("provider", provider);
+        state.addProperty("model", model);
+        state.addProperty("permissionMode", permissionMode);
+        state.addProperty("reasoningEffort", reasoningEffort);
+        state.addProperty("codexFastMode", "fast".equals(codexServiceTier) ? "fast" : "normal");
+        return state.toString();
+    }
+
+    /**
+     * Replays the non-mutating UI refreshes formerly triggered by boot-time provider/model sync.
+     * Usage calculation deliberately delegates to the existing v0.5 services; recovery does not
+     * introduce a separate Codex context-window algorithm.
+     */
+    private void refreshFrontendDerivedState() {
+        ClaudeSession session = host.getSession();
+        HandlerContext context = host.getHandlerContext();
+        if (session == null || context == null || host.isDisposed()) {
+            return;
+        }
+
+        UsagePushService usagePushService = new UsagePushService(context);
+        usagePushService.pushUsageUpdateAfterModelChange(resolveModelContextLimitForRecovery(
+                session.getProvider(),
+                session.getModel(),
+                context.getSettingsService()
+        ));
+        usagePushService.refreshContextBar();
+    }
+
+    /**
+     * Resolves the same configured Claude model mapping used by an explicit model selection,
+     * while retaining v0.5's provider-aware Codex/static context-window behavior.
+     */
+    static int resolveModelContextLimitForRecovery(
+            String provider,
+            String model,
+            CodemossSettingsService settingsService
+    ) {
+        if ("codex".equalsIgnoreCase(provider)) {
+            return SettingsHandler.getModelContextLimit(provider, model);
+        }
+
+        String resolvedModel = model;
+        if (settingsService != null) {
+            try {
+                JsonObject settings = settingsService.readClaudeSettings();
+                if (settings != null && settings.has("env") && settings.get("env").isJsonObject()) {
+                    resolvedModel = ModelProviderHandler.resolveConfiguredClaudeModel(
+                            model,
+                            settings.getAsJsonObject("env")
+                    );
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to resolve configured Claude model during WebView recovery: "
+                        + e.getMessage());
+            }
+        }
+        return SettingsHandler.getModelContextLimit(resolvedModel);
     }
 
     private void replayCurrentSessionStateToFrontend() {

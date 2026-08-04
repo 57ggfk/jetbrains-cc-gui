@@ -80,6 +80,7 @@ public class ClaudeChatWindow {
     private volatile boolean disposed = false;
     private volatile boolean initialized = false;
     private volatile boolean frontendReady = false;
+    private volatile boolean hasEverBeenFrontendReady = false;
     private final PendingCodeSnippetBuffer pendingCodeSnippetBuffer = new PendingCodeSnippetBuffer();
     private volatile boolean slashCommandsFetched = false;
     private final AtomicBoolean restoredHistoryLoadStarted = new AtomicBoolean(false);
@@ -665,6 +666,7 @@ public class ClaudeChatWindow {
         if (!ready) {
             return;
         }
+        hasEverBeenFrontendReady = true;
         flushPendingCodeSnippet();
         ApplicationManager.getApplication().invokeLater(() -> {
             if (!disposed) {
@@ -1496,6 +1498,11 @@ public class ClaudeChatWindow {
             }
 
             @Override
+            public boolean hasEverBeenFrontendReady() {
+                return hasEverBeenFrontendReady;
+            }
+
+            @Override
             public void setFrontendReady(boolean ready) {
                 updateFrontendReadyState(ready);
             }
@@ -1665,6 +1672,11 @@ public class ClaudeChatWindow {
             @Override
             public boolean isFrontendReady() {
                 return frontendReady;
+            }
+
+            @Override
+            public boolean isRuntimeRecoveryPage() {
+                return webviewInitializer.isRuntimeRecoveryPage();
             }
 
             @Override
