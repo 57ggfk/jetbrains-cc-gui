@@ -74,14 +74,18 @@
 .refreshBtn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
   flex-shrink: 0;
-  padding: 6px 12px;
+  min-height: 36px;
+  min-width: 128px;
+  padding: 8px 20px;
   border: 1px solid var(--border-primary, var(--border-secondary));
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.2;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 
@@ -96,7 +100,7 @@
   }
 
   :global(.codicon) {
-    font-size: 13px;
+    font-size: 15px;
   }
 }
 
@@ -142,10 +146,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 36px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  gap: 16px;
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 8px;
   border: 1px solid var(--border-primary, var(--border-secondary));
   background: var(--bg-secondary);
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -257,21 +261,26 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 12px;
   flex-shrink: 0;
   margin-left: auto;
+  padding-left: 8px;
 }
 
 .statusBadge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 7px;
-  border-radius: 4px;
+  gap: 6px;
+  min-height: 30px;
+  min-width: 78px;
+  justify-content: center;
+  padding: 4px 14px;
+  border-radius: 7px;
   background: var(--bg-tertiary, var(--bg-primary));
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
+  letter-spacing: 0.01em;
   cursor: default;
   user-select: none;
   white-space: nowrap;
@@ -288,21 +297,22 @@
   }
 
   :global(.codicon) {
-    font-size: 11px;
+    font-size: 13px;
   }
 }
 
 .divider {
   width: 1px;
-  height: 14px;
+  height: 18px;
   background: var(--border-primary, var(--border-secondary));
   flex-shrink: 0;
+  opacity: 0.85;
 }
 
 .actionButtons {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
 }
 
 .iconBtn {
@@ -310,10 +320,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border-radius: 5px;
+  border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-secondary);
@@ -327,7 +337,7 @@
   }
 
   :global(.codicon) {
-    font-size: 13px;
+    font-size: 15px;
   }
 
   /*
@@ -394,13 +404,14 @@
 .primaryBtn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: 14px;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-radius: 16px;
   border: none;
   background: var(--button-primary-background, #0078d4);
   color: #fff;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -411,7 +422,7 @@
   }
 
   :global(.codicon) {
-    font-size: 12px;
+    font-size: 14px;
   }
 }
 .moreComing {
