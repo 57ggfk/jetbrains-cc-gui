@@ -626,6 +626,22 @@
     margin-bottom: 0;
 }
 
+/* Block-memoized streaming render: each top-level markdown block is wrapped
+   in .md-block. Keep paragraph spacing between blocks identical to the old
+   single-document render — only the message's final paragraph drops its
+   bottom margin. */
+.markdown-content .md-block > p:last-child {
+    margin-bottom: 10px;
+}
+
+.markdown-content > .md-block:last-child > p:last-child {
+    margin-bottom: 0;
+}
+
+.thinking-content .markdown-content .md-block > p:last-child {
+    margin-bottom: 0;
+}
+
 .markdown-content pre {
     background-color: var(--color-code-block-bg);
     border: 1px solid var(--color-code-block-border);
