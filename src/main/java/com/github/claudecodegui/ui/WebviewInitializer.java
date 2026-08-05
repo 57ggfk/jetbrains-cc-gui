@@ -59,6 +59,21 @@ public class WebviewInitializer {
     private static final int BRIDGE_INJECTION_SLOW_RETRY_INTERVAL_MS = 1000;
     private static final int BRIDGE_INJECTION_FAST_RETRY_ATTEMPTS = 50;
 
+    /** Identifies which side owns provider/model boot synchronization for a page load. */
+    enum PageLoadKind {
+        INITIAL_LOAD("initial_load", false),
+        STARTUP_RETRY("startup_retry", false),
+        RUNTIME_RECOVERY("runtime_recovery", true);
+
+        private final String wireName;
+        private final boolean authoritativeRecovery;
+
+        PageLoadKind(String wireName, boolean authoritativeRecovery) {
+            this.wireName = wireName;
+            this.authoritativeRecovery = authoritativeRecovery;
+        }
+    }
+
     /**
      * Host interface providing access to window-level dependencies.
      */
@@ -77,6 +92,7 @@ public class WebviewInitializer {
         void handleJavaScriptMessage(int pageGeneration, String message);
         WebviewWatchdog getWebviewWatchdog();
         boolean isFrontendReady();
+        boolean hasEverBeenFrontendReady();
         void setFrontendReady(boolean ready);
     }
 
@@ -102,6 +118,7 @@ public class WebviewInitializer {
      */
     private volatile BrowserBridges bridges;
     private int pageGeneration;
+    private PageLoadKind nextBrowserPageLoadKind = PageLoadKind.INITIAL_LOAD;
 
     public WebviewInitializer(WebviewHost host) {
         this.host = host;
@@ -317,10 +334,11 @@ public class WebviewInitializer {
                 return new JBCefJSQuery.Response("ok");
             });
 
-            int initialPageGeneration = beginPageLoad(currentBridges);
+            PageLoadKind initialPageLoadKind = consumeNextBrowserPageLoadKind();
+            int initialPageGeneration = beginPageLoad(currentBridges, initialPageLoadKind);
             host.activatePageGeneration(initialPageGeneration);
             host.setFrontendReady(false);
-            String htmlContent = loadChatHtmlWithInitialTabState(initialPageGeneration);
+            String htmlContent = loadChatHtmlWithInitialTabState();
 
             // LoadHandler must be registered before loadHTML, otherwise the
             // first frame's onLoadEnd is missed and the JS bridge injection
@@ -341,13 +359,17 @@ public class WebviewInitializer {
                     String injection;
                     String shiftEscInjection;
                     String clipboardPathInjection;
+                    String pageContextInjection;
                     int pageGeneration;
+                    PageLoadKind pageLoadKind;
                     synchronized (WebviewInitializer.this.bridgeLock) {
                         if (WebviewInitializer.this.bridges != currentBridges
                                 || !currentBridges.isCurrentFor(createdBrowser)) {
                             return;
                         }
                         pageGeneration = currentBridges.getPageGeneration();
+                        pageLoadKind = currentBridges.getPageLoadKind();
+                        pageContextInjection = buildPageContextInjection(pageGeneration, pageLoadKind);
                         injection = guardPageScript(pageGeneration,
                                 buildBridgeInjection(currentBridges.jsQuery.inject(
                                         buildBridgeMessageExpression(pageGeneration))));
@@ -367,9 +389,13 @@ public class WebviewInitializer {
                     }
 
                     try {
-                        cefBrowser.executeJavaScript(injection, cefBrowser.getURL(), 0);
-                        cefBrowser.executeJavaScript(shiftEscInjection, cefBrowser.getURL(), 0);
-                        cefBrowser.executeJavaScript(clipboardPathInjection, cefBrowser.getURL(), 0);
+                        String runtimeBootstrap = joinRuntimePageBootstrap(
+                                pageContextInjection,
+                                injection,
+                                shiftEscInjection,
+                                clipboardPathInjection
+                        );
+                        cefBrowser.executeJavaScript(runtimeBootstrap, cefBrowser.getURL(), 0);
                     } catch (Exception | LinkageError e) {
                         LOG.debug("Skipping webview bridge injection after browser disposal: " + e.getMessage(), e);
                         return;
@@ -522,13 +548,13 @@ public class WebviewInitializer {
         timer.start();
     }
 
-    private int beginPageLoad(BrowserBridges expectedBridges) {
+    private int beginPageLoad(BrowserBridges expectedBridges, PageLoadKind pageLoadKind) {
         synchronized (this.bridgeLock) {
             if (this.bridges != expectedBridges) {
                 throw new IllegalStateException("Cannot load a page for stale browser bridges");
             }
             int nextPageGeneration = nextPageGeneration();
-            expectedBridges.beginPageLoad(nextPageGeneration);
+            expectedBridges.beginPageLoad(nextPageGeneration, pageLoadKind);
             return nextPageGeneration;
         }
     }
@@ -537,7 +563,7 @@ public class WebviewInitializer {
         synchronized (this.bridgeLock) {
             int nextPageGeneration = nextPageGeneration();
             if (this.bridges != null) {
-                this.bridges.beginPageLoad(nextPageGeneration);
+                this.bridges.beginPageLoad(nextPageGeneration, PageLoadKind.INITIAL_LOAD);
             }
             return nextPageGeneration;
         }
@@ -572,11 +598,15 @@ public class WebviewInitializer {
         String bridgeInjection;
         String shiftEscInjection;
         String clipboardPathInjection;
+        String pageContextInjection;
+        PageLoadKind pageLoadKind;
         synchronized (this.bridgeLock) {
             if (this.bridges != currentBridges
                     || !currentBridges.isCurrentPage(browser, pageGeneration)) {
                 return false;
             }
+            pageLoadKind = currentBridges.getPageLoadKind();
+            pageContextInjection = buildPageContextInjection(pageGeneration, pageLoadKind);
             bridgeInjection = guardPageScript(pageGeneration,
                     buildBridgeInjection(currentBridges.jsQuery.inject(
                             buildBridgeMessageExpression(pageGeneration))));
@@ -598,9 +628,13 @@ public class WebviewInitializer {
         try {
             CefBrowser cefBrowser = browser.getCefBrowser();
             String url = cefBrowser.getURL();
-            cefBrowser.executeJavaScript(bridgeInjection, url, 0);
-            cefBrowser.executeJavaScript(shiftEscInjection, url, 0);
-            cefBrowser.executeJavaScript(clipboardPathInjection, url, 0);
+            String runtimeBootstrap = joinRuntimePageBootstrap(
+                    pageContextInjection,
+                    bridgeInjection,
+                    shiftEscInjection,
+                    clipboardPathInjection
+            );
+            cefBrowser.executeJavaScript(runtimeBootstrap, url, 0);
 
             injectFrontendConfiguration(cefBrowser, pageGeneration);
             if (attempt == 1) {
@@ -638,6 +672,57 @@ public class WebviewInitializer {
 
     static String buildBridgeMessageExpression(int pageGeneration) {
         return "'__CCG_PAGE_GENERATION__:" + pageGeneration + ":' + String(msg)";
+    }
+
+    /**
+     * Establishes the Java-owned runtime page context before any bridge function is exposed.
+     * Repeated fallback injections for the same generation are idempotent so they cannot reset
+     * the recovery-applied marker after React consumes the authoritative backend state.
+     */
+    static String buildPageContextInjection(int pageGeneration, PageLoadKind pageLoadKind) {
+        boolean authoritativeRecovery = pageLoadKind.authoritativeRecovery;
+        return "if (window.__CCG_PAGE_GENERATION__ !== " + pageGeneration
+                + " || window.__CCGUI_PAGE_CONTEXT_READY__ !== true) {"
+                + "window.__CCG_PAGE_GENERATION__ = " + pageGeneration + ";"
+                + "window.__CCGUI_PAGE_LOAD_KIND__ = '" + pageLoadKind.wireName + "';"
+                + "window.__CCGUI_RECOVERY_RELOAD__ = " + authoritativeRecovery + ";"
+                + "window.__CCGUI_RECOVERY_STATE_APPLIED__ = " + !authoritativeRecovery + ";"
+                + "window.__CCGUI_PAGE_CONTEXT_READY__ = true;"
+                + "};";
+    }
+
+    /**
+     * Joins runtime context and guarded bridge scripts into one renderer invocation so the
+     * bridge can never become visible before its generation and recovery context.
+     */
+    static String joinRuntimePageBootstrap(String pageContext, String... guardedScripts) {
+        return pageContext + String.join("", guardedScripts);
+    }
+
+    private PageLoadKind consumeNextBrowserPageLoadKind() {
+        synchronized (this.bridgeLock) {
+            PageLoadKind pageLoadKind = this.nextBrowserPageLoadKind;
+            this.nextBrowserPageLoadKind = PageLoadKind.INITIAL_LOAD;
+            return pageLoadKind;
+        }
+    }
+
+    private PageLoadKind recoveryPageLoadKind() {
+        return recoveryPageLoadKind(host.hasEverBeenFrontendReady());
+    }
+
+    static PageLoadKind recoveryPageLoadKind(boolean hasEverBeenFrontendReady) {
+        return hasEverBeenFrontendReady
+                ? PageLoadKind.RUNTIME_RECOVERY
+                : PageLoadKind.STARTUP_RETRY;
+    }
+
+    /** Returns whether the active page is recovering state after having reached frontend readiness. */
+    public boolean isRuntimeRecoveryPage() {
+        synchronized (this.bridgeLock) {
+            return this.bridges != null
+                    && this.bridges.getPageLoadKind() == PageLoadKind.RUNTIME_RECOVERY;
+        }
     }
 
     static String unwrapBridgeMessage(String message, int expectedPageGeneration) {
@@ -1048,23 +1133,31 @@ public class WebviewInitializer {
                         recreateWebview(reason + "_stale_bridges");
                         return;
                     }
-                    pageGeneration = beginPageLoad(currentBridges);
+                    pageGeneration = beginPageLoad(currentBridges, recoveryPageLoadKind());
                 }
                 host.activatePageGeneration(pageGeneration);
                 host.setFrontendReady(false);
-                browser.loadHTML(loadChatHtmlWithInitialTabState(pageGeneration));
+                reloadCurrentPage(browser.getCefBrowser());
                 scheduleBridgeInjectionRetries(browser, currentBridges, pageGeneration);
                 host.getWebviewWatchdog().resetTimestamps();
                 host.getMainPanel().revalidate();
                 host.getMainPanel().repaint();
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 LOG.warn("[WebviewWatchdog] Reload failed, escalating to recreate: " + e.getMessage(), e);
                 recreateWebview(reason + "_reload_failed");
             }
         });
     }
 
-    private String loadChatHtmlWithInitialTabState(int pageGeneration) {
+    /**
+     * Reloads the URL already registered for the JCEF browser instead of registering another
+     * full HTML payload in the platform-wide {@code loadHTML} request map.
+     */
+    static void reloadCurrentPage(CefBrowser cefBrowser) {
+        cefBrowser.reload();
+    }
+
+    private String loadChatHtmlWithInitialTabState() {
         HtmlLoader htmlLoader = host.getHtmlLoader();
         String htmlContent = htmlLoader.loadChatHtml();
 
@@ -1075,7 +1168,7 @@ public class WebviewInitializer {
         String tabProvider = session != null ? session.getProvider() : null;
         String tabModel = session != null ? session.getModel() : null;
         String htmlWithTabState = htmlLoader.injectInitialTabState(htmlContent, tabProvider, tabModel);
-        return htmlLoader.injectPageGeneration(htmlWithTabState, pageGeneration);
+        return htmlLoader.injectPageContextBootstrap(htmlWithTabState);
     }
 
     /**
@@ -1085,6 +1178,9 @@ public class WebviewInitializer {
         ApplicationManager.getApplication().invokeLater(() -> {
             if (host.isDisposed()) { return; }
 
+            synchronized (this.bridgeLock) {
+                this.nextBrowserPageLoadKind = recoveryPageLoadKind();
+            }
             int invalidationGeneration = invalidateCurrentPage();
             host.activatePageGeneration(invalidationGeneration);
             host.setFrontendReady(false);
@@ -1156,6 +1252,7 @@ public class WebviewInitializer {
         private final JBCefJSQuery hidePanelQuery;
         private Timer bridgeInjectionTimer;
         private int pageGeneration;
+        private PageLoadKind pageLoadKind = PageLoadKind.INITIAL_LOAD;
 
         private BrowserBridges(JBCefBrowser browser) {
             this.browser = browser;
@@ -1178,13 +1275,18 @@ public class WebviewInitializer {
             this.hidePanelQuery = createdHidePanelQuery;
         }
 
-        private synchronized void beginPageLoad(int newPageGeneration) {
+        private synchronized void beginPageLoad(int newPageGeneration, PageLoadKind newPageLoadKind) {
             stopBridgeInjectionTimer();
             this.pageGeneration = newPageGeneration;
+            this.pageLoadKind = newPageLoadKind;
         }
 
         private synchronized int getPageGeneration() {
             return pageGeneration;
+        }
+
+        private synchronized PageLoadKind getPageLoadKind() {
+            return pageLoadKind;
         }
 
         private boolean belongsTo(JBCefBrowser browser) {

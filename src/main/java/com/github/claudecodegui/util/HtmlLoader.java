@@ -128,10 +128,19 @@ public class HtmlLoader {
         return html;
     }
 
-    /** Injects the page generation before the frontend bundle executes. */
-    public String injectPageGeneration(String html, int pageGeneration) {
-        String scriptInjection = "\n    <script>window.__CCG_PAGE_GENERATION__ = "
-                + pageGeneration + ";</script>";
+    /**
+     * Marks the Java-owned page context as unavailable before the frontend bundle executes.
+     * The active runtime generation is injected later by {@code WebviewInitializer}, immediately
+     * before the page-specific bridge becomes visible.
+     */
+    public String injectPageContextBootstrap(String html) {
+        String scriptInjection = "\n    <script>"
+                + "window.__CCG_PAGE_GENERATION__ = undefined;"
+                + "window.__CCGUI_PAGE_CONTEXT_READY__ = false;"
+                + "window.__CCGUI_PAGE_LOAD_KIND__ = undefined;"
+                + "window.__CCGUI_RECOVERY_RELOAD__ = undefined;"
+                + "window.__CCGUI_RECOVERY_STATE_APPLIED__ = false;"
+                + "</script>";
         int headIndex = html.indexOf("<head>");
         if (headIndex == -1) {
             return html;

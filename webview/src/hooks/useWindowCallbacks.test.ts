@@ -38,10 +38,14 @@ describe('useWindowCallbacks integration', () => {
     setUsageMaxTokens: vi.fn(),
     setSubagentHistories: vi.fn(),
     setPermissionMode: vi.fn(),
+    setCurrentProvider: vi.fn(),
     setClaudePermissionMode: vi.fn(),
     setCodexPermissionMode: vi.fn(),
     setSelectedClaudeModel: vi.fn(),
     setSelectedCodexModel: vi.fn(),
+    setLongContextEnabled: vi.fn(),
+    setReasoningEffort: vi.fn(),
+    setCodexFastMode: vi.fn(),
     setProviderConfigVersion: vi.fn(),
     setActiveProviderConfig: vi.fn(),
     setClaudeSettingsAlwaysThinkingEnabled: vi.fn(),
@@ -119,6 +123,9 @@ describe('useWindowCallbacks integration', () => {
     // so each test starts from a clean pending state.
     delete (window as unknown as Record<string, unknown>).__pendingPermissionDialogTimeout;
     delete (window as unknown as Record<string, unknown>).__pendingDependencyStatus;
+    delete window.__pendingBackendTabState;
+    delete window.__pendingUsageUpdate;
+    delete window.__CCGUI_RECOVERY_STATE_APPLIED__;
     window.__dependencyStatusState = 'pending';
   });
 
@@ -135,6 +142,65 @@ describe('useWindowCallbacks integration', () => {
     });
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
   };
+
+  it('applies Java recovery state without echoing provider or model bridge commands', () => {
+    const currentProviderRef = { current: 'codex' };
+    const opts = createOptions({ currentProviderRef });
+    renderHook(() => useWindowCallbacks(opts));
+    const bridgeCallsBeforeRestore = (window.sendToJava as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    act(() => {
+      window.applyBackendTabState?.(JSON.stringify({
+        provider: 'claude',
+        model: 'claude-opus-4-8[1m]',
+        permissionMode: 'default',
+        reasoningEffort: 'high',
+        codexFastMode: 'normal',
+      }));
+    });
+
+    expect(currentProviderRef.current).toBe('claude');
+    expect(opts.setCurrentProvider).toHaveBeenCalledWith('claude');
+    expect(opts.setSelectedClaudeModel).toHaveBeenCalledWith('claude-opus-4-8');
+    expect(opts.setLongContextEnabled).toHaveBeenCalledWith(true);
+    expect(opts.setReasoningEffort).toHaveBeenCalledWith('high');
+    expect(opts.setCodexFastMode).toHaveBeenCalledWith('normal');
+    expect(window.__CCGUI_RECOVERY_STATE_APPLIED__).toBe(true);
+    expect((window.sendToJava as ReturnType<typeof vi.fn>).mock.calls.length).toBe(bridgeCallsBeforeRestore);
+  });
+
+  it('drains Java recovery state buffered before React callback registration', () => {
+    window.__pendingBackendTabState = JSON.stringify({
+      provider: 'codex',
+      model: 'gpt-5.6-sol',
+      permissionMode: 'default',
+      codexFastMode: 'fast',
+    });
+    const opts = createOptions();
+
+    renderHook(() => useWindowCallbacks(opts));
+
+    expect(opts.setCurrentProvider).toHaveBeenCalledWith('codex');
+    expect(opts.setSelectedCodexModel).toHaveBeenCalledWith('gpt-5.6-sol');
+    expect(opts.setCodexFastMode).toHaveBeenCalledWith('fast');
+    expect(window.__pendingBackendTabState).toBeUndefined();
+  });
+
+  it('drains the latest usage update buffered before React callback registration', () => {
+    window.__pendingUsageUpdate = JSON.stringify({
+      percentage: 19,
+      usedTokens: 49300,
+      maxTokens: 258400,
+    });
+    const opts = createOptions();
+
+    renderHook(() => useWindowCallbacks(opts));
+
+    expect(opts.setUsagePercentage).toHaveBeenCalledWith(19);
+    expect(opts.setUsageUsedTokens).toHaveBeenCalledWith(49300);
+    expect(opts.setUsageMaxTokens).toHaveBeenCalledWith(258400);
+    expect(window.__pendingUsageUpdate).toBeUndefined();
+  });
 
   it('settles dependency status errors without reporting an SDK installation state', () => {
     const opts = createOptions();
