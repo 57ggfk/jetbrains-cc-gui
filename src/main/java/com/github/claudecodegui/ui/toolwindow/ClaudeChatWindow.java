@@ -622,6 +622,13 @@ public class ClaudeChatWindow {
         }
         if (savedState.model != null && !savedState.model.trim().isEmpty()) {
             session.setModel(savedState.model);
+            // ModelProviderHandler also reads the handler-owned model to detect
+            // real transitions. Keep both authorities aligned before frontend
+            // startup sync so a restored non-default model is not mistaken for
+            // a switch that invalidates the freshly loaded usage snapshot.
+            if (handlerContext != null) {
+                handlerContext.setCurrentModel(savedState.model);
+            }
         }
         if (savedState.reasoningEffort != null && !savedState.reasoningEffort.trim().isEmpty()) {
             session.setReasoningEffort(savedState.reasoningEffort);

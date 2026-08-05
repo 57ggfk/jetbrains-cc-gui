@@ -284,10 +284,11 @@ public class CodexMessageHandler implements MessageCallback {
             // Normalize to the Claude usage schema (input excludes cache) and stamp it
             // as turnUsage for the per-turn token display in the webview.
             com.google.gson.JsonObject turnUsage = buildTurnUsage(usage);
-            com.google.gson.JsonObject statusUsage = currentTurnContextUsage == null
-                    ? usage
-                    : currentTurnContextUsage;
-            boolean updated = attachUsageToLastAssistant(statusUsage, turnUsage);
+            // turn.completed usage is per-turn accounting only. Some Codex SDK
+            // versions expose session-cumulative values here, and the result never
+            // carries the authoritative context window. Only token_count may update
+            // the top-level context snapshot.
+            boolean updated = attachUsageToLastAssistant(currentTurnContextUsage, turnUsage);
             if (updated) {
                 callbackHandler.notifyMessageUpdate(state.getMessages());
                 LOG.info("Codex usage applied from result message");
@@ -353,20 +354,27 @@ public class CodexMessageHandler implements MessageCallback {
 
             com.google.gson.JsonObject info = payload.getAsJsonObject("info");
             if (!info.has("last_token_usage") || !info.get("last_token_usage").isJsonObject()) {
-                LOG.debug("Ignoring Codex cumulative token_count without last_token_usage");
+                // total_token_usage is cumulative across the whole session and can
+                // exceed the active model window. It is valid only for Node-side
+                // per-turn delta calculation, never as the current-context numerator.
+                LOG.debug("Ignoring Codex token_count without last_token_usage");
                 return;
             }
+            com.google.gson.JsonObject contextUsage = info.getAsJsonObject("last_token_usage");
 
-            com.google.gson.JsonObject lastUsage = info.getAsJsonObject("last_token_usage");
-            int inputTokens = lastUsage.has("input_tokens") ? lastUsage.get("input_tokens").getAsInt() : 0;
-            int outputTokens = lastUsage.has("output_tokens") ? lastUsage.get("output_tokens").getAsInt() : 0;
-            int cachedInputTokens = lastUsage.has("cached_input_tokens") ? lastUsage.get("cached_input_tokens").getAsInt() : 0;
+            int inputTokens = readInt(contextUsage, "input_tokens");
+            int outputTokens = readInt(contextUsage, "output_tokens");
+            int cachedInputTokens = readInt(contextUsage, "cached_input_tokens");
 
             com.google.gson.JsonObject usage = new com.google.gson.JsonObject();
             usage.addProperty("input_tokens", inputTokens);
             usage.addProperty("output_tokens", outputTokens);
             usage.addProperty("cache_read_input_tokens", cachedInputTokens);
             usage.addProperty("cache_creation_input_tokens", 0);
+            int modelContextWindow = readInt(info, "model_context_window");
+            if (modelContextWindow > 0) {
+                usage.addProperty("model_context_window", modelContextWindow);
+            }
             currentTurnContextUsage = usage.deepCopy();
 
             // token_count is not turn-scoped, so never stamp it as turnUsage. The latest
@@ -398,7 +406,9 @@ public class CodexMessageHandler implements MessageCallback {
         for (int i = messages.size() - 1; i >= 0; i--) {
             Message msg = messages.get(i);
             if (msg.type == Message.Type.ASSISTANT && msg.raw != null) {
-                msg.raw.add("usage", usage);
+                if (usage != null) {
+                    msg.raw.add("usage", usage);
+                }
                 if (turnUsage != null) {
                     msg.raw.add("turnUsage", turnUsage);
                     Double turnCostUsd = UsageCostCalculator.calculateTurnCostUsd("codex", turnUsage, state.getModel());

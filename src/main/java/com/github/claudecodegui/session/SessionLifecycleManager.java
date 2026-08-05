@@ -4,15 +4,13 @@ import com.github.claudecodegui.bridge.NodeDetector;
 import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.model.SessionTemplate;
 import com.github.claudecodegui.settings.CodemossSettingsService;
+import com.github.claudecodegui.handler.UsagePushService;
 import com.github.claudecodegui.handler.core.HandlerContext;
-import com.github.claudecodegui.handler.SettingsHandler;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.skill.SlashCommandRegistry;
 import com.github.claudecodegui.util.JsUtils;
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -400,34 +398,11 @@ public class SessionLifecycleManager {
     }
 
     /**
-     * Reset token usage statistics in the frontend (used after new session creation).
+     * Clear transient context usage after creating a new session. The new provider has
+     * not reported a trusted token count yet, so used/max values remain unknown.
      */
     private void resetTokenUsage() {
-        int maxTokens = SettingsHandler.getModelContextLimit(
-                host.getHandlerContext().getCurrentProvider(),
-                host.getHandlerContext().getCurrentModel()
-        );
-        JsonObject usageUpdate = new JsonObject();
-        usageUpdate.addProperty("percentage", 0);
-        usageUpdate.addProperty("totalTokens", 0);
-        usageUpdate.addProperty("limit", maxTokens);
-        usageUpdate.addProperty("usedTokens", 0);
-        usageUpdate.addProperty("maxTokens", maxTokens);
-
-        String usageJson = new Gson().toJson(usageUpdate);
-
-        JBCefBrowser browser = host.getBrowser();
-        if (browser != null && !host.isDisposed()) {
-            String js = "(function() {" +
-                                "  if (typeof window.onUsageUpdate === 'function') {" +
-                                "    window.onUsageUpdate('" + JsUtils.escapeJs(usageJson) + "');" +
-                                "    console.log('[Backend->Frontend] Usage reset for new session');" +
-                                "  } else {" +
-                                "    console.warn('[Backend->Frontend] window.onUsageUpdate not found');" +
-                                "  }" +
-                                "})();";
-            browser.getCefBrowser().executeJavaScript(js, browser.getCefBrowser().getURL(), 0);
-        }
+        new UsagePushService(host.getHandlerContext()).clearUsageDisplay();
     }
 
     private String getCurrentEditorFilePath() {

@@ -156,22 +156,59 @@ test('current-turn session replay emits custom_tool_call exec patches found only
   }
 });
 
-test('forwards Codex token_count events to the Java usage handler', async () => {
+test('token_count forwards current context and derives turn usage from cumulative deltas', async () => {
   const emittedMessages = [];
   const state = createInitialEventState((message) => emittedMessages.push(message));
 
   await captureStdout(async () => {
     await processCodexEventStream(
       eventsFrom([
+        { type: 'turn.started' },
         {
           type: 'event_msg',
           payload: {
             type: 'token_count',
             info: {
-              total_token_usage: { input_tokens: 13007800, output_tokens: 9000 },
-              last_token_usage: { input_tokens: 180000, output_tokens: 2400 },
+              total_token_usage: {
+                input_tokens: 150,
+                cached_input_tokens: 60,
+                output_tokens: 15,
+                total_tokens: 165,
+              },
+              last_token_usage: {
+                input_tokens: 50,
+                cached_input_tokens: 20,
+                output_tokens: 5,
+                total_tokens: 55,
+              },
+              model_context_window: 258400,
             },
           },
+        },
+        {
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: {
+                input_tokens: 220,
+                cached_input_tokens: 90,
+                output_tokens: 30,
+                total_tokens: 250,
+              },
+              last_token_usage: {
+                input_tokens: 70,
+                cached_input_tokens: 30,
+                output_tokens: 15,
+                total_tokens: 85,
+              },
+              model_context_window: 258400,
+            },
+          },
+        },
+        {
+          type: 'turn.completed',
+          usage: { input_tokens: 220, cached_input_tokens: 90, output_tokens: 30 },
         },
       ]),
       state,
@@ -179,36 +216,51 @@ test('forwards Codex token_count events to the Java usage handler', async () => 
     );
   });
 
-  assert.deepEqual(emittedMessages, [{
-    type: 'event_msg',
-    payload: {
-      type: 'token_count',
-      info: {
-        total_token_usage: { input_tokens: 13007800, output_tokens: 9000 },
-        last_token_usage: { input_tokens: 180000, output_tokens: 2400 },
-      },
-    },
-  }]);
+  const contextMessages = emittedMessages.filter((message) => message.type === 'event_msg');
+  assert.equal(contextMessages.length, 2);
+  assert.deepEqual(contextMessages[1].payload.info.last_token_usage, {
+    input_tokens: 70,
+    cached_input_tokens: 30,
+    output_tokens: 15,
+    total_tokens: 85,
+  });
+  assert.equal(contextMessages[1].payload.info.model_context_window, 258400);
+
+  const result = emittedMessages.find((message) => message.type === 'result');
+  assert.deepEqual(result.usage, {
+    input_tokens: 120,
+    output_tokens: 20,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 50,
+  });
 });
 
-test('recovers current context usage from the session when the SDK omits token_count events', async () => {
-  const tempDirectory = await mkdtemp(join(tmpdir(), 'codex-context-usage-'));
+test('turn.completed recovers omitted SDK token_count events from current-turn JSONL', async () => {
+  const tempDirectory = await mkdtemp(join(tmpdir(), 'codex-token-count-replay-'));
   const tempSessionPath = join(tempDirectory, 'fixture-session.jsonl');
   await writeFile(
     tempSessionPath,
-    [
-      JSON.stringify({ type: 'turn_context', payload: { turn_id: 'old-turn' } }),
-      JSON.stringify({
-        type: 'event_msg',
-        payload: {
-          type: 'token_count',
-          info: {
-            total_token_usage: { input_tokens: 9000000, output_tokens: 30000 },
-            last_token_usage: { input_tokens: 90000, output_tokens: 30 },
+    `${JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: 343224,
+            cached_input_tokens: 300544,
+            output_tokens: 2150,
+            total_tokens: 345374,
           },
+          last_token_usage: {
+            input_tokens: 49060,
+            cached_input_tokens: 46848,
+            output_tokens: 231,
+            total_tokens: 49291,
+          },
+          model_context_window: 258400,
         },
-      }),
-    ].join('\n') + '\n',
+      },
+    })}\n`,
     'utf8',
   );
 
@@ -221,18 +273,29 @@ test('recovers current context usage from the session when the SDK omits token_c
     await appendFile(
       tempSessionPath,
       [
-        JSON.stringify({ type: 'turn_context', payload: { turn_id: 'turn-1' } }),
-        JSON.stringify({
+        { type: 'turn_context', payload: { cwd: '/fixture' } },
+        {
           type: 'event_msg',
           payload: {
             type: 'token_count',
             info: {
-              total_token_usage: { input_tokens: 22496533, output_tokens: 71502 },
-              last_token_usage: { input_tokens: 127886, output_tokens: 88 },
+              total_token_usage: {
+                input_tokens: 396607,
+                cached_input_tokens: 349440,
+                output_tokens: 2219,
+                total_tokens: 398826,
+              },
+              last_token_usage: {
+                input_tokens: 53383,
+                cached_input_tokens: 48896,
+                output_tokens: 69,
+                total_tokens: 53452,
+              },
+              model_context_window: 258400,
             },
           },
-        }),
-      ].join('\n') + '\n',
+        },
+      ].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
       'utf8',
     );
 
@@ -242,7 +305,7 @@ test('recovers current context usage from the session when the SDK omits token_c
           { type: 'turn.started' },
           {
             type: 'turn.completed',
-            usage: { input_tokens: 22496533, output_tokens: 71502 },
+            usage: { input_tokens: 396607, cached_input_tokens: 349440, output_tokens: 2219 },
           },
         ]),
         state,
@@ -250,20 +313,75 @@ test('recovers current context usage from the session when the SDK omits token_c
       );
     });
 
-    assert.deepEqual(emittedMessages[0], {
-      type: 'event_msg',
-      payload: {
-        type: 'token_count',
-        info: {
-          total_token_usage: { input_tokens: 22496533, output_tokens: 71502 },
-          last_token_usage: { input_tokens: 127886, output_tokens: 88 },
-        },
-      },
+    const contextMessages = emittedMessages.filter((message) => message.type === 'event_msg');
+    assert.equal(contextMessages.length, 1);
+    assert.equal(contextMessages[0].payload.info.last_token_usage.total_tokens, 53452);
+    assert.equal(contextMessages[0].payload.info.model_context_window, 258400);
+    const result = emittedMessages.find((message) => message.type === 'result');
+    assert.deepEqual(result.usage, {
+      input_tokens: 53383,
+      output_tokens: 69,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 48896,
     });
-    assert.equal(emittedMessages[1].type, 'result');
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
   }
+});
+
+test('event_msg forwarding excludes non-token events and pre-turn replay', async () => {
+  const emittedMessages = [];
+  const state = createInitialEventState((message) => emittedMessages.push(message));
+  const tokenCount = {
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: {
+        total_token_usage: { input_tokens: 10, output_tokens: 1 },
+        last_token_usage: { input_tokens: 10, output_tokens: 1 },
+        model_context_window: 258400,
+      },
+    },
+  };
+
+  await captureStdout(async () => {
+    await processCodexEventStream(
+      eventsFrom([
+        tokenCount,
+        { type: 'turn.started' },
+        { type: 'event_msg', payload: { type: 'status' } },
+        tokenCount,
+        { type: 'turn.completed' },
+      ]),
+      state,
+      makeConfig(),
+    );
+  });
+
+  const contextMessages = emittedMessages.filter((message) => message.type === 'event_msg');
+  assert.equal(contextMessages.length, 1);
+  assert.equal(contextMessages[0].payload.type, 'token_count');
+});
+
+test('turn.completed does not fabricate usage when no trusted token_count is available', async () => {
+  const emittedMessages = [];
+  const state = createInitialEventState((message) => emittedMessages.push(message));
+
+  await captureStdout(async () => {
+    await processCodexEventStream(
+      eventsFrom([
+        { type: 'turn.started' },
+        {
+          type: 'turn.completed',
+          usage: { input_tokens: 37, cached_input_tokens: 11, output_tokens: 3 },
+        },
+      ]),
+      state,
+      makeConfig(),
+    );
+  });
+
+  assert.equal(emittedMessages.some((message) => message.type === 'result'), false);
 });
 
 test('Codex item.updated agent_message emits incremental content deltas before completion', async () => {

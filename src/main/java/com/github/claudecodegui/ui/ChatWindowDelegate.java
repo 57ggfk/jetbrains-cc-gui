@@ -637,8 +637,8 @@ public class ChatWindowDelegate {
 
     /**
      * Replays the non-mutating UI refreshes formerly triggered by boot-time provider/model sync.
-     * Usage calculation deliberately delegates to the existing v0.5 services; recovery does not
-     * introduce a separate Codex context-window algorithm.
+     * Usage is restored only from an existing provider snapshot. Empty sessions may still be
+     * loading history and must not overwrite a valid frontend value with a synthetic zero.
      */
     private void refreshFrontendDerivedState() {
         ClaudeSession session = host.getSession();
@@ -648,7 +648,7 @@ public class ChatWindowDelegate {
         }
 
         UsagePushService usagePushService = new UsagePushService(context);
-        usagePushService.pushUsageUpdateAfterModelChange(resolveModelContextLimitForRecovery(
+        usagePushService.pushCurrentUsageIfAvailable(resolveModelContextLimitForRecovery(
                 session.getProvider(),
                 session.getModel(),
                 context.getSettingsService()

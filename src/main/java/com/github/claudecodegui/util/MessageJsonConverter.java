@@ -340,7 +340,9 @@ public class MessageJsonConverter {
             }
 
             int usedTokens = TokenUsageUtils.extractContextTokens(lastUsage, currentProvider);
-            int maxTokens = SettingsHandler.getModelContextLimit(currentProvider, handlerContext.getCurrentModel());
+            int fallbackMaxTokens = SettingsHandler.getModelContextLimit(
+                    currentProvider, handlerContext.getCurrentModel());
+            int maxTokens = TokenUsageUtils.extractMaxTokens(lastUsage, fallbackMaxTokens);
             int percentage = Math.min(100, maxTokens > 0 ? (int) ((usedTokens * 100.0) / maxTokens) : 0);
 
             LOG.debug("Pushing usage update: provider=" + currentProvider + ", usedTokens=" + usedTokens + ", max=" + maxTokens + ", percentage=" + percentage + "%");
