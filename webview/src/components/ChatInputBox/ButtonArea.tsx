@@ -2,10 +2,11 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
-import { CLAUDE_MODELS, CODEX_MODELS } from './types';
+import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS } from './types';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
+import { useCliModels } from '../../hooks/providers/useCliModels';
 
 /**
  * Get custom Codex model list from localStorage
@@ -97,6 +98,7 @@ export const ButtonArea = ({
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
+  const { cliModels, cliModelsLoading } = useCliModels(currentProvider);
 
   // Track changes to custom models in localStorage
   // When localStorage changes, updating this version number triggers useMemo recalculation
@@ -168,6 +170,12 @@ export const ButtonArea = ({
       const filteredBuiltIn = CODEX_MODELS.filter(m => !customIds.has(m.id));
       return [...customModels, ...filteredBuiltIn];
     }
+    if (currentProvider === 'grok') {
+      return GROK_MODELS;
+    }
+    if (currentProvider === 'kimi' || currentProvider === 'opencode') {
+      return cliModels;
+    }
     if (typeof window === 'undefined' || !window.localStorage) {
       return CLAUDE_MODELS;
     }
@@ -192,7 +200,17 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion]);
+  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels]);
+
+  // When CLI model catalog arrives, ensure selection is a real entry.
+  useEffect(() => {
+    if (currentProvider !== 'kimi' && currentProvider !== 'opencode') return;
+    if (!cliModels.length || !onModelSelect) return;
+    const exists = cliModels.some((model) => model.id === selectedModel);
+    if (!exists) {
+      onModelSelect(cliModels[0].id);
+    }
+  }, [cliModels, currentProvider, onModelSelect, selectedModel]);
 
   /**
    * Handle submit button click
@@ -273,7 +291,16 @@ export const ButtonArea = ({
           compact
         />
         <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
-        <ModelSelect value={selectedModel} onChange={handleModelSelect} models={availableModels} currentProvider={currentProvider} onAddModel={onAddModel} longContextEnabled={longContextEnabled} onLongContextChange={onLongContextChange} />
+        <ModelSelect
+          value={selectedModel}
+          onChange={handleModelSelect}
+          models={availableModels}
+          currentProvider={currentProvider}
+          loading={cliModelsLoading}
+          onAddModel={onAddModel}
+          longContextEnabled={longContextEnabled}
+          onLongContextChange={onLongContextChange}
+        />
         <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />

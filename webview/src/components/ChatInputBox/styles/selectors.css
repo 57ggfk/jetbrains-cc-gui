@@ -220,6 +220,34 @@
   color: var(--success-color);
 }
 
+/* Trailing cluster: Beta badge + check / chevron, right-aligned */
+.provider-option-trailing {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.provider-option-trailing .check-mark {
+  margin-left: 0;
+}
+
+/* Beta tag for experimental CLI providers (Grok / Kimi / OpenCode / PI) */
+.provider-beta-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.18);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  flex-shrink: 0;
+  user-select: none;
+}
+
 .selector-option .model-description {
   font-size: 11px;
   color: var(--text-secondary);

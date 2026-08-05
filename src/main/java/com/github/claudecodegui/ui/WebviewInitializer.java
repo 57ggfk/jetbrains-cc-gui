@@ -6,6 +6,8 @@ import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.model.NodeDetectionResult;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import java.util.Map;
 import com.github.claudecodegui.session.ClaudeSession;
 import com.github.claudecodegui.startup.BridgePreloader;
 import com.github.claudecodegui.util.FontConfigService;
@@ -64,6 +66,7 @@ public class WebviewInitializer {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        Map<String, MarkerCliBridge> getCliBridges();
         JPanel getMainPanel();
         HtmlLoader getHtmlLoader();
         HandlerContext getHandlerContext();
@@ -80,6 +83,17 @@ public class WebviewInitializer {
     private final WebviewHost host;
 
     private final Object bridgeLock = new Object();
+
+    private static void applyNodePathToCliBridges(Map<String, MarkerCliBridge> cliBridges, String path) {
+        if (cliBridges == null) {
+            return;
+        }
+        for (MarkerCliBridge bridge : cliBridges.values()) {
+            if (bridge != null) {
+                bridge.setNodeExecutable(path);
+            }
+        }
+    }
 
     /**
      * JCEF JS bridges for the current browser. Keeping each browser's queries
@@ -133,6 +147,7 @@ public class WebviewInitializer {
 
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
+        Map<String, MarkerCliBridge> cliBridges = host.getCliBridges();
 
         PropertiesComponent props = PropertiesComponent.getInstance();
         String savedNodePath = props.getValue(NODE_PATH_PROPERTY_KEY);
@@ -142,6 +157,7 @@ public class WebviewInitializer {
             String trimmed = savedNodePath.trim();
             claudeSDKBridge.setNodeExecutable(trimmed);
             codexSDKBridge.setNodeExecutable(trimmed);
+            applyNodePathToCliBridges(cliBridges, trimmed);
             nodeResult = claudeSDKBridge.verifyAndCacheNodePath(trimmed);
             if (nodeResult == null || !nodeResult.isFound()) {
                 showInvalidNodePathPanel(trimmed, nodeResult != null ? nodeResult.getErrorMessage() : null);
@@ -153,6 +169,7 @@ public class WebviewInitializer {
                 props.setValue(NODE_PATH_PROPERTY_KEY, nodeResult.getNodePath());
                 claudeSDKBridge.setNodeExecutable(nodeResult.getNodePath());
                 codexSDKBridge.setNodeExecutable(nodeResult.getNodePath());
+                applyNodePathToCliBridges(cliBridges, nodeResult.getNodePath());
                 claudeSDKBridge.verifyAndCacheNodePath(nodeResult.getNodePath());
             }
         }
@@ -952,6 +969,7 @@ public class WebviewInitializer {
     public void handleNodePathSave(String manualPath) {
         ClaudeSDKBridge claudeSDKBridge = this.host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = this.host.getCodexSDKBridge();
+        Map<String, MarkerCliBridge> cliBridges = this.host.getCliBridges();
         JPanel mainPanel = this.host.getMainPanel();
 
         try {
@@ -962,6 +980,7 @@ public class WebviewInitializer {
                 props.unsetValue(NODE_PATH_PROPERTY_KEY);
                 claudeSDKBridge.setNodeExecutable(null);
                 codexSDKBridge.setNodeExecutable(null);
+                applyNodePathToCliBridges(cliBridges, null);
                 LOG.info("Cleared manual Node.js path, triggering auto-detection");
 
                 NodeDetectionResult detected = claudeSDKBridge.detectNodeWithDetails();
@@ -970,6 +989,7 @@ public class WebviewInitializer {
                     props.setValue(NODE_PATH_PROPERTY_KEY, detectedPath);
                     claudeSDKBridge.verifyAndCacheNodePath(detectedPath);
                     codexSDKBridge.setNodeExecutable(detectedPath);
+                    applyNodePathToCliBridges(cliBridges, detectedPath);
                     LOG.info("Auto-detected and saved Node.js path: " + detectedPath);
                 }
             } else {
@@ -980,6 +1000,7 @@ public class WebviewInitializer {
                     props.setValue(NODE_PATH_PROPERTY_KEY, manualPath);
                     claudeSDKBridge.setNodeExecutable(manualPath);
                     codexSDKBridge.setNodeExecutable(manualPath);
+                    applyNodePathToCliBridges(cliBridges, manualPath);
                     LOG.info("Saved manual Node.js path: " + manualPath);
                 } else {
                     // Verification failed, show error and don't save invalid path

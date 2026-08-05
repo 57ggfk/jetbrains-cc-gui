@@ -20,7 +20,7 @@ export const getStreamEndHandlingMode = (
   if (isStreaming || currentTurnId > 0) {
     return 'full';
   }
-  if (provider === 'codex') {
+  if (provider === 'codex' || provider === 'grok' || provider === 'kimi' || provider === 'opencode') {
     return 'minimal';
   }
   return 'skip';

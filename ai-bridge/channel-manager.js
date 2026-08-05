@@ -2,14 +2,17 @@
 
 /**
  * AI Bridge Channel Manager
- * Unified bridge entry point for Claude and Codex SDKs
+ * Unified bridge entry point for Claude/Codex SDKs and CLI providers
  *
  * Command format:
  *   node channel-manager.js <provider> <command> [args...]
  *
  * Provider:
- *   claude - Claude Agent SDK (@anthropic-ai/claude-agent-sdk)
- *   codex  - Codex SDK (@openai/codex-sdk)
+ *   claude   - Claude Agent SDK (@anthropic-ai/claude-agent-sdk)
+ *   codex    - Codex SDK (@openai/codex-sdk)
+ *   grok     - Grok CLI (no SDK; spawns local `grok` binary)
+ *   kimi     - Kimi CLI (no SDK; spawns local `kimi` binary)
+ *   opencode - OpenCode CLI (no SDK; spawns local `opencode` binary)
  *
  * Commands:
  *   send                - Send a message (parameters passed via stdin as JSON)
@@ -26,6 +29,9 @@
 import { readStdinData } from './utils/stdin-utils.js';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
+import { handleGrokCommand } from './channels/grok-channel.js';
+import { handleKimiCommand } from './channels/kimi-channel.js';
+import { handleOpenCodeCommand } from './channels/opencode-channel.js';
 import { getSdkStatus, isClaudeSdkAvailable, isCodexSdkAvailable } from './utils/sdk-loader.js';
 import { injectStartupEnvVars, configureCliIdentity } from './config/api-config.js';
 
@@ -117,6 +123,9 @@ async function handleSystemCommand(command, args, stdinData) {
 const providerHandlers = {
   claude: handleClaudeCommand,
   codex: handleCodexCommand,
+  grok: handleGrokCommand,
+  kimi: handleKimiCommand,
+  opencode: handleOpenCodeCommand,
   system: handleSystemCommand
 };
 
@@ -127,7 +136,7 @@ const providerHandlers = {
     // Validate provider
     console.error('[DIAG-EXEC] Validating provider...');
     if (!provider || !providerHandlers[provider]) {
-      console.error('Invalid provider. Use "claude", "codex", or "system"');
+      console.error('Invalid provider. Use "claude", "codex", "grok", "kimi", "opencode", or "system"');
       console.log(JSON.stringify({
         success: false,
         error: 'Invalid provider: ' + provider

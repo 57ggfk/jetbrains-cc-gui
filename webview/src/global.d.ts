@@ -889,6 +889,12 @@ interface Window {
   updateDependencyStatus?: (json: string) => void;
 
   /**
+   * CLI tools install/version detection result (Settings → CLI tab).
+   * Payload is a map of tool id → { id, name, binaryName, installed, version?, path?, error? }.
+   */
+  updateCliStatus?: (json: string) => void;
+
+  /**
    * Dependency install progress callback
    */
   dependencyInstallProgress?: (json: string) => void;
@@ -1072,4 +1078,20 @@ interface Window {
    * JSON string or object with shape { type, title, message }.
    */
   backend_notification?: (...args: unknown[]) => void;
+
+  /**
+   * CLI provider model catalog (Kimi / OpenCode). Java pushes JSON after
+   * `get_cli_models:<provider>` via channel-manager `listModels`.
+   */
+  setCliModels?: (
+    dataOrStr:
+      | string
+      | {
+          success?: boolean;
+          provider?: string;
+          models?: Array<{ id?: string; label?: string; description?: string }>;
+          error?: string;
+          defaultModel?: string;
+        }
+  ) => void;
 }

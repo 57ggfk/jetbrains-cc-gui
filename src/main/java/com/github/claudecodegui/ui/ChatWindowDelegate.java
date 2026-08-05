@@ -8,6 +8,8 @@ import com.github.claudecodegui.handler.ClipboardHandler;
 import com.github.claudecodegui.handler.ContextHandler;
 import com.github.claudecodegui.handler.CodexMcpServerHandler;
 import com.github.claudecodegui.handler.CodexPetHandler;
+import com.github.claudecodegui.handler.CliModelsHandler;
+import com.github.claudecodegui.handler.CliStatusHandler;
 import com.github.claudecodegui.handler.DependencyHandler;
 import com.github.claudecodegui.handler.DiffHandler;
 import com.github.claudecodegui.handler.core.HandlerContext;
@@ -35,6 +37,8 @@ import com.github.claudecodegui.handler.file.UndoFileHandler;
 import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import java.util.Map;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.SessionLifecycleManager;
@@ -76,6 +80,7 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        Map<String, MarkerCliBridge> getCliBridges();
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
         JPanel getMainPanel();
@@ -125,17 +130,53 @@ public class ChatWindowDelegate {
         this.host = host;
     }
 
-    public void loadNodePathFromSettings() {
+    private void applyNodePathToBridges(String path) {
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
+        if (claudeSDKBridge != null) {
+            claudeSDKBridge.setNodeExecutable(path);
+        }
+        if (codexSDKBridge != null) {
+            codexSDKBridge.setNodeExecutable(path);
+        }
+        Map<String, MarkerCliBridge> cliBridges = host.getCliBridges();
+        if (cliBridges != null) {
+            for (MarkerCliBridge bridge : cliBridges.values()) {
+                if (bridge != null) {
+                    bridge.setNodeExecutable(path);
+                }
+            }
+        }
+    }
+
+    private void applySessionIdToBridges(String sessionId) {
+        ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
+        CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
+        if (claudeSDKBridge != null) {
+            claudeSDKBridge.setSessionId(sessionId);
+        }
+        if (codexSDKBridge != null) {
+            codexSDKBridge.setSessionId(sessionId);
+        }
+        Map<String, MarkerCliBridge> cliBridges = host.getCliBridges();
+        if (cliBridges != null) {
+            for (MarkerCliBridge bridge : cliBridges.values()) {
+                if (bridge != null) {
+                    bridge.setSessionId(sessionId);
+                }
+            }
+        }
+    }
+
+    public void loadNodePathFromSettings() {
+        ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         try {
             PropertiesComponent props = PropertiesComponent.getInstance();
             String savedNodePath = props.getValue(NODE_PATH_PROPERTY_KEY);
 
             if (savedNodePath != null && !savedNodePath.trim().isEmpty()) {
                 String path = savedNodePath.trim();
-                claudeSDKBridge.setNodeExecutable(path);
-                codexSDKBridge.setNodeExecutable(path);
+                applyNodePathToBridges(path);
                 claudeSDKBridge.verifyAndCacheNodePath(path);
                 LOG.info("Using manually configured Node.js path: " + path);
             } else {
@@ -148,8 +189,7 @@ public class ChatWindowDelegate {
                     String detectedVersion = detected.getNodeVersion();
 
                     props.setValue(NODE_PATH_PROPERTY_KEY, detectedPath);
-                    claudeSDKBridge.setNodeExecutable(detectedPath);
-                    codexSDKBridge.setNodeExecutable(detectedPath);
+                    applyNodePathToBridges(detectedPath);
                     claudeSDKBridge.verifyAndCacheNodePath(detectedPath);
 
                     LOG.info("Auto-detected Node.js: " + detectedPath + " (" + detectedVersion + ")");
@@ -214,16 +254,28 @@ public class ChatWindowDelegate {
         if ((sessionId == null || sessionId.isEmpty()) && codexSDKBridge != null) {
             sessionId = codexSDKBridge.getSessionId();
         }
+        if (sessionId == null || sessionId.isEmpty()) {
+            Map<String, MarkerCliBridge> cliBridges = host.getCliBridges();
+            if (cliBridges != null) {
+                for (MarkerCliBridge bridge : cliBridges.values()) {
+                    if (bridge == null) {
+                        continue;
+                    }
+                    String candidate = bridge.getSessionId();
+                    if (candidate != null && !candidate.isEmpty()) {
+                        sessionId = candidate;
+                        break;
+                    }
+                }
+            }
+        }
 
         if (sessionId == null || sessionId.isEmpty()) {
             LOG.warn("Failed to get session ID from bridges, generating fallback UUID");
             sessionId = java.util.UUID.randomUUID().toString();
         }
 
-        claudeSDKBridge.setSessionId(sessionId);
-        if (codexSDKBridge != null) {
-            codexSDKBridge.setSessionId(sessionId);
-        }
+        applySessionIdToBridges(sessionId);
         LOG.info("Unified bridge sessionId for PermissionService routing: " + sessionId);
 
         PermissionService permissionService = PermissionService.getInstance(project, sessionId);
@@ -298,6 +350,8 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(new RewindHandler(handlerContext));
         messageDispatcher.registerHandler(new UndoFileHandler(handlerContext));
         messageDispatcher.registerHandler(new DependencyHandler(handlerContext));
+        messageDispatcher.registerHandler(new CliModelsHandler(handlerContext));
+        messageDispatcher.registerHandler(new CliStatusHandler(handlerContext));
         messageDispatcher.registerHandler(new ClipboardHandler(handlerContext));
         messageDispatcher.registerHandler(new NodeProcessHandler(handlerContext));
 

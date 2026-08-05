@@ -17,6 +17,12 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     setSelectedCodexModel: vi.fn(),
     setClaudePermissionMode: vi.fn(),
     setCodexPermissionMode: vi.fn(),
+    setSelectedGrokModel: vi.fn(),
+    setSelectedKimiModel: vi.fn(),
+    setSelectedOpenCodeModel: vi.fn(),
+    setGrokPermissionMode: vi.fn(),
+    setKimiPermissionMode: vi.fn(),
+    setOpenCodePermissionMode: vi.fn(),
     setPermissionMode: vi.fn(),
     setLongContextEnabled: vi.fn(),
     setReasoningEffort: vi.fn(),
@@ -26,6 +32,12 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     selectedCodexModel: 'gpt-5-codex',
     claudePermissionMode: 'default' as PermissionMode,
     codexPermissionMode: 'default' as PermissionMode,
+    selectedGrokModel: 'grok',
+    selectedKimiModel: 'auto',
+    selectedOpenCodeModel: 'opencode-default',
+    grokPermissionMode: 'default' as PermissionMode,
+    kimiPermissionMode: 'default' as PermissionMode,
+    openCodePermissionMode: 'default' as PermissionMode,
     longContextEnabled: false,
     reasoningEffort: 'medium',
     codexFastMode: 'normal',
@@ -162,5 +174,65 @@ describe('useModelStatePersistence — retired model migration', () => {
 
     expect(bridgeEventsFor('set_model')).toEqual([['set_model', DEFAULT_CLAUDE_MODEL_ID]]);
     expect(DEFAULT_CLAUDE_MODEL_ID).not.toBe('claude-fable-5');
+  });
+});
+
+describe('useModelStatePersistence — CLI provider persistence', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sendBridgeEventMock.mockClear();
+    (window as unknown as { sendToJava?: unknown }).sendToJava = () => {};
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (window as unknown as { sendToJava?: unknown }).sendToJava;
+    delete (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__;
+    delete (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__;
+  });
+
+  it('restores a saved CLI provider instead of silently falling back to claude', () => {
+    // Regression: the hydration allowlist was ['claude','codex'], so a saved
+    // grok/kimi/opencode provider was dropped and syncToBackend then pushed
+    // set_provider claude, clobbering the CLI session on restart.
+    const setCurrentProvider = vi.fn();
+    localStorage.setItem('model-selection-state', JSON.stringify({
+      provider: 'kimi',
+      kimiModel: 'kimi-k3',
+    }));
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setCurrentProvider })));
+    vi.advanceTimersByTime(200);
+
+    expect(setCurrentProvider).toHaveBeenCalledWith('kimi');
+    expect(bridgeEventsFor('set_provider')).toEqual([['set_provider', 'kimi']]);
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'kimi-k3']]);
+  });
+
+  it('honors a backend-supplied CLI provider via __INITIAL_TAB_PROVIDER__', () => {
+    const setCurrentProvider = vi.fn();
+    (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__ = 'grok';
+    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'grok';
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setCurrentProvider })));
+    vi.advanceTimersByTime(200);
+
+    expect(setCurrentProvider).toHaveBeenCalledWith('grok');
+    expect(bridgeEventsFor('set_provider')).toEqual([['set_provider', 'grok']]);
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'grok']]);
+  });
+
+  it('persists CLI model and permission selections in the snapshot', () => {
+    renderHook(() => useModelStatePersistence(makeOptions({
+      currentProvider: 'opencode',
+      selectedOpenCodeModel: 'openai/gpt-5',
+      openCodePermissionMode: 'acceptEdits',
+    })));
+
+    const saved = JSON.parse(localStorage.getItem('model-selection-state') ?? '{}');
+    expect(saved.provider).toBe('opencode');
+    expect(saved.openCodeModel).toBe('openai/gpt-5');
+    expect(saved.openCodePermissionMode).toBe('acceptEdits');
   });
 });

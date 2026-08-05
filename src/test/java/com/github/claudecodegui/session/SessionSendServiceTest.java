@@ -35,6 +35,31 @@ public class SessionSendServiceTest {
     }
 
     @Test
+    public void resolveEffectivePermissionModeDowngradesPlanForCliProviders() {
+        assertEquals(
+                "default",
+                SessionSendService.resolveEffectivePermissionMode("grok", "plan", "acceptEdits")
+        );
+        assertEquals(
+                "default",
+                SessionSendService.resolveEffectivePermissionMode("kimi", "plan", null)
+        );
+        assertEquals(
+                "default",
+                SessionSendService.resolveEffectivePermissionMode("opencode", null, "plan")
+        );
+    }
+
+    @Test
+    public void normalizeCliModelForProviderMapsSentinelsAndGrokLegacyIds() {
+        assertNull(SessionSendService.normalizeCliModelForProvider("kimi", "auto"));
+        assertNull(SessionSendService.normalizeCliModelForProvider("opencode", "opencode-default"));
+        assertEquals("kimi-k2.5", SessionSendService.normalizeCliModelForProvider("kimi", "kimi-k2.5"));
+        assertEquals("grok", SessionSendService.normalizeCliModelForProvider("grok", "grok-4.5"));
+        assertNull(SessionSendService.normalizeCliModelForProvider("grok", "claude-sonnet-5"));
+    }
+
+    @Test
     public void normalizeRequestedReasoningEffortRejectsBlankAndUnknownValues() {
         assertNull(SessionSendService.normalizeRequestedReasoningEffort(null));
         assertNull(SessionSendService.normalizeRequestedReasoningEffort(" "));

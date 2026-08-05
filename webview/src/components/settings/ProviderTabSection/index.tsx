@@ -4,6 +4,7 @@ import type { ProviderConfig, CodexProviderConfig } from '../../../types/provide
 import { STORAGE_KEYS } from '../../../types/provider';
 import ProviderManageSection from '../ProviderManageSection';
 import CodexProviderSection from '../CodexProviderSection';
+import CliSection from '../CliSection';
 import CustomModelDialog from '../CustomModelDialog';
 import { usePluginModels } from '../hooks/usePluginModels';
 import { useConfiguredClaudeModelPricing } from '../hooks/useConfiguredModelPricing';
@@ -13,6 +14,8 @@ const BLOCK_STYLE: React.CSSProperties = { display: 'block' };
 const NONE_STYLE: React.CSSProperties = { display: 'none' };
 const ICON_14_STYLE: React.CSSProperties = { fontSize: 14 };
 const FLEX_1_STYLE: React.CSSProperties = { flex: 1 };
+
+type ProviderManageTab = 'claude' | 'codex' | 'cli';
 
 interface ProviderTabSectionProps {
   currentProvider: 'claude' | 'codex' | string;
@@ -54,9 +57,15 @@ const ProviderTabSection = ({
 }: ProviderTabSectionProps) => {
   const { t } = useTranslation();
 
-  const [activeTab, setActiveTab] = useState<'claude' | 'codex'>(
-    () => currentProvider === 'codex' ? 'codex' : 'claude'
-  );
+  const [activeTab, setActiveTab] = useState<ProviderManageTab>(() => {
+    if (currentProvider === 'codex') return 'codex';
+    // Grok / Kimi / OpenCode / PI share the CLI management surface.
+    if (currentProvider === 'grok' || currentProvider === 'kimi'
+      || currentProvider === 'opencode' || currentProvider === 'pi') {
+      return 'cli';
+    }
+    return 'claude';
+  });
 
   // Plugin-level custom model management
   const claudeModels = usePluginModels(STORAGE_KEYS.CLAUDE_CUSTOM_MODELS);
@@ -107,6 +116,16 @@ const ProviderTabSection = ({
         >
           <span className="codicon codicon-terminal" aria-hidden="true" />
           {t('settings.providerTab.codex')}
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'cli'}
+          aria-controls="panel-cli-tools"
+          className={`${styles.tabBtn} ${activeTab === 'cli' ? styles.active : ''}`}
+          onClick={() => setActiveTab('cli')}
+        >
+          <span className="codicon codicon-terminal-bash" aria-hidden="true" />
+          {t('settings.providerTab.cli')}
         </button>
       </div>
 
@@ -180,6 +199,10 @@ const ProviderTabSection = ({
           addToast={addToast}
           showHeader={false}
         />
+      </div>
+
+      <div id="panel-cli-tools" role="tabpanel" style={activeTab === 'cli' ? BLOCK_STYLE : NONE_STYLE}>
+        <CliSection addToast={addToast} />
       </div>
 
       {/* Shared model management dialog */}
