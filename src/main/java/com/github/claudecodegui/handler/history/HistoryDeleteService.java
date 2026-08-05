@@ -230,6 +230,9 @@ class HistoryDeleteService {
         if ("codex".equals(currentProvider)) {
             return new DeleteResult(deleteCodexSession(sessionId), 0);
         }
+        if ("grok".equals(currentProvider)) {
+            return new DeleteResult(deleteGrokSession(sessionId), 0);
+        }
 
         String rawPath = context.resolveEffectiveWorkingDirectory();
         String nodePath = NodeDetector.getInstance().getCachedNodePath();
@@ -241,6 +244,17 @@ class HistoryDeleteService {
 
         int[] result = deleteClaudeSession(sessionId, projectPath);
         return new DeleteResult(result[0] == 1, result[1]);
+    }
+
+    private boolean deleteGrokSession(String sessionId) throws java.io.IOException {
+        String rawPath = context.resolveEffectiveWorkingDirectory();
+        String nodePath = NodeDetector.getInstance().getCachedNodePath();
+        String projectPath = NodeDetector.isWslPath(nodePath) ? NodeDetector.convertToWslPath(rawPath) : rawPath;
+        com.github.claudecodegui.provider.grok.GrokHistoryReader reader =
+                new com.github.claudecodegui.provider.grok.GrokHistoryReader();
+        boolean deleted = reader.deleteSession(sessionId, projectPath);
+        LOG.info("[HistoryHandler] Delete Grok session " + sessionId + ": " + (deleted ? "ok" : "not found"));
+        return deleted;
     }
 
     private boolean deleteCodexSession(String sessionId) throws java.io.IOException {

@@ -97,7 +97,7 @@ public class ChatWindowDelegateTest {
             boolean runtimeRecovery,
             List<String> javaScriptCalls
     ) {
-        ClaudeSession session = new ClaudeSession(null, null, null);
+        ClaudeSession session = new ClaudeSession(null, null, null, null);
         session.setProvider("codex");
         session.setModel("gpt-5.6-sol");
 

@@ -93,7 +93,7 @@
     "attachmentFile": "[附件: {{fileName}}]",
     "unknownFile": "Unknown file",
     "attachmentsUploaded": "[已上傳附件]",
-    "streamingConnected": "{{provider}} 已成功連接，正在理解問題",
+    "streamingConnected": "AI 已成功連接，正在理解問題",
     "showEarlierMessages": "顯示之前的 {{count}} 則訊息",
     "showEarlierTurns": "顯示更早的 {{count}} 輪對話（目前已載入尚餘 {{remaining}} 輪）",
     "loadEarlierTurns": "從磁碟載入更早的 {{count}} 輪（共 {{total}} 輪，尚餘 {{remaining}} 輪）",
@@ -303,7 +303,8 @@
     "providersDesc": "管理 Claude 和 Codex API 供應商配置，切換不同的 API 服務提供商",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "自訂模型",
@@ -780,6 +781,56 @@
         "confirmAdd": "Create",
         "saveChanges": "Save"
       }
+    },
+    "cli": {
+      "hint": "以下 CLI 需在系統終端自行安裝並完成設定。外掛只負責偵測是否已安裝及版本號，不會替你自動安裝。請先在終端確認可正常使用，再回到此處使用。",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "Install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok 終端編碼助手"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "月之暗面 Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "開源終端 AI 編碼代理"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "Pi 終端編碼代理（即將支援）"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "本機 CLI 工具",
+      "summary": "{{installed}} / {{total}} 已安裝",
+      "moreComingSoon": "即將支援更多",
+      "copyPath": "複製路徑"
     }
   },
   "history": {
@@ -1523,11 +1574,25 @@
     "codex": {
       "label": "Codex"
     },
+    "grok": {
+      "label": "Grok CLI"
+    },
+    "kimi": {
+      "label": "Kimi CLI"
+    },
     "gemini": {
       "label": "Gemini Cli"
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "beta": {
+      "badge": "Beta",
+      "title": "Beta 功能",
+      "message": "此功能仍處於 Beta 階段。如果遇到使用 Bug，請及時回饋給作者。"
     }
   },
   "promptEnhancer": {

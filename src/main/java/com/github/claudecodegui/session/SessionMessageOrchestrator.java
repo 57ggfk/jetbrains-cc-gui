@@ -76,7 +76,10 @@ public class SessionMessageOrchestrator {
     }
 
     public CompletableFuture<Void> syncUserMessageUuidsAfterSend() {
-        if ("codex".equals(state.getProvider()) || findLatestUnresolvedUserMessage() == null) {
+        String provider = state.getProvider();
+        if ("codex".equals(provider)
+                || SessionProviderRouter.isCliProvider(provider)
+                || findLatestUnresolvedUserMessage() == null) {
             return CompletableFuture.completedFuture(null);
         }
 

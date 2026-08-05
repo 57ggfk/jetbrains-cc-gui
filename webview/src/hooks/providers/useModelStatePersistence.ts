@@ -4,12 +4,16 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   DEFAULT_CLAUDE_MODEL_ID,
+  GROK_DEFAULT_MODEL_ID,
+  KIMI_DEFAULT_MODEL_ID,
+  OPENCODE_DEFAULT_MODEL_ID,
   isValidPermissionMode,
   normalizeClaudeModelId,
   apply1MContextSuffix,
   strip1MContextSuffix,
 } from '../../components/ChatInputBox/types';
 import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
+import { isCliOnlyProvider, normalizeCliPermissionMode } from './cliProviders';
 
 const STORAGE_KEY = 'model-selection-state';
 const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -37,6 +41,12 @@ export interface UseModelStatePersistenceOptions {
   setSelectedCodexModel: (value: string) => void;
   setClaudePermissionMode: (value: PermissionMode) => void;
   setCodexPermissionMode: (value: PermissionMode) => void;
+  setSelectedGrokModel: (value: string) => void;
+  setSelectedKimiModel: (value: string) => void;
+  setSelectedOpenCodeModel: (value: string) => void;
+  setGrokPermissionMode: (value: PermissionMode) => void;
+  setKimiPermissionMode: (value: PermissionMode) => void;
+  setOpenCodePermissionMode: (value: PermissionMode) => void;
   setPermissionMode: (value: PermissionMode) => void;
   setLongContextEnabled: (value: boolean) => void;
   setReasoningEffort: (value: ReasoningEffort) => void;
@@ -47,6 +57,12 @@ export interface UseModelStatePersistenceOptions {
   selectedCodexModel: string;
   claudePermissionMode: PermissionMode;
   codexPermissionMode: PermissionMode;
+  selectedGrokModel: string;
+  selectedKimiModel: string;
+  selectedOpenCodeModel: string;
+  grokPermissionMode: PermissionMode;
+  kimiPermissionMode: PermissionMode;
+  openCodePermissionMode: PermissionMode;
   longContextEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
@@ -69,6 +85,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     setSelectedCodexModel,
     setClaudePermissionMode,
     setCodexPermissionMode,
+    setSelectedGrokModel,
+    setSelectedKimiModel,
+    setSelectedOpenCodeModel,
+    setGrokPermissionMode,
+    setKimiPermissionMode,
+    setOpenCodePermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -78,6 +100,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     selectedCodexModel,
     claudePermissionMode,
     codexPermissionMode,
+    selectedGrokModel,
+    selectedKimiModel,
+    selectedOpenCodeModel,
+    grokPermissionMode,
+    kimiPermissionMode,
+    openCodePermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -101,7 +129,9 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       const initialTabModel = typeof window.__INITIAL_TAB_MODEL__ === 'string'
         ? window.__INITIAL_TAB_MODEL__.trim()
         : '';
-      const hasBackendProvider = initialTabProvider === 'claude' || initialTabProvider === 'codex';
+      const hasBackendProvider = initialTabProvider === 'claude'
+        || initialTabProvider === 'codex'
+        || isCliOnlyProvider(initialTabProvider);
       const hasBackendModel = initialTabModel.length > 0;
 
       let restoredProvider = 'claude';
@@ -109,6 +139,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       let restoredCodexModel = CODEX_MODELS[0].id;
       let restoredClaudePermissionMode: PermissionMode = 'default';
       let restoredCodexPermissionMode: PermissionMode = 'default';
+      let restoredGrokModel = GROK_DEFAULT_MODEL_ID;
+      let restoredKimiModel = KIMI_DEFAULT_MODEL_ID;
+      let restoredOpenCodeModel = OPENCODE_DEFAULT_MODEL_ID;
+      let restoredGrokPermissionMode: PermissionMode = 'default';
+      let restoredKimiPermissionMode: PermissionMode = 'default';
+      let restoredOpenCodePermissionMode: PermissionMode = 'default';
       let restoredLongContextEnabled = true;
       let restoredCodexFastMode: CodexFastMode = 'normal';
 
@@ -130,6 +166,25 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           setSelectedCodexModel(modelId);
         }
       };
+      // CLI catalogs are dynamic (user-defined Grok profiles, backend-reported
+      // Kimi/OpenCode models), so any non-empty saved id is accepted.
+      const makeCliModelApplier = (apply: (id: string) => void) => (modelId: unknown) => {
+        if (typeof modelId === 'string' && modelId.trim().length > 0) {
+          apply(modelId);
+        }
+      };
+      const applyGrokModel = makeCliModelApplier((id) => {
+        restoredGrokModel = id;
+        setSelectedGrokModel(id);
+      });
+      const applyKimiModel = makeCliModelApplier((id) => {
+        restoredKimiModel = id;
+        setSelectedKimiModel(id);
+      });
+      const applyOpenCodeModel = makeCliModelApplier((id) => {
+        restoredOpenCodeModel = id;
+        setSelectedOpenCodeModel(id);
+      });
 
       if (saved) {
         const state = JSON.parse(saved);
@@ -138,7 +193,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         // hydration so non-provider preferences (permission mode, reasoning
         // effort, codex fast mode, …) are restored from localStorage.
         const providerCandidate = hasBackendProvider ? initialTabProvider : state.provider;
-        if (['claude', 'codex'].includes(providerCandidate)) {
+        if (['claude', 'codex'].includes(providerCandidate) || isCliOnlyProvider(providerCandidate)) {
           restoredProvider = providerCandidate;
           setCurrentProvider(providerCandidate);
         }
@@ -150,6 +205,15 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           restoredCodexPermissionMode = state.codexPermissionMode === 'plan'
             ? 'default'
             : state.codexPermissionMode;
+        }
+        if (isValidPermissionMode(state.grokPermissionMode)) {
+          restoredGrokPermissionMode = normalizeCliPermissionMode(state.grokPermissionMode);
+        }
+        if (isValidPermissionMode(state.kimiPermissionMode)) {
+          restoredKimiPermissionMode = normalizeCliPermissionMode(state.kimiPermissionMode);
+        }
+        if (isValidPermissionMode(state.openCodePermissionMode)) {
+          restoredOpenCodePermissionMode = normalizeCliPermissionMode(state.openCodePermissionMode);
         }
 
         if (typeof state.longContextEnabled === 'boolean') {
@@ -174,6 +238,21 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           ? initialTabModel
           : state.codexModel;
         applyCodexModel(codexModelCandidate);
+
+        const grokModelCandidate = hasBackendModel && restoredProvider === 'grok'
+          ? initialTabModel
+          : state.grokModel;
+        applyGrokModel(grokModelCandidate);
+
+        const kimiModelCandidate = hasBackendModel && restoredProvider === 'kimi'
+          ? initialTabModel
+          : state.kimiModel;
+        applyKimiModel(kimiModelCandidate);
+
+        const openCodeModelCandidate = hasBackendModel && restoredProvider === 'opencode'
+          ? initialTabModel
+          : state.openCodeModel;
+        applyOpenCodeModel(openCodeModelCandidate);
       } else if (hasBackendProvider) {
         // No localStorage yet (fresh user) but backend supplied a provider:
         // honor it so the tab starts with the right provider.
@@ -182,14 +261,26 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         if (hasBackendModel) {
           if (initialTabProvider === 'claude') applyClaudeModel(initialTabModel);
           else if (initialTabProvider === 'codex') applyCodexModel(initialTabModel);
+          else if (initialTabProvider === 'grok') applyGrokModel(initialTabModel);
+          else if (initialTabProvider === 'kimi') applyKimiModel(initialTabModel);
+          else if (initialTabProvider === 'opencode') applyOpenCodeModel(initialTabModel);
         }
       }
 
       const initialPermissionMode: PermissionMode = restoredProvider === 'codex'
         ? restoredCodexPermissionMode
-        : restoredClaudePermissionMode;
+        : restoredProvider === 'grok'
+          ? restoredGrokPermissionMode
+          : restoredProvider === 'kimi'
+            ? restoredKimiPermissionMode
+            : restoredProvider === 'opencode'
+              ? restoredOpenCodePermissionMode
+              : restoredClaudePermissionMode;
       setClaudePermissionMode(restoredClaudePermissionMode);
       setCodexPermissionMode(restoredCodexPermissionMode);
+      setGrokPermissionMode(restoredGrokPermissionMode);
+      setKimiPermissionMode(restoredKimiPermissionMode);
+      setOpenCodePermissionMode(restoredOpenCodePermissionMode);
       setPermissionMode(initialPermissionMode);
 
       let syncRetryCount = 0;
@@ -206,7 +297,13 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           sendBridgeEvent('set_provider', restoredProvider);
           const modelToSync = restoredProvider === 'codex'
             ? restoredCodexModel
-            : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
+            : restoredProvider === 'grok'
+              ? restoredGrokModel
+              : restoredProvider === 'kimi'
+                ? restoredKimiModel
+                : restoredProvider === 'opencode'
+                  ? restoredOpenCodeModel
+                  : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
           sendBridgeEvent('set_model', modelToSync);
           // Do NOT push the permission mode to Java on boot. Java is the source
           // of truth for the mode (persisted app-level in PropertiesComponent,
@@ -231,7 +328,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     }
   }, []);
 
-  // Persist snapshot whenever any of the seven keys change.
+  // Persist snapshot whenever any of the persisted keys change.
   useEffect(() => {
     let retryTimer: number | undefined;
     let retryCount = 0;
@@ -261,6 +358,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           codexModel: selectedCodexModel,
           claudePermissionMode,
           codexPermissionMode,
+          grokModel: selectedGrokModel,
+          kimiModel: selectedKimiModel,
+          openCodeModel: selectedOpenCodeModel,
+          grokPermissionMode,
+          kimiPermissionMode,
+          openCodePermissionMode,
           longContextEnabled,
           reasoningEffort,
           codexFastMode,
@@ -282,6 +385,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     selectedCodexModel,
     claudePermissionMode,
     codexPermissionMode,
+    selectedGrokModel,
+    selectedKimiModel,
+    selectedOpenCodeModel,
+    grokPermissionMode,
+    kimiPermissionMode,
+    openCodePermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,

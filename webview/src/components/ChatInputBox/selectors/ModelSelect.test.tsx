@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ModelSelect } from './ModelSelect';
 import { CLAUDE_MODELS, CODEX_MODELS } from '../types';
@@ -101,5 +101,27 @@ describe('ModelSelect', () => {
       'gpt-5.5',
       'gpt-5.4',
     ]);
+  });
+
+  it('loading 时应显示加载状态', () => {
+    render(
+      <ModelSelect
+        value="opencode-default"
+        onChange={vi.fn()}
+        models={[
+          {
+            id: 'opencode-default',
+            label: 'OpenCode Default',
+            description: 'Use OpenCode CLI default model',
+          },
+        ]}
+        currentProvider="opencode"
+        loading
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByTestId('model-loading')).toBeTruthy();
+    expect(screen.getByText('chat.loadingDropdown')).toBeTruthy();
   });
 });
