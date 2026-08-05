@@ -812,7 +812,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi 終端編碼代理（即將支援）"
+          "description": "極簡終端編碼代理，支援多提供商模型"
         }
       },
       "installDialog": {

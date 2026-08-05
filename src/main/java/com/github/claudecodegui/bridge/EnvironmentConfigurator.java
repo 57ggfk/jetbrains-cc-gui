@@ -126,6 +126,7 @@ public class EnvironmentConfigurator {
                     userHome + "/.kimi/bin",
                     userHome + "/.opencode/bin",
                     userHome + "/.grok/bin",
+                    userHome + "/.pi/bin",
                     userHome + "/.claude/bin",
             };
             for (String p : unixPaths) {

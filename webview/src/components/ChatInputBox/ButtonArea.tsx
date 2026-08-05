@@ -173,7 +173,7 @@ export const ButtonArea = ({
     if (currentProvider === 'grok') {
       return GROK_MODELS;
     }
-    if (currentProvider === 'kimi' || currentProvider === 'opencode') {
+    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
       return cliModels;
     }
     if (typeof window === 'undefined' || !window.localStorage) {
@@ -204,7 +204,7 @@ export const ButtonArea = ({
 
   // When CLI model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
-    if (currentProvider !== 'kimi' && currentProvider !== 'opencode') return;
+    if (currentProvider !== 'kimi' && currentProvider !== 'opencode' && currentProvider !== 'pi') return;
     if (!cliModels.length || !onModelSelect) return;
     const exists = cliModels.some((model) => model.id === selectedModel);
     if (!exists) {

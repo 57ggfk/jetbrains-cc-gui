@@ -812,7 +812,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi terminal coding agent (coming soon)"
+          "description": "マルチプロバイダーのモデルに対応したミニマルなターミナルコーディングエージェント"
         }
       },
       "installDialog": {
@@ -1579,6 +1579,9 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
     }
   },
   "promptEnhancer": {

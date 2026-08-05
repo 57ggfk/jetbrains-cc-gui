@@ -7,6 +7,7 @@ import {
   GROK_DEFAULT_MODEL_ID,
   KIMI_DEFAULT_MODEL_ID,
   OPENCODE_DEFAULT_MODEL_ID,
+  PI_DEFAULT_MODEL_ID,
   isValidPermissionMode,
   normalizeClaudeModelId,
   apply1MContextSuffix,
@@ -44,9 +45,11 @@ export interface UseModelStatePersistenceOptions {
   setSelectedGrokModel: (value: string) => void;
   setSelectedKimiModel: (value: string) => void;
   setSelectedOpenCodeModel: (value: string) => void;
+  setSelectedPiModel: (value: string) => void;
   setGrokPermissionMode: (value: PermissionMode) => void;
   setKimiPermissionMode: (value: PermissionMode) => void;
   setOpenCodePermissionMode: (value: PermissionMode) => void;
+  setPiPermissionMode: (value: PermissionMode) => void;
   setPermissionMode: (value: PermissionMode) => void;
   setLongContextEnabled: (value: boolean) => void;
   setReasoningEffort: (value: ReasoningEffort) => void;
@@ -60,9 +63,11 @@ export interface UseModelStatePersistenceOptions {
   selectedGrokModel: string;
   selectedKimiModel: string;
   selectedOpenCodeModel: string;
+  selectedPiModel: string;
   grokPermissionMode: PermissionMode;
   kimiPermissionMode: PermissionMode;
   openCodePermissionMode: PermissionMode;
+  piPermissionMode: PermissionMode;
   longContextEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
@@ -88,9 +93,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     setSelectedGrokModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
+    setSelectedPiModel,
     setGrokPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
+    setPiPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -103,9 +110,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
+    selectedPiModel,
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
+    piPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -142,9 +151,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       let restoredGrokModel = GROK_DEFAULT_MODEL_ID;
       let restoredKimiModel = KIMI_DEFAULT_MODEL_ID;
       let restoredOpenCodeModel = OPENCODE_DEFAULT_MODEL_ID;
+      let restoredPiModel = PI_DEFAULT_MODEL_ID;
       let restoredGrokPermissionMode: PermissionMode = 'default';
       let restoredKimiPermissionMode: PermissionMode = 'default';
       let restoredOpenCodePermissionMode: PermissionMode = 'default';
+      let restoredPiPermissionMode: PermissionMode = 'default';
       let restoredLongContextEnabled = true;
       let restoredCodexFastMode: CodexFastMode = 'normal';
 
@@ -185,6 +196,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         restoredOpenCodeModel = id;
         setSelectedOpenCodeModel(id);
       });
+      const applyPiModel = makeCliModelApplier((id) => {
+        restoredPiModel = id;
+        setSelectedPiModel(id);
+      });
 
       if (saved) {
         const state = JSON.parse(saved);
@@ -214,6 +229,9 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         }
         if (isValidPermissionMode(state.openCodePermissionMode)) {
           restoredOpenCodePermissionMode = normalizeCliPermissionMode(state.openCodePermissionMode);
+        }
+        if (isValidPermissionMode(state.piPermissionMode)) {
+          restoredPiPermissionMode = normalizeCliPermissionMode(state.piPermissionMode);
         }
 
         if (typeof state.longContextEnabled === 'boolean') {
@@ -253,6 +271,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           ? initialTabModel
           : state.openCodeModel;
         applyOpenCodeModel(openCodeModelCandidate);
+
+        const piModelCandidate = hasBackendModel && restoredProvider === 'pi'
+          ? initialTabModel
+          : state.piModel;
+        applyPiModel(piModelCandidate);
       } else if (hasBackendProvider) {
         // No localStorage yet (fresh user) but backend supplied a provider:
         // honor it so the tab starts with the right provider.
@@ -264,6 +287,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           else if (initialTabProvider === 'grok') applyGrokModel(initialTabModel);
           else if (initialTabProvider === 'kimi') applyKimiModel(initialTabModel);
           else if (initialTabProvider === 'opencode') applyOpenCodeModel(initialTabModel);
+          else if (initialTabProvider === 'pi') applyPiModel(initialTabModel);
         }
       }
 
@@ -275,12 +299,15 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
             ? restoredKimiPermissionMode
             : restoredProvider === 'opencode'
               ? restoredOpenCodePermissionMode
-              : restoredClaudePermissionMode;
+              : restoredProvider === 'pi'
+                ? restoredPiPermissionMode
+                : restoredClaudePermissionMode;
       setClaudePermissionMode(restoredClaudePermissionMode);
       setCodexPermissionMode(restoredCodexPermissionMode);
       setGrokPermissionMode(restoredGrokPermissionMode);
       setKimiPermissionMode(restoredKimiPermissionMode);
       setOpenCodePermissionMode(restoredOpenCodePermissionMode);
+      setPiPermissionMode(restoredPiPermissionMode);
       setPermissionMode(initialPermissionMode);
 
       let syncRetryCount = 0;
@@ -303,7 +330,9 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
                 ? restoredKimiModel
                 : restoredProvider === 'opencode'
                   ? restoredOpenCodeModel
-                  : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
+                  : restoredProvider === 'pi'
+                    ? restoredPiModel
+                    : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
           sendBridgeEvent('set_model', modelToSync);
           // Do NOT push the permission mode to Java on boot. Java is the source
           // of truth for the mode (persisted app-level in PropertiesComponent,
@@ -361,9 +390,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           grokModel: selectedGrokModel,
           kimiModel: selectedKimiModel,
           openCodeModel: selectedOpenCodeModel,
+          piModel: selectedPiModel,
           grokPermissionMode,
           kimiPermissionMode,
           openCodePermissionMode,
+          piPermissionMode,
           longContextEnabled,
           reasoningEffort,
           codexFastMode,
@@ -388,9 +419,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
+    selectedPiModel,
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
+    piPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,

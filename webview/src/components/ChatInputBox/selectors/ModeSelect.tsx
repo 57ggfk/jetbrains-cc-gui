@@ -45,7 +45,7 @@ export const ModeSelect = ({ value, onChange, provider }: ModeSelectProps) => {
   });
 
   const modeOptions = useMemo(() => {
-    if (provider === 'codex' || provider === 'grok' || provider === 'kimi' || provider === 'opencode') {
+    if (provider === 'codex' || provider === 'grok' || provider === 'kimi' || provider === 'opencode' || provider === 'pi') {
       // Codex + headless CLI: plan mode is not exposed (always-approve / auto).
       return AVAILABLE_MODES.filter((mode) => mode.id !== 'plan');
     }

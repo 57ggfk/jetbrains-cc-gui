@@ -1,5 +1,5 @@
 /**
- * Shared CLI binary path resolution for headless CLI providers (Grok / Kimi / OpenCode).
+ * Shared CLI binary path resolution for headless CLI providers (Grok / Kimi / OpenCode / PI).
  *
  * Priority:
  * 1. Explicit env overrides
@@ -126,6 +126,7 @@ export function commonCliBinDirs(home = homedir()) {
     join(home, '.opencode', 'bin'),
     join(home, '.local', 'share', 'opencode', 'bin'),
     join(home, '.grok', 'bin'),
+    join(home, '.pi', 'bin'),
     join(home, '.claude', 'bin'),
     join(home, '.local', 'bin'),
     join(home, '.cargo', 'bin'),
@@ -155,6 +156,17 @@ export function resolveOpenCodeCliPath() {
       '{home}/.opencode/bin/{bin}',
       '{home}/.local/bin/{bin}',
       '{home}/.local/share/opencode/bin/{bin}',
+    ],
+  });
+}
+
+export function resolvePiCliPath() {
+  return resolveCliPath({
+    binaryName: 'pi',
+    envKeys: ['PI_BIN', 'PI_PATH', 'PI_CLI_PATH'],
+    homeCandidates: [
+      '{home}/.pi/bin/{bin}',
+      '{home}/.local/bin/{bin}',
     ],
   });
 }

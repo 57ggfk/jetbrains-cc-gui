@@ -451,6 +451,17 @@ export const OPENCODE_MODELS: ModelInfo[] = [
   },
 ];
 
+/** PI default: omit `--model` so CLI resolves its own default. */
+export const PI_DEFAULT_MODEL_ID = 'auto';
+
+export const PI_MODELS: ModelInfo[] = [
+  {
+    id: PI_DEFAULT_MODEL_ID,
+    label: 'PI Auto',
+    description: 'Use PI CLI default model',
+  },
+];
+
 /**
  * Available models (backward compatibility)
  */
@@ -477,8 +488,7 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'grok', label: 'Grok CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'kimi', label: 'Kimi CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: true, beta: true },
-  // Placeholder only (same UX as former Gemini CLI): visible, disabled, not selectable.
-  { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: false, beta: true },
+  { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: true, beta: true },
 ];
 
 /**

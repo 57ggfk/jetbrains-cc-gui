@@ -923,7 +923,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi terminal coding agent (coming soon)"
+          "description": "멀티 프로바이더 모델을 지원하는 미니멀 터미널 코딩 에이전트"
         }
       },
       "installDialog": {

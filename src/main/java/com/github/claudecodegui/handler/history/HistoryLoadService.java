@@ -69,7 +69,7 @@ class HistoryLoadService {
                     GrokHistoryReader grokReader = new GrokHistoryReader();
                     historyJson = grokReader.getSessionsForProjectAsJson(projectPath);
                     LOG.info("[HistoryHandler] GrokHistoryReader 返回的 JSON 长度: " + historyJson.length());
-                } else if ("kimi".equals(provider) || "opencode".equals(provider)) {
+                } else if ("kimi".equals(provider) || "opencode".equals(provider) || "pi".equals(provider)) {
                     // History disk readers are deferred; live multi-turn uses sessionId resume.
                     LOG.info("[HistoryHandler] " + provider + " history list not implemented yet; returning empty");
                     historyJson = "{\"success\":true,\"sessions\":[],\"provider\":\"" + provider + "\"}";
@@ -153,7 +153,7 @@ class HistoryLoadService {
             } else if ("grok".equals(provider)) {
                 // Grok history is read live from disk; no dedicated index cache yet.
                 LOG.info("[HistoryHandler] Grok deep search: reloading from ~/.grok/sessions");
-            } else if ("kimi".equals(provider) || "opencode".equals(provider)) {
+            } else if ("kimi".equals(provider) || "opencode".equals(provider) || "pi".equals(provider)) {
                 LOG.info("[HistoryHandler] " + provider + " deep search: no disk index yet");
             } else if (projectPath != null) {
                 SessionIndexCache.getInstance().clearProject(projectPath);

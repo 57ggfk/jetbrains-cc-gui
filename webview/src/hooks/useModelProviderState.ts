@@ -13,6 +13,7 @@ import { useCodexProvider } from './providers/useCodexProvider';
 import { useGrokProvider } from './providers/useGrokProvider';
 import { useKimiProvider } from './providers/useKimiProvider';
 import { useOpenCodeProvider } from './providers/useOpenCodeProvider';
+import { usePiProvider } from './providers/usePiProvider';
 import { isCliOnlyProvider, normalizeCliPermissionMode } from './providers/cliProviders';
 import { useUsageTracking } from './providers/useUsageTracking';
 import { useProviderSettings } from './providers/useProviderSettings';
@@ -56,6 +57,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const grok = useGrokProvider();
   const kimi = useKimiProvider();
   const openCode = useOpenCodeProvider();
+  const pi = usePiProvider();
   const { isSdkInstalled, isSdkStatusKnown, sdkStatus, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
@@ -83,6 +85,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedOpenCodeModel, setSelectedOpenCodeModel,
     openCodePermissionMode, setOpenCodePermissionMode,
   } = openCode;
+  const {
+    selectedPiModel, setSelectedPiModel,
+    piPermissionMode, setPiPermissionMode,
+  } = pi;
 
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
@@ -94,9 +100,11 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedGrokModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
+    setSelectedPiModel,
     setGrokPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
+    setPiPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -109,9 +117,11 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
+    selectedPiModel,
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
+    piPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -126,7 +136,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
         ? selectedKimiModel
         : currentProvider === 'opencode'
           ? selectedOpenCodeModel
-          : selectedClaudeModel;
+          : currentProvider === 'pi'
+            ? selectedPiModel
+            : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
@@ -158,6 +170,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       if (currentProvider === 'grok') setGrokPermissionMode(cliMode);
       if (currentProvider === 'kimi') setKimiPermissionMode(cliMode);
       if (currentProvider === 'opencode') setOpenCodePermissionMode(cliMode);
+      if (currentProvider === 'pi') setPiPermissionMode(cliMode);
       sendBridgeEvent('set_mode', cliMode);
       return;
     }
@@ -171,6 +184,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setGrokPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
+    setPiPermissionMode,
   ]);
 
   const handleModelSelect = useCallback((modelId: string) => {
@@ -191,6 +205,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'opencode') {
       setSelectedOpenCodeModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'pi') {
+      setSelectedPiModel(modelId);
+      sendBridgeEvent('set_model', modelId);
     }
   }, [
     currentProvider,
@@ -200,6 +217,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedGrokModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
+    setSelectedPiModel,
   ]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
@@ -215,6 +233,8 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       modeToSet = normalizeCliPermissionMode(kimiPermissionMode);
     } else if (providerId === 'opencode') {
       modeToSet = normalizeCliPermissionMode(openCodePermissionMode);
+    } else if (providerId === 'pi') {
+      modeToSet = normalizeCliPermissionMode(piPermissionMode);
     }
     setPermissionMode(modeToSet);
     sendBridgeEvent('set_mode', modeToSet);
@@ -224,6 +244,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     else if (providerId === 'grok') newModel = selectedGrokModel;
     else if (providerId === 'kimi') newModel = selectedKimiModel;
     else if (providerId === 'opencode') newModel = selectedOpenCodeModel;
+    else if (providerId === 'pi') newModel = selectedPiModel;
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
@@ -231,11 +252,13 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
+    piPermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
+    selectedPiModel,
     longContextEnabled,
   ]);
 
@@ -291,6 +314,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...grok,
     ...kimi,
     ...openCode,
+    ...pi,
     ...usage,
     ...settings,
     sdkStatus,

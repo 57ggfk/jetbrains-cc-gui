@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sendBridgeEvent } from '../../utils/bridge';
 import type { ModelInfo } from '../../components/ChatInputBox/types';
-import { KIMI_MODELS, OPENCODE_MODELS } from '../../components/ChatInputBox/types';
+import { KIMI_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
 
 type CliModelsByProvider = Record<string, ModelInfo[]>;
@@ -12,6 +12,7 @@ const CLI_MODELS_TIMEOUT_MS = 15_000;
 function fallbackModels(providerId: string): ModelInfo[] {
   if (providerId === 'kimi') return KIMI_MODELS;
   if (providerId === 'opencode') return OPENCODE_MODELS;
+  if (providerId === 'pi') return PI_MODELS;
   return [];
 }
 

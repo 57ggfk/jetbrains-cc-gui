@@ -463,6 +463,13 @@ public final class NodeProcessRegistry implements Disposable {
         if (lower.contains("opencode")) {
             return "opencode";
         }
+        // "pi" is too short for a contains() match (false positives from paths
+        // like "pics" or "spin"); match the channel-manager provider argument.
+        for (String token : lower.split("\\s+")) {
+            if ("pi".equals(token)) {
+                return "pi";
+            }
+        }
         if (lower.contains("claude")) {
             return "claude";
         }

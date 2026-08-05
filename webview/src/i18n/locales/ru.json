@@ -819,7 +819,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi terminal coding agent (coming soon)"
+          "description": "Минималистичный терминальный агент для кодирования с поддержкой нескольких провайдеров"
         }
       },
       "installDialog": {
@@ -1600,6 +1600,9 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
     }
   },
   "promptEnhancer": {

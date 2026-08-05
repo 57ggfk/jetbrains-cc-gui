@@ -807,7 +807,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi terminal coding agent (coming soon)"
+          "description": "मल्टी-प्रोवाइडर मॉडल सपोर्ट वाला मिनिमल टर्मिनल कोडिंग एजेंट"
         }
       },
       "installDialog": {
@@ -1573,6 +1573,9 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
     }
   },
   "promptEnhancer": {

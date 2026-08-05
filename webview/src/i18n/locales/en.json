@@ -556,7 +556,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi terminal coding agent (coming soon)"
+          "description": "Minimal terminal coding agent with multi-provider model support"
         }
       },
       "installDialog": {

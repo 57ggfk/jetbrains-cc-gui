@@ -8,6 +8,7 @@ const STDIN_ENV_BY_PROVIDER = {
   grok: 'GROK_USE_STDIN',
   kimi: 'KIMI_USE_STDIN',
   opencode: 'OPENCODE_USE_STDIN',
+  pi: 'PI_USE_STDIN',
 };
 
 /**

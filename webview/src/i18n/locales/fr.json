@@ -807,7 +807,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi terminal coding agent (coming soon)"
+          "description": "Agent de codage terminal minimaliste avec prise en charge multi-fournisseurs"
         }
       },
       "installDialog": {
@@ -1574,6 +1574,9 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
     }
   },
   "promptEnhancer": {

@@ -556,7 +556,7 @@
         },
         "pi": {
           "name": "PI CLI",
-          "description": "Pi 终端编码代理（即将支持）"
+          "description": "极简终端编码代理，支持多提供商模型"
         }
       },
       "installDialog": {
