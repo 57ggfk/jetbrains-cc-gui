@@ -124,4 +124,50 @@ describe('ModelSelect', () => {
     expect(screen.getByTestId('model-loading')).toBeTruthy();
     expect(screen.getByText('chat.loadingDropdown')).toBeTruthy();
   });
+
+  it('error 时应显示失败状态并支持点击重试', () => {
+    const onRetry = vi.fn();
+    render(
+      <ModelSelect
+        value="auto"
+        onChange={vi.fn()}
+        models={[
+          {
+            id: 'auto',
+            label: 'PI Auto',
+            description: 'Use PI CLI default model',
+          },
+        ]}
+        currentProvider="pi"
+        error="pi --list-models failed"
+        onRetry={onRetry}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const errorRow = screen.getByTestId('model-load-error');
+    expect(errorRow).toBeTruthy();
+    expect(screen.getByText('chat.modelsLoadFailed')).toBeTruthy();
+
+    fireEvent.click(errorRow);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('loading 时不应同时显示 error 状态', () => {
+    render(
+      <ModelSelect
+        value="auto"
+        onChange={vi.fn()}
+        models={[{ id: 'auto', label: 'PI Auto' }]}
+        currentProvider="pi"
+        loading
+        error="timeout"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByTestId('model-loading')).toBeTruthy();
+    expect(screen.queryByTestId('model-load-error')).toBeNull();
+  });
 });

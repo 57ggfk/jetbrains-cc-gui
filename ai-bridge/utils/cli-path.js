@@ -13,6 +13,16 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { execSync } from 'child_process';
 
+/**
+ * Windows npm global installs only ship a `.cmd` / `.bat` shim (no `.exe`),
+ * and Node cannot spawn those without `shell: true`.
+ * @param {string} bin - resolved binary path or bare name
+ * @returns {boolean}
+ */
+export function isWindowsCmdShim(bin) {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(String(bin || ''));
+}
+
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (typeof value === 'string') {
@@ -59,23 +69,29 @@ function whichOnPath(binaryName) {
  */
 export function resolveCliPath({ binaryName, envKeys = [], homeCandidates = [] }) {
   const win = process.platform === 'win32';
-  const exeName = win ? `${binaryName}.exe` : binaryName;
+  // npm global installs on Windows ship `.cmd` shims, not `.exe`.
+  const exeNames = win
+    ? [`${binaryName}.cmd`, `${binaryName}.bat`, `${binaryName}.exe`, binaryName]
+    : [binaryName];
 
   const envOverride = firstNonEmpty(...envKeys.map((key) => process.env[key]));
   if (envOverride) {
     return envOverride;
   }
 
-  const fromPath = whichOnPath(exeName);
+  // `where <name>` (no extension) honors PATHEXT, so it finds `.cmd` shims.
+  const fromPath = whichOnPath(binaryName);
   if (fromPath) return fromPath;
 
   const home = homedir();
   for (const template of homeCandidates) {
-    const resolved = template
-      .replace('{home}', home)
-      .replace('{bin}', exeName)
-      .replace('{name}', binaryName);
-    if (pathExists(resolved)) return resolved;
+    for (const exeName of exeNames) {
+      const resolved = template
+        .replace('{home}', home)
+        .replace('{bin}', exeName)
+        .replace('{name}', binaryName);
+      if (pathExists(resolved)) return resolved;
+    }
   }
 
   return binaryName;
@@ -118,8 +134,9 @@ export function resolveGrokCliPath() {
  * Used both for binary resolution and spawn PATH enrichment.
  */
 export function commonCliBinDirs(home = homedir()) {
-  if (!home) return [];
-  return [
+  const dirs = [];
+  if (!home) return dirs;
+  dirs.push(
     join(home, '.kimi-code', 'bin'),
     join(home, '.kimi', 'bin'),
     join(home, '.moonshot', 'bin'),
@@ -130,7 +147,13 @@ export function commonCliBinDirs(home = homedir()) {
     join(home, '.claude', 'bin'),
     join(home, '.local', 'bin'),
     join(home, '.cargo', 'bin'),
-  ];
+  );
+  if (process.platform === 'win32') {
+    // npm global bin dir on Windows (e.g. C:\Users\<user>\AppData\Roaming\npm).
+    const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming');
+    dirs.push(join(appData, 'npm'));
+  }
+  return dirs;
 }
 
 export function resolveKimiCliPath() {

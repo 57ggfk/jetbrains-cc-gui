@@ -46,6 +46,7 @@
     "removeAttachment": "Supprimer la pièce jointe",
     "closePreview": "Fermer l'aperçu",
     "loadingDropdown": "Chargement...",
+    "modelsLoadFailed": "Échec du chargement des modèles. Cliquez pour réessayer",
     "addAttachment": "Ajouter une pièce jointe",
     "stopGeneration": "Arrêter la génération",
     "generatingResponse": "Génération de la réponse",

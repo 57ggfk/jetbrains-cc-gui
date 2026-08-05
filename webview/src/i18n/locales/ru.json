@@ -46,6 +46,7 @@
     "removeAttachment": "Удалить вложение",
     "closePreview": "Закрыть предпросмотр",
     "loadingDropdown": "Загрузка...",
+    "modelsLoadFailed": "Не удалось загрузить модели. Нажмите, чтобы повторить",
     "addAttachment": "Добавить вложение",
     "stopGeneration": "Остановить генерацию",
     "generatingResponse": "Генерирую ответ",

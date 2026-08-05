@@ -10,6 +10,7 @@ import { homedir } from 'os';
 import {
   commonCliBinDirs,
   enrichPathWithBinDirs,
+  isWindowsCmdShim,
   resolvePiCliPath,
 } from '../../utils/cli-path.js';
 
@@ -68,6 +69,8 @@ export function listModels() {
       env,
       timeout: 45_000,
       maxBuffer: 8 * 1024 * 1024,
+      // Windows npm `.cmd` shims require a shell to spawn.
+      shell: isWindowsCmdShim(bin),
     });
   } catch (error) {
     console.log(JSON.stringify({

@@ -42,6 +42,7 @@ function normalizeModels(raw: unknown): ModelInfo[] {
 export function useCliModels(currentProvider: string) {
   const [modelsByProvider, setModelsByProvider] = useState<CliModelsByProvider>({});
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
+  const [errorByProvider, setErrorByProvider] = useState<Record<string, string>>({});
   const pendingLoadRef = useRef<{ provider: string; timer: ReturnType<typeof setTimeout> } | null>(null);
 
   const clearPendingLoad = useCallback(() => {
@@ -54,20 +55,28 @@ export function useCliModels(currentProvider: string) {
   const beginLoad = useCallback((providerId: string) => {
     clearPendingLoad();
     setLoadingProvider(providerId);
+    setErrorByProvider((prev) => {
+      if (!(providerId in prev)) return prev;
+      const next = { ...prev };
+      delete next[providerId];
+      return next;
+    });
     sendBridgeEvent('get_cli_models', providerId);
     pendingLoadRef.current = {
       provider: providerId,
       timer: setTimeout(() => {
         pendingLoadRef.current = null;
-        // No response arrived in time — fall back to the static catalog.
+        // No response arrived in time — fall back to the static catalog and
+        // surface the failure so the user isn't staring at a bare fallback list.
         setLoadingProvider((current) => (current === providerId ? null : current));
+        setErrorByProvider((prev) => ({ ...prev, [providerId]: 'timeout' }));
       }, CLI_MODELS_TIMEOUT_MS),
     };
   }, [clearPendingLoad]);
 
   useEffect(() => {
-    const handler = (dataOrStr: string | { provider?: string; models?: unknown; success?: boolean }) => {
-      let payload: { provider?: string; models?: unknown; success?: boolean } | null = null;
+    const handler = (dataOrStr: string | { provider?: string; models?: unknown; success?: boolean; error?: string }) => {
+      let payload: { provider?: string; models?: unknown; success?: boolean; error?: string } | null = null;
       if (typeof dataOrStr === 'string') {
         try {
           payload = JSON.parse(dataOrStr);
@@ -78,15 +87,31 @@ export function useCliModels(currentProvider: string) {
         payload = dataOrStr;
       }
       if (!payload?.provider) return;
+      const provider = payload.provider;
       const models = normalizeModels(payload.models);
       setModelsByProvider((prev) => ({
         ...prev,
-        [payload!.provider!]: models.length > 0 ? models : fallbackModels(payload!.provider!),
+        [provider]: models.length > 0 ? models : fallbackModels(provider),
       }));
-      if (pendingLoadRef.current?.provider === payload.provider) {
+      if (payload.success === false) {
+        // Backend reported a failure (CLI missing, non-zero exit, …) — keep the
+        // fallback list but remember the error so the dropdown can show it.
+        const message = typeof payload.error === 'string' && payload.error.trim()
+          ? payload.error.trim()
+          : 'unknown error';
+        setErrorByProvider((prev) => ({ ...prev, [provider]: message }));
+      } else {
+        setErrorByProvider((prev) => {
+          if (!(provider in prev)) return prev;
+          const next = { ...prev };
+          delete next[provider];
+          return next;
+        });
+      }
+      if (pendingLoadRef.current?.provider === provider) {
         clearPendingLoad();
       }
-      setLoadingProvider((current) => (current === payload!.provider ? null : current));
+      setLoadingProvider((current) => (current === provider ? null : current));
     };
 
     window.setCliModels = handler;
@@ -118,6 +143,7 @@ export function useCliModels(currentProvider: string) {
   return {
     cliModels,
     cliModelsLoading: loadingProvider === currentProvider,
+    cliModelsError: errorByProvider[currentProvider] ?? null,
     refreshCliModels,
     modelsByProvider,
   };

@@ -32,6 +32,10 @@ interface ModelSelectProps {
   currentProvider?: string;
   /** True while CLI providers (OpenCode / Kimi) are still fetching model catalogs. */
   loading?: boolean;
+  /** Set when the CLI model catalog fetch failed (or timed out); row offers retry. */
+  error?: string | null;
+  /** Retries the CLI model catalog fetch for the current provider. */
+  onRetry?: () => void;
   onAddModel?: () => void;
   longContextEnabled?: boolean;
   onLongContextChange?: (enabled: boolean) => void;
@@ -146,7 +150,7 @@ const resolveModelIdForIcon = (
  * ModelSelect - Model selector component
  * Supports switching between Sonnet 4.5, Opus 4.5, and other models, including Codex models
  */
-export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, currentProvider = 'claude', loading = false, onAddModel, longContextEnabled = true, onLongContextChange }: ModelSelectProps) => {
+export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, currentProvider = 'claude', loading = false, error = null, onRetry, onAddModel, longContextEnabled = true, onLongContextChange }: ModelSelectProps) => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -334,6 +338,19 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
             >
               <span className="codicon codicon-loading codicon-modifier-spin" />
               <span>{t('chat.loadingDropdown')}</span>
+            </div>
+          )}
+          {!loading && error && (
+            <div
+              className="selector-option selector-option-status"
+              data-testid="model-load-error"
+              style={{ ...LOADING_OPTION_STYLE, cursor: onRetry ? 'pointer' : 'default' }}
+              title={error}
+              onClick={() => onRetry?.()}
+            >
+              <span className="codicon codicon-warning" />
+              <span style={{ flex: 1, minWidth: 0 }}>{t('chat.modelsLoadFailed')}</span>
+              <span className="codicon codicon-refresh" />
             </div>
           )}
           {visibleModels.map((model) => (

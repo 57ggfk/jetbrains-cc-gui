@@ -46,6 +46,7 @@
     "removeAttachment": "첨부파일 제거",
     "closePreview": "미리보기 닫기",
     "loadingDropdown": "로딩 중...",
+    "modelsLoadFailed": "모델을 불러오지 못했습니다. 클릭하여 다시 시도",
     "addAttachment": "첨부파일 추가",
     "stopGeneration": "생성 중지",
     "generatingResponse": "응답 생성 중",

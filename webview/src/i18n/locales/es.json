@@ -46,6 +46,7 @@
     "removeAttachment": "Eliminar adjunto",
     "closePreview": "Cerrar vista previa",
     "loadingDropdown": "Cargando...",
+    "modelsLoadFailed": "Error al cargar los modelos. Haz clic para reintentar",
     "addAttachment": "Añadir adjunto",
     "stopGeneration": "Detener generación",
     "generatingResponse": "Generando respuesta",

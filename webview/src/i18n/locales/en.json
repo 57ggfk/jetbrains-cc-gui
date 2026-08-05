@@ -63,6 +63,7 @@
     "removeAttachment": "Remove attachment",
     "closePreview": "Close preview",
     "loadingDropdown": "Loading...",
+    "modelsLoadFailed": "Failed to load models. Click to retry",
     "addAttachment": "Add attachment",
     "stopGeneration": "Stop generation",
     "generatingResponse": "Generating response",

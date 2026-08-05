@@ -46,6 +46,7 @@
     "removeAttachment": "添付ファイルを削除",
     "closePreview": "プレビューを閉じる",
     "loadingDropdown": "読み込み中...",
+    "modelsLoadFailed": "モデルの読み込みに失敗しました。クリックして再試行",
     "addAttachment": "添付ファイルを追加",
     "stopGeneration": "生成を停止",
     "generatingResponse": "応答を生成中",

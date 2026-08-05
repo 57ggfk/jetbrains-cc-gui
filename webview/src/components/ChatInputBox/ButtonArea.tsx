@@ -98,7 +98,7 @@ export const ButtonArea = ({
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
-  const { cliModels, cliModelsLoading } = useCliModels(currentProvider);
+  const { cliModels, cliModelsLoading, cliModelsError, refreshCliModels } = useCliModels(currentProvider);
 
   // Track changes to custom models in localStorage
   // When localStorage changes, updating this version number triggers useMemo recalculation
@@ -297,6 +297,8 @@ export const ButtonArea = ({
           models={availableModels}
           currentProvider={currentProvider}
           loading={cliModelsLoading}
+          error={cliModelsError}
+          onRetry={() => refreshCliModels(currentProvider)}
           onAddModel={onAddModel}
           longContextEnabled={longContextEnabled}
           onLongContextChange={onLongContextChange}

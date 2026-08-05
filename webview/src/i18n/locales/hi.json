@@ -46,6 +46,7 @@
     "removeAttachment": "अटैचमेंट हटाएं",
     "closePreview": "पूर्वावलोकन बंद करें",
     "loadingDropdown": "लोड हो रहा है...",
+    "modelsLoadFailed": "मॉडल लोड करने में विफल। पुनः प्रयास के लिए क्लिक करें",
     "addAttachment": "अटैचमेंट जोड़ें",
     "stopGeneration": "जनरेशन रोकें",
     "generatingResponse": "प्रतिक्रिया उत्पन्न हो रही है",
