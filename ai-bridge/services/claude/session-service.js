@@ -11,6 +11,25 @@ import { createInterface } from 'readline';
 import { getClaudeProjectSessionFilePath } from '../../utils/path-utils.js';
 
 /**
+ * Write a JSON payload as a single stdout line and await the flush.
+ *
+ * `console.log` is fire-and-forget: for a piped stdout the underlying
+ * `process.stdout.write` is asynchronous, and a large payload (the full
+ * session history returned by getSession easily exceeds the libuv
+ * high-water mark) gets queued in an internal buffer. Once the handler
+ * returns, channel-manager.js sets `process.exitCode` and lets the process
+ * exit naturally -- which can race ahead of the buffer draining and
+ * truncate the JSON mid-stream, surfacing as `MalformedJsonException` on
+ * the Java side. Awaiting the write callback guarantees the bytes reach
+ * the OS pipe before the process is allowed to exit.
+ */
+function writeJsonResponse(payload) {
+  return new Promise((resolve) => {
+    process.stdout.write(JSON.stringify(payload) + '\n', 'utf8', resolve);
+  });
+}
+
+/**
  * Append a message to the JSONL history file.
  * Adds necessary metadata fields to ensure compatibility with the history reader.
  */
@@ -91,10 +110,10 @@ export async function getSessionMessages(sessionId, cwd = null) {
     const sessionFile = resolveSessionFile(sessionId, cwd);
 
     if (!existsSync(sessionFile)) {
-      console.log(JSON.stringify({
+      await writeJsonResponse({
         success: true,
         messages: []
-      }));
+      });
       return;
     }
 
@@ -112,17 +131,17 @@ export async function getSessionMessages(sessionId, cwd = null) {
       })
       .filter(msg => msg !== null);
 
-    console.log(JSON.stringify({
+    await writeJsonResponse({
       success: true,
       messages
-    }));
+    });
 
   } catch (error) {
     console.error('[GET_SESSION_ERROR]', error.message);
-    console.log(JSON.stringify({
+    await writeJsonResponse({
       success: false,
       error: error.message
-    }));
+    });
   }
 }
 
@@ -131,10 +150,10 @@ export async function getLatestUserMessage(sessionId, cwd = null) {
     const sessionFile = resolveSessionFile(sessionId, cwd);
 
     if (!existsSync(sessionFile)) {
-      console.log(JSON.stringify({
+      await writeJsonResponse({
         success: true,
         message: null
-      }));
+      });
       return;
     }
 
@@ -164,16 +183,16 @@ export async function getLatestUserMessage(sessionId, cwd = null) {
       }
     }
 
-    console.log(JSON.stringify({
+    await writeJsonResponse({
       success: true,
       message: latestUserMessage
-    }));
+    });
   } catch (error) {
     console.error('[GET_LATEST_USER_ERROR]', error.message);
-    console.log(JSON.stringify({
+    await writeJsonResponse({
       success: false,
       error: error.message
-    }));
+    });
   }
 }
 
