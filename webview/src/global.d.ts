@@ -7,8 +7,15 @@ interface Window {
    */
   sendToJava?: (message: string) => void;
 
-  /** Re-rasterize the JCEF surface after its IntelliJ content tab is activated. */
+  /** Legacy windowed-JCEF repaint requested after its IntelliJ content tab is activated. */
   onTabActivated?: () => void;
+
+  /** Strict two-frame OSR damage pulse, owned by a Java frame-fence attempt token. */
+  __ccguiSurfaceDamagePhaseA?: (token: string) => boolean;
+  __ccguiSurfaceDamagePhaseB?: (token: string) => boolean;
+  __ccguiSurfaceDamageReplace?: (previousToken: string, nextToken: string) => boolean;
+  __ccguiSurfaceDamageFinish?: (token: string) => boolean;
+  __ccguiSurfaceDamageCancel?: (token: string, predecessorToken?: string) => boolean;
 
   /**
    * Get clipboard file path from Java
@@ -120,7 +127,15 @@ interface Window {
    * History load complete callback - invoked when history messages finish loading.
    * Triggers Markdown re-rendering to fix incorrect rendering on first history load.
    */
-  historyLoadComplete?: () => void;
+  historyLoadComplete?: (expectedMessageCount?: string | number) => void;
+  /** Early history completion buffered before React installs the real callback. */
+  __pendingHistoryLoadComplete?: { expectedMessageCount?: string | number };
+  /** Number of messages in the latest full backend snapshot accepted by this page. */
+  __lastAcceptedMessageCount?: number;
+  /** Restored-history snapshot size that still needs a React commit acknowledgment. */
+  __pendingHistoryRefreshMessageCount?: number;
+  /** Identifies or invalidates a commit-bound repaint when the page changes sessions first. */
+  __historySurfaceRefreshEpoch?: number;
 
   /**
    * Subagent sidechain history callback.

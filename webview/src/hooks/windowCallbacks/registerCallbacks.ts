@@ -61,6 +61,7 @@ function appendSubagentHistoryChunk(transferId: string, chunk: string, isFinal: 
 export function registerWindowCallbacks(
   options: UseWindowCallbacksOptions,
   tRef: MutableRefObject<UseWindowCallbacksOptions['t']>,
+  requestHistoryRenderCommit: (refreshEpoch: number) => void,
 ): void {
   // -------------------------------------------------------------------------
   // Session transition helpers
@@ -93,7 +94,7 @@ export function registerWindowCallbacks(
   // Register callback groups
   // =========================================================================
 
-  registerMessageCallbacks(options, resetTransientUiState);
+  registerMessageCallbacks(options, resetTransientUiState, requestHistoryRenderCommit);
   registerStreamingCallbacks(options);
   registerSessionAndSdkCallbacks(options, tRef);
   registerUsageModeCallbacks(options);
