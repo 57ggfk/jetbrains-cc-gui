@@ -6,8 +6,14 @@
 // Read/file viewing tools
 export const READ_TOOL_NAMES = new Set(['read', 'read_file', 'read_multiple_files']);
 
-// Edit/file modification tools
-export const EDIT_TOOL_NAMES = new Set(['edit', 'edit_file', 'replace_string', 'write_to_file']);
+// Edit/file modification tools (message-list grouping / EditToolBlock)
+export const EDIT_TOOL_NAMES = new Set([
+  'edit',
+  'edit_file',
+  'replace_string',
+  'write_to_file',
+  'multiedit',
+]);
 
 // Bash/command execution tools
 export const BASH_TOOL_NAMES = new Set(['bash', 'run_terminal_cmd', 'exec_command', 'execute_command', 'shell_command']);
@@ -31,7 +37,7 @@ export const TRANSIENT_INTERNAL_TOOL_NAMES = new Set([
   'multi_tool_use.parallel',
 ]);
 
-// File modification tools (for rewind feature - includes write for new file creation)
+// File modification tools (StatusPanel Edits tab / rewind — includes write + MultiEdit)
 export const FILE_MODIFY_TOOL_NAMES = new Set([
   'write',
   'write_file',
@@ -41,6 +47,7 @@ export const FILE_MODIFY_TOOL_NAMES = new Set([
   'write_to_file',
   'notebookedit',
   'create_file',
+  'multiedit',
 ]);
 
 export function normalizeToolName(toolName: string): string {
