@@ -3,7 +3,6 @@ package com.github.claudecodegui.service;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.DaemonBridge;
-import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow;
 import com.github.claudecodegui.ui.toolwindow.ClaudeSDKToolWindow;
 import com.github.claudecodegui.util.PlatformUtils;
@@ -193,43 +192,6 @@ public final class NodeProcessRegistry implements Disposable {
                             .sessionId(sessionId)
                             .tabName(tabName)
                             .build());
-                }
-            }
-
-            // -- CHANNEL entries from CLI bridges (Grok / Kimi / OpenCode) --
-            Map<String, MarkerCliBridge> cliBridges = safeCliBridges(window);
-            if (cliBridges != null) {
-                for (Map.Entry<String, MarkerCliBridge> bridgeEntry : cliBridges.entrySet()) {
-                    MarkerCliBridge bridge = bridgeEntry.getValue();
-                    if (bridge == null) {
-                        continue;
-                    }
-                    Map<String, Process> channels = bridge.getProcessManager().getActiveChannelSnapshot();
-                    for (Map.Entry<String, Process> entry : channels.entrySet()) {
-                        Process p = entry.getValue();
-                        if (p == null || !p.isAlive()) {
-                            continue;
-                        }
-                        long pid = p.pid();
-                        knownPids.add(pid);
-                        ProcessHandle.Info info = safeInfo(p);
-                        long startedAt = info != null
-                                ? info.startInstant().map(Instant::toEpochMilli).orElse(-1L)
-                                : -1L;
-                        String provider = bridgeEntry.getKey() != null ? bridgeEntry.getKey() : tabProvider;
-                        result.add(NodeProcessInfo.builder()
-                                .kind(NodeProcessInfo.Kind.CHANNEL)
-                                .provider(provider)
-                                .pid(pid)
-                                .alive(true)
-                                .startedAtMs(startedAt)
-                                .uptimeMs(startedAt > 0 ? Math.max(0, now - startedAt) : 0L)
-                                .command(extractCommand(info))
-                                .channelId(entry.getKey())
-                                .sessionId(sessionId)
-                                .tabName(tabName)
-                                .build());
-                    }
                 }
             }
         }
@@ -454,22 +416,6 @@ public final class NodeProcessRegistry implements Disposable {
         if (lower.contains("codex")) {
             return "codex";
         }
-        if (lower.contains("grok")) {
-            return "grok";
-        }
-        if (lower.contains("kimi")) {
-            return "kimi";
-        }
-        if (lower.contains("opencode")) {
-            return "opencode";
-        }
-        // "pi" is too short for a contains() match (false positives from paths
-        // like "pics" or "spin"); match the channel-manager provider argument.
-        for (String token : lower.split("\\s+")) {
-            if ("pi".equals(token)) {
-                return "pi";
-            }
-        }
         if (lower.contains("claude")) {
             return "claude";
         }
@@ -507,14 +453,6 @@ public final class NodeProcessRegistry implements Disposable {
     private static @Nullable CodexSDKBridge safeCodexBridge(ClaudeChatWindow window) {
         try {
             return window != null ? window.getCodexSDKBridge() : null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static @Nullable Map<String, MarkerCliBridge> safeCliBridges(ClaudeChatWindow window) {
-        try {
-            return window != null ? window.getCliBridges() : null;
         } catch (Exception e) {
             return null;
         }
