@@ -108,6 +108,8 @@ public class ChatWindowDelegate {
         boolean isFrontendReady();
         boolean isRuntimeRecoveryPage();
         void setFrontendReady(boolean ready);
+        void onHistoryRenderComplete(long commitEpoch);
+        void onSurfaceDamageApplied(String token, String phase, boolean applied);
         void setSlashCommandsFetched(boolean fetched);
         void setFetchedSlashCommandsCount(int count);
         void persistTabSessionState();
@@ -380,6 +382,16 @@ public class ChatWindowDelegate {
                 host.getSessionLifecycleManager().createNewSession();
             }
             @Override public void onFrontendReady() { handleFrontendReady(); }
+            @Override public void onHistoryRenderComplete(long commitEpoch) {
+                host.onHistoryRenderComplete(commitEpoch);
+            }
+            @Override public void onSurfaceDamageApplied(
+                    String token,
+                    String phase,
+                    boolean applied
+            ) {
+                host.onSurfaceDamageApplied(token, phase, applied);
+            }
             @Override public void onRefreshSlashCommands() {
                 host.getSessionLifecycleManager().fetchSlashCommandsOnStartup();
             }

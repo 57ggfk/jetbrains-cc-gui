@@ -25,6 +25,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.jcef.JBCefBrowser;
+import com.intellij.ui.jcef.JBCefOSRHandlerFactory;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import org.cef.CefClient;
@@ -89,6 +90,7 @@ public class WebviewInitializer {
         HtmlLoader getHtmlLoader();
         HandlerContext getHandlerContext();
         JBCefBrowser getBrowser();
+        JBCefOSRHandlerFactory getOsrHandlerFactory();
         void setBrowser(JBCefBrowser browser);
         boolean isDisposed();
         void activatePageGeneration(int pageGeneration);
@@ -248,7 +250,7 @@ public class WebviewInitializer {
         }
 
         try {
-            browser = JBCefBrowserFactory.create();
+            browser = JBCefBrowserFactory.create(host.getOsrHandlerFactory());
             JBCefBrowser createdBrowser = browser;
             host.setBrowser(createdBrowser);
             host.getHandlerContext().setBrowser(createdBrowser);

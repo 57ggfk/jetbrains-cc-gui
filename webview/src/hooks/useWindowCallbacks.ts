@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import type { MutableRefObject, RefObject } from 'react';
 import type { ClaudeMessage, ClaudeRawMessage, HistoryData, SubagentHistoryResponse, TaskEventMap } from '../types';
@@ -14,6 +14,7 @@ import type { AskUserQuestionRequest } from '../components/AskUserQuestionDialog
 import type { PlanApprovalRequest } from '../components/PlanApprovalDialog';
 import type { RewindRequest } from '../components/RewindDialog';
 import { registerWindowCallbacks } from './windowCallbacks/registerCallbacks';
+import { sendBridgeEvent } from '../utils/bridge';
 
 // Re-export from messageSync to avoid duplicate definition
 export { OPTIMISTIC_MESSAGE_TIME_WINDOW } from './windowCallbacks/messageSync';
@@ -126,6 +127,7 @@ export interface UseWindowCallbacksOptions {
 
 export function useWindowCallbacks(options: UseWindowCallbacksOptions): void {
   const { t } = options;
+  const [historyRenderCommitEpoch, setHistoryRenderCommitEpoch] = useState(0);
 
   // Store t in ref to avoid stale closures
   const tRef = useRef(t);
@@ -134,8 +136,20 @@ export function useWindowCallbacks(options: UseWindowCallbacksOptions): void {
   }, [t]);
 
   useEffect(() => {
-    registerWindowCallbacks(options, tRef);
+    registerWindowCallbacks(options, tRef, setHistoryRenderCommitEpoch);
     // Callbacks are registered once on mount; re-registration would cause duplicate handlers.
     // Options object reference is intentionally excluded from deps.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // This signal means only that React committed the restored message tree. Native OSR
+  // publication is fenced separately by Java using real OnPaint callbacks.
+  useLayoutEffect(() => {
+    if (
+      historyRenderCommitEpoch > 0
+      && window.__historySurfaceRefreshEpoch === historyRenderCommitEpoch
+    ) {
+      sendBridgeEvent('history_dom_committed', String(historyRenderCommitEpoch));
+    }
+    return undefined;
+  }, [historyRenderCommitEpoch]);
 }

@@ -1,4 +1,5 @@
-import { act, renderHook } from '@testing-library/react';
+import { createElement, useState } from 'react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { useWindowCallbacks } from './useWindowCallbacks.js';
 import type { UseWindowCallbacksOptions } from './useWindowCallbacks.js';
 import type { ClaudeMessage } from '../types/index.js';
@@ -6,7 +7,9 @@ import { forceWebviewRepaint } from '../utils/forceWebviewRepaint.js';
 
 // Mock the repaint util so we can assert the session-transition path triggers it
 // without touching the real DOM (there is no #app element under jsdom).
-vi.mock('../utils/forceWebviewRepaint.js', () => ({ forceWebviewRepaint: vi.fn() }));
+vi.mock('../utils/forceWebviewRepaint.js', () => ({
+  forceWebviewRepaint: vi.fn((_reason?: string, onRepaint?: () => void) => onRepaint?.()),
+}));
 
 /**
  * Integration tests for useWindowCallbacks — verifies the real window callback
@@ -126,6 +129,11 @@ describe('useWindowCallbacks integration', () => {
     delete window.__pendingBackendTabState;
     delete window.__pendingUsageUpdate;
     delete window.__CCGUI_RECOVERY_STATE_APPLIED__;
+    delete window.__lastAcceptedMessageCount;
+    delete window.__pendingHistoryRefreshMessageCount;
+    delete window.__pendingHistoryLoadComplete;
+    delete window.__historySurfaceRefreshEpoch;
+    vi.mocked(forceWebviewRepaint).mockClear();
     window.__dependencyStatusState = 'pending';
   });
 
@@ -250,6 +258,7 @@ describe('useWindowCallbacks integration', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     delete window.__codexHistoryPageInfo;
   });
@@ -504,6 +513,153 @@ describe('useWindowCallbacks integration', () => {
 
     // setMessages SHOULD be called
     expect(opts.setMessages).toHaveBeenCalled();
+  });
+
+  it('reports one DOM commit when restored history arrives after completion', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([]), 1);
+      window.historyLoadComplete!('1');
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBe(1);
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'user', content: 'restored history' },
+      ]), 2);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    act(() => vi.runAllTimers());
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'user', content: 'normal follow-up' },
+      ]), 3);
+    });
+
+    const historyRefreshCalls = (window.sendToJava as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([payload]) => payload === 'history_dom_committed:1');
+    expect(historyRefreshCalls).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it('drains an early history completion only after the restored message DOM commits', async () => {
+    const restoredMessages: ClaudeMessage[] = [
+      { type: 'assistant', content: 'restored before callback registration' },
+    ];
+    window.__pendingUpdateMessages = {
+      json: JSON.stringify(restoredMessages),
+      sequence: 1,
+    };
+    window.__pendingHistoryLoadComplete = { expectedMessageCount: 1 };
+    let domTextWhenAcknowledged = '';
+    window.sendToJava = vi.fn((payload: string) => {
+      if (payload === 'history_dom_committed:1') {
+        domTextWhenAcknowledged = document.querySelector('[data-testid="history-dom"]')?.textContent ?? '';
+      }
+    });
+
+    const HistoryHarness = () => {
+      const [messages, setMessages] = useState<ClaudeMessage[]>([]);
+      useWindowCallbacks(createOptions({ setMessages }));
+      return createElement(
+        'div',
+        { 'data-testid': 'history-dom' },
+        messages.map(message => message.content).join('|'),
+      );
+    };
+
+    render(createElement(HistoryHarness));
+
+    await waitFor(() => {
+      expect(domTextWhenAcknowledged).toContain('restored before callback registration');
+    });
+    expect(window.__pendingHistoryLoadComplete).toBeUndefined();
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+  });
+
+  it('preserves an explicit zero count buffered before callback registration', async () => {
+    window.__pendingHistoryLoadComplete = { expectedMessageCount: 0 };
+    renderHook(() => useWindowCallbacks(createOptions()));
+
+    await waitFor(() => {
+      expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+    });
+    expect(window.__pendingHistoryLoadComplete).toBeUndefined();
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+  });
+
+  it('reports a DOM commit when the restored-history snapshot arrived first', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'already restored' },
+      ]), 1);
+    });
+    act(() => {
+      window.historyLoadComplete!(1);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    act(() => vi.runAllTimers());
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+    vi.useRealTimers();
+  });
+
+  it('keeps the restored-history refresh pending when a stale snapshot is rejected', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    window.__minAcceptedUpdateSequence = 5;
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.historyLoadComplete!(1);
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'stale history' },
+      ]), 4);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBe(1);
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'current history' },
+      ]), 5);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    act(() => vi.runAllTimers());
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+    vi.useRealTimers();
+  });
+
+  it('cancels a deferred restored-history refresh when the session is cleared', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.historyLoadComplete!(1);
+      window.clearMessages!();
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'new session' },
+      ]), 1);
+    });
+
+    act(() => vi.runAllTimers());
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    expect(window.sendToJava).not.toHaveBeenCalledWith('history_dom_committed:1');
+    expect(forceWebviewRepaint).toHaveBeenCalledWith('session-transition');
+    vi.useRealTimers();
   });
 
   it('buffers a Codex history page and prepends it in one ordered state update', () => {
