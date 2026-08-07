@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sendBridgeEvent } from '../../utils/bridge';
 import type { ModelInfo } from '../../components/ChatInputBox/types';
-import { KIMI_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
+import { CODEX_MODELS, KIMI_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
+import { subscribeActiveCodexProvider } from '../../utils/runtimeProviderCapabilities';
 
 type CliModelsByProvider = Record<string, ModelInfo[]>;
 
@@ -13,7 +14,19 @@ function fallbackModels(providerId: string): ModelInfo[] {
   if (providerId === 'kimi') return KIMI_MODELS;
   if (providerId === 'opencode') return OPENCODE_MODELS;
   if (providerId === 'pi') return PI_MODELS;
+  if (providerId === 'codex') return CODEX_MODELS;
   return [];
+}
+
+/**
+ * Providers whose model list is discovered dynamically via `get_cli_models`.
+ * Codex is included even though it is not a CLI-only provider: its list comes
+ * from ~/.codex/config.toml + model_catalog_json, same as the codex CLI picker.
+ * Grok is excluded (static profile list).
+ */
+function supportsDynamicModels(providerId: string): boolean {
+  if (providerId === 'codex') return true;
+  return isCliOnlyProvider(providerId) && providerId !== 'grok';
 }
 
 function normalizeModels(raw: unknown): ModelInfo[] {
@@ -36,11 +49,14 @@ function normalizeModels(raw: unknown): ModelInfo[] {
 }
 
 /**
- * Loads model catalogs for headless CLI providers (Kimi / OpenCode) via
- * channel-manager `listModels`. Falls back to static defaults until loaded.
+ * Loads model catalogs for headless CLI providers (Kimi / OpenCode) and Codex
+ * via channel-manager `listModels`. Falls back to static defaults until loaded.
  */
 export function useCliModels(currentProvider: string) {
   const [modelsByProvider, setModelsByProvider] = useState<CliModelsByProvider>({});
+  const [defaultModelByProvider, setDefaultModelByProvider] = useState<Record<string, string>>({});
+  /** Whether the last payload for a provider carried real catalog entries (vs empty → fallback). */
+  const [catalogHasEntriesByProvider, setCatalogHasEntriesByProvider] = useState<Record<string, boolean>>({});
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
   const [errorByProvider, setErrorByProvider] = useState<Record<string, string>>({});
   const pendingLoadRef = useRef<{ provider: string; timer: ReturnType<typeof setTimeout> } | null>(null);
@@ -75,8 +91,8 @@ export function useCliModels(currentProvider: string) {
   }, [clearPendingLoad]);
 
   useEffect(() => {
-    const handler = (dataOrStr: string | { provider?: string; models?: unknown; success?: boolean; error?: string }) => {
-      let payload: { provider?: string; models?: unknown; success?: boolean; error?: string } | null = null;
+    const handler = (dataOrStr: string | { provider?: string; models?: unknown; success?: boolean; error?: string; defaultModel?: unknown }) => {
+      let payload: { provider?: string; models?: unknown; success?: boolean; error?: string; defaultModel?: unknown } | null = null;
       if (typeof dataOrStr === 'string') {
         try {
           payload = JSON.parse(dataOrStr);
@@ -93,6 +109,19 @@ export function useCliModels(currentProvider: string) {
         ...prev,
         [provider]: models.length > 0 ? models : fallbackModels(provider),
       }));
+      setCatalogHasEntriesByProvider((prev) => ({ ...prev, [provider]: models.length > 0 }));
+      const defaultModel = typeof payload.defaultModel === 'string' && payload.defaultModel.trim()
+        ? payload.defaultModel.trim()
+        : null;
+      setDefaultModelByProvider((prev) => {
+        const next = { ...prev };
+        if (defaultModel) {
+          next[provider] = defaultModel;
+        } else {
+          delete next[provider];
+        }
+        return next;
+      });
       if (payload.success === false) {
         // Backend reported a failure (CLI missing, non-zero exit, …) — keep the
         // fallback list but remember the error so the dropdown can show it.
@@ -124,15 +153,43 @@ export function useCliModels(currentProvider: string) {
   }, [clearPendingLoad]);
 
   useEffect(() => {
-    if (!isCliOnlyProvider(currentProvider)) return;
-    if (currentProvider === 'grok') return; // Grok uses static profile list for now
+    if (!supportsDynamicModels(currentProvider)) return;
     if (modelsByProvider[currentProvider]?.length) return;
 
     beginLoad(currentProvider);
   }, [currentProvider, modelsByProvider, beginLoad]);
 
+  // Switching the active Codex provider rewrites ~/.codex/config.toml, so the
+  // cached catalog no longer reflects what the CLI would serve. Drop the cache
+  // and refetch when the chat is currently on codex.
+  useEffect(() => {
+    return subscribeActiveCodexProvider(() => {
+      setModelsByProvider((prev) => {
+        if (!('codex' in prev)) return prev;
+        const next = { ...prev };
+        delete next.codex;
+        return next;
+      });
+      setDefaultModelByProvider((prev) => {
+        if (!('codex' in prev)) return prev;
+        const next = { ...prev };
+        delete next.codex;
+        return next;
+      });
+      setCatalogHasEntriesByProvider((prev) => {
+        if (!('codex' in prev)) return prev;
+        const next = { ...prev };
+        delete next.codex;
+        return next;
+      });
+      if (currentProvider === 'codex') {
+        beginLoad('codex');
+      }
+    });
+  }, [currentProvider, beginLoad]);
+
   const refreshCliModels = useCallback((providerId: string) => {
-    if (!isCliOnlyProvider(providerId) || providerId === 'grok') return;
+    if (!supportsDynamicModels(providerId)) return;
     beginLoad(providerId);
   }, [beginLoad]);
 
@@ -144,6 +201,8 @@ export function useCliModels(currentProvider: string) {
     cliModels,
     cliModelsLoading: loadingProvider === currentProvider,
     cliModelsError: errorByProvider[currentProvider] ?? null,
+    cliDefaultModel: defaultModelByProvider[currentProvider] ?? null,
+    cliCatalogHasEntries: catalogHasEntriesByProvider[currentProvider] ?? false,
     refreshCliModels,
     modelsByProvider,
   };

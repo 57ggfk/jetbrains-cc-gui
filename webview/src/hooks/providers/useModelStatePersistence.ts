@@ -171,8 +171,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         }
       };
       const applyCodexModel = (modelId: string) => {
-        const customs = getCustomModels('codex-custom-models');
-        if (CODEX_MODELS.find(m => m.id === modelId) || customs.find(m => m.id === modelId)) {
+        // Codex catalogs are dynamic (config.toml `model` + model_catalog_json),
+        // so any non-empty saved id is accepted — same policy as CLI providers.
+        // A stale id is corrected by the catalog auto-select once the fetch lands.
+        if (typeof modelId === 'string' && modelId.trim().length > 0) {
           restoredCodexModel = modelId;
           setSelectedCodexModel(modelId);
         }
