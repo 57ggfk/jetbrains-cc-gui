@@ -4,8 +4,11 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.cef.browser.CefBrowser;
 
+import javax.swing.Timer;
+import java.awt.event.ActionEvent;
 import java.lang.reflect.Proxy;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
@@ -52,6 +55,145 @@ public class WebviewInitializerTest {
         Assert.assertEquals(fastDelay, WebviewInitializer.bridgeInjectionRetryDelayMs(1));
         Assert.assertTrue(slowDelay > fastDelay);
         Assert.assertEquals(slowDelay, WebviewInitializer.bridgeInjectionRetryDelayMs(500));
+    }
+
+    /** Verifies that hidden tabs pause fallback work until activation and ready tabs stop it. */
+    @Test
+    public void bridgeInjectionRetriesOnlyRunForActiveUnreadyWebviews() {
+        Assert.assertFalse(WebviewInitializer.shouldRunBridgeInjectionRetries(false, false, false));
+        Assert.assertTrue(WebviewInitializer.shouldRunBridgeInjectionRetries(false, false, true));
+        Assert.assertFalse(WebviewInitializer.shouldRunBridgeInjectionRetries(false, true, true));
+        Assert.assertFalse(WebviewInitializer.shouldRunBridgeInjectionRetries(true, false, true));
+    }
+
+    /** Verifies that a hidden-tab tick clears the real timer and activation installs a replacement. */
+    @Test
+    public void hiddenBridgeTimerStopsAndActivationRestartsIt() {
+        WebviewInitializer.BridgeInjectionTimerLifecycle lifecycle =
+                new WebviewInitializer.BridgeInjectionTimerLifecycle();
+        AtomicBoolean active = new AtomicBoolean(true);
+        lifecycle.beginPageLoad(7);
+
+        try {
+            Assert.assertTrue(lifecycle.startIfAbsent(7, active::get, attempt -> true));
+            Timer initialTimer = lifecycle.getTimer();
+            Assert.assertNotNull(initialTimer);
+            Assert.assertTrue(initialTimer.isRunning());
+
+            active.set(false);
+            fireTimer(initialTimer);
+            assertNull(lifecycle.getTimer());
+
+            active.set(true);
+            Assert.assertTrue(lifecycle.startIfAbsent(7, active::get, attempt -> true));
+            Assert.assertNotSame(initialTimer, lifecycle.getTimer());
+        } finally {
+            lifecycle.stop();
+        }
+    }
+
+    /** Verifies that repeated activation cannot install a second timer for one generation. */
+    @Test
+    public void repeatedActivationKeepsSingleBridgeTimer() {
+        WebviewInitializer.BridgeInjectionTimerLifecycle lifecycle =
+                new WebviewInitializer.BridgeInjectionTimerLifecycle();
+        lifecycle.beginPageLoad(7);
+
+        try {
+            Assert.assertTrue(lifecycle.startIfAbsent(7, () -> true, attempt -> true));
+            Timer installedTimer = lifecycle.getTimer();
+            installedTimer.stop();
+
+            Assert.assertFalse(lifecycle.startIfAbsent(7, () -> true, attempt -> true));
+            Assert.assertSame(installedTimer, lifecycle.getTimer());
+        } finally {
+            lifecycle.stop();
+        }
+    }
+
+    /** Verifies that generation changes stop old timers and reject stale-page retry installation. */
+    @Test
+    public void pageGenerationInvalidatesOldBridgeTimer() {
+        WebviewInitializer.BridgeInjectionTimerLifecycle lifecycle =
+                new WebviewInitializer.BridgeInjectionTimerLifecycle();
+        AtomicBoolean oldRetryAllowed = new AtomicBoolean(true);
+        lifecycle.beginPageLoad(7);
+
+        try {
+            Assert.assertTrue(lifecycle.startIfAbsent(7, oldRetryAllowed::get, attempt -> true));
+            Timer oldTimer = lifecycle.getTimer();
+            lifecycle.beginPageLoad(8);
+
+            assertNull(lifecycle.getTimer());
+            Assert.assertFalse(oldTimer.isRunning());
+            Assert.assertFalse(lifecycle.startIfAbsent(7, () -> true, attempt -> true));
+            Assert.assertTrue(lifecycle.startIfAbsent(8, () -> true, attempt -> true));
+            Timer currentTimer = lifecycle.getTimer();
+            currentTimer.stop();
+
+            oldRetryAllowed.set(false);
+            fireTimer(oldTimer);
+            Assert.assertSame(currentTimer, lifecycle.getTimer());
+            Assert.assertFalse(lifecycle.startIfAbsent(7, () -> false, attempt -> true));
+            Assert.assertSame(currentTimer, lifecycle.getTimer());
+        } finally {
+            lifecycle.stop();
+        }
+    }
+
+    /** Verifies that ready and disposed state transitions stop the installed timer on its next tick. */
+    @Test
+    public void readyAndDisposedTransitionsStopBridgeTimer() {
+        WebviewInitializer.BridgeInjectionTimerLifecycle lifecycle =
+                new WebviewInitializer.BridgeInjectionTimerLifecycle();
+        AtomicBoolean ready = new AtomicBoolean(false);
+        AtomicBoolean disposed = new AtomicBoolean(false);
+        lifecycle.beginPageLoad(7);
+
+        try {
+            Assert.assertTrue(lifecycle.startIfAbsent(
+                    7,
+                    () -> WebviewInitializer.shouldRunBridgeInjectionRetries(
+                            disposed.get(), ready.get(), true),
+                    attempt -> true));
+            Timer readyTimer = lifecycle.getTimer();
+            readyTimer.stop();
+            ready.set(true);
+            fireTimer(readyTimer);
+            assertNull(lifecycle.getTimer());
+
+            ready.set(false);
+            Assert.assertTrue(lifecycle.startIfAbsent(
+                    7,
+                    () -> WebviewInitializer.shouldRunBridgeInjectionRetries(
+                            disposed.get(), ready.get(), true),
+                    attempt -> true));
+            Timer disposedTimer = lifecycle.getTimer();
+            disposedTimer.stop();
+            disposed.set(true);
+            fireTimer(disposedTimer);
+            assertNull(lifecycle.getTimer());
+        } finally {
+            lifecycle.stop();
+        }
+    }
+
+    /** Verifies that configuration resolution runs once per page generation and refreshes after reload. */
+    @Test
+    public void frontendConfigurationIsCachedPerPageGeneration() {
+        WebviewInitializer.PageConfigurationCache cache =
+                new WebviewInitializer.PageConfigurationCache();
+        AtomicInteger builds = new AtomicInteger();
+        cache.reset(7);
+
+        assertEquals("config-1", cache.getOrCreate(7, () -> "config-" + builds.incrementAndGet()));
+        assertEquals("config-1", cache.getOrCreate(7, () -> "config-" + builds.incrementAndGet()));
+        assertNull(cache.getOrCreate(8, () -> "config-" + builds.incrementAndGet()));
+        assertEquals(1, builds.get());
+
+        cache.reset(8);
+        assertEquals("config-2", cache.getOrCreate(8, () -> "config-" + builds.incrementAndGet()));
+        assertEquals(2, builds.get());
     }
 
     /** Verifies that bridge injection wakes the frontend startup waiter once available. */
@@ -178,5 +320,13 @@ public class WebviewInitializerTest {
         WebviewInitializer.reloadCurrentPage(cefBrowser);
 
         Assert.assertEquals(1, reloadCalls.get());
+    }
+
+    private static void fireTimer(Timer timer) {
+        Assert.assertNotNull(timer);
+        timer.stop();
+        for (java.awt.event.ActionListener listener : timer.getActionListeners()) {
+            listener.actionPerformed(new ActionEvent(timer, ActionEvent.ACTION_PERFORMED, "test"));
+        }
     }
 }

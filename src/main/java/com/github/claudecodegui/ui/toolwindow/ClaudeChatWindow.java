@@ -451,6 +451,7 @@ public class ClaudeChatWindow {
                 return;
             }
             webviewWatchdog.markTabActivated();
+            webviewInitializer.onTabActivated();
 
             JBCefBrowser currentBrowser = browser;
             if (currentBrowser != null) {
@@ -478,6 +479,31 @@ public class ClaudeChatWindow {
         Content content = parentContent;
         ContentManager contentManager = content == null ? null : content.getManager();
         return contentManager != null && contentManager.getSelectedContent() == content;
+    }
+
+    private boolean isWebviewActive() {
+        Content content = parentContent;
+        ContentManager contentManager = content == null ? null : content.getManager();
+        boolean managedContent = contentManager != null && contentManager.getIndexOfContent(content) >= 0;
+        boolean selectedContent = managedContent && contentManager.getSelectedContent() == content;
+        DetachedChatFrame detachedFrame = DetachedWindowManager.getDetachedFrame(project, this);
+        return resolveWebviewActive(
+                managedContent,
+                selectedContent,
+                detachedFrame != null,
+                detachedFrame != null && detachedFrame.isVisible());
+    }
+
+    static boolean resolveWebviewActive(
+            boolean managedContent,
+            boolean selectedContent,
+            boolean detachedWindowPresent,
+            boolean detachedWindowVisible
+    ) {
+        if (managedContent) {
+            return selectedContent;
+        }
+        return !detachedWindowPresent || detachedWindowVisible;
     }
 
     static void refreshActivatedWebview(
@@ -1555,6 +1581,11 @@ public class ClaudeChatWindow {
             @Override
             public boolean hasEverBeenFrontendReady() {
                 return hasEverBeenFrontendReady;
+            }
+
+            @Override
+            public boolean isWebviewActive() {
+                return ClaudeChatWindow.this.isWebviewActive();
             }
 
             @Override

@@ -16,8 +16,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+/**
+ * Unit tests for native JCEF repainting and active-state decisions during tab activation.
+ */
 public class WebviewTabActivationTest {
 
+    /** Verifies that a windowed JCEF surface is remapped and repainted when its tab activates. */
     @Test
     public void remapsWindowedNativeSurfaceForAnEmptyTab() {
         List<String> calls = new ArrayList<>();
@@ -42,6 +46,7 @@ public class WebviewTabActivationTest {
         assertTrue(frontendRepainted.get());
     }
 
+    /** Verifies that off-screen-rendered JCEF uses resize notification instead of native remapping. */
     @Test
     public void usesResizeNotificationOnlyForOsrSurface() {
         List<String> calls = new ArrayList<>();
@@ -61,6 +66,16 @@ public class WebviewTabActivationTest {
         assertTrue(nativeComponent.visibilityChanges.isEmpty());
         assertTrue(calls.contains("notifyScreenInfoChanged"));
         assertTrue(frontendRepainted.get());
+    }
+
+    /** Verifies active-state selection for managed tabs, pre-binding windows, and detached windows. */
+    @Test
+    public void resolvesManagedAndDetachedWebviewActivity() {
+        assertTrue(ClaudeChatWindow.resolveWebviewActive(true, true, false, false));
+        assertFalse(ClaudeChatWindow.resolveWebviewActive(true, false, true, true));
+        assertTrue(ClaudeChatWindow.resolveWebviewActive(false, false, false, false));
+        assertTrue(ClaudeChatWindow.resolveWebviewActive(false, false, true, true));
+        assertFalse(ClaudeChatWindow.resolveWebviewActive(false, false, true, false));
     }
 
     private static CefBrowser createCefBrowser(
