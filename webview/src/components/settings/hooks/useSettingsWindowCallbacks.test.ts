@@ -40,6 +40,8 @@ describe('useSettingsWindowCallbacks', () => {
     setSoundOnlyWhenUnfocused: vi.fn(),
     setSelectedSound: vi.fn(),
     setCustomSoundPath: vi.fn(),
+    setSystemNotificationOnlyWhenUnfocused: vi.fn(),
+    setAskUserQuestionSoundNotificationEnabled: vi.fn(),
     updateProviders: vi.fn(),
     updateActiveProvider: vi.fn(),
     loadProviders: vi.fn(),
@@ -81,6 +83,8 @@ describe('useSettingsWindowCallbacks', () => {
     expect(window.sendToJava).toHaveBeenCalledWith('get_commit_ai_config:');
     expect(window.sendToJava).toHaveBeenCalledWith('get_prompt_enhancer_config:');
     expect(window.sendToJava).toHaveBeenCalledWith('get_sound_notification_config:');
+    expect(window.sendToJava).toHaveBeenCalledWith('get_system_notification_only_when_unfocused:');
+    expect(window.sendToJava).toHaveBeenCalledWith('get_ask_user_question_sound_notification_enabled:');
     expect(window.sendToJava).toHaveBeenCalledWith('get_ui_font_config:');
     expect(window.sendToJava).toHaveBeenCalledWith('get_code_font_config:');
   });
@@ -226,5 +230,17 @@ describe('useSettingsWindowCallbacks', () => {
       fontBase64: 'AAECA',
       fontFormat: 'truetype',
     }));
+  });
+
+  it('registers system notification focus gate callback and updates state from backend payload', () => {
+    const deps = createDeps();
+
+    renderHook(() => useSettingsWindowCallbacks(deps));
+
+    window.updateSystemNotificationOnlyWhenUnfocused?.(JSON.stringify({
+      systemNotificationOnlyWhenUnfocused: true,
+    }));
+
+    expect(deps.setSystemNotificationOnlyWhenUnfocused).toHaveBeenCalledWith(true);
   });
 });

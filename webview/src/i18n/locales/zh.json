@@ -412,8 +412,8 @@
       },
       "diffExpanded": {
         "label": "默认展开差异",
-        "enabled": "已展开",
-        "disabled": "已折叠",
+        "enabled": "已开启",
+        "disabled": "已关闭",
         "hint": "开启后，聊天中的代码差异将默认展开显示。关闭后，差异默认折叠，可点击展开。"
       },
       "commitGeneration": {
@@ -429,13 +429,13 @@
         "hint": "开启后，在 IDE 右下角状态栏显示当前模型和模式信息（如 GUI [Opus] {自动}）。关闭后隐藏。"
       },
       "taskCompletionNotification": {
-        "label": "任务完成通知",
+        "label": "任务完成系统通知",
         "enabled": "已开启",
         "disabled": "已关闭",
         "hint": "开启后，当 AI 任务完成时显示系统通知。关闭后不显示系统通知。"
       },
       "askUserQuestionNotification": {
-        "label": "询问用户提醒通知",
+        "label": "提问系统通知",
         "enabled": "已开启",
         "disabled": "已关闭",
         "hint": "开启后，当 Claude 向你提问时显示系统通知提醒，避免错过。关闭后不显示通知。"
@@ -445,6 +445,18 @@
         "enabled": "已开启",
         "disabled": "已关闭",
         "hint": "开启后，消息底部会在可用时显示本轮预估费用，并在输入 Token 中标明缓存命中。Token 消耗信息始终保持显示。"
+      },
+      "askUserQuestionSoundNotification": {
+        "label": "提问提示音",
+        "enabled": "已开启",
+        "disabled": "已关闭",
+        "hint": "开启后，当 Claude 向你提问时播放已配置的提示音。会使用下方的音效选择和焦点规则。"
+      },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "仅在 IDE 未聚焦时显示系统通知",
+        "enabled": "已开启",
+        "disabled": "已关闭",
+        "hint": "开启后，仅在 IDE 窗口未聚焦时显示任务完成和提问系统通知。"
       },
       "sendShortcut": {
         "label": "发送快捷键",
@@ -486,8 +498,8 @@
         "enabled": "已开启",
         "disabled": "已关闭",
         "hint": "开启后，AI 完成任务时会播放提示音，方便您离开屏幕时也能知道任务已完成。",
-        "onlyWhenUnfocused": "仅在 IDE 未聚焦时播放",
-        "onlyWhenUnfocusedHint": "开启后，仅在 IDE 窗口未聚焦时播放提示音。",
+        "onlyWhenUnfocused": "仅在 IDE 未聚焦时播放提示音",
+        "onlyWhenUnfocusedHint": "开启后，仅在 IDE 窗口未聚焦时播放任务完成和提问提示音。",
         "selectSound": "提示音",
         "soundDefault": "默认",
         "soundChime": "清脆铃声",

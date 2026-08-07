@@ -241,18 +241,18 @@
       },
       "diffExpanded": {
         "label": "Développer les différences par défaut",
-        "enabled": "Développé",
-        "disabled": "Réduit",
+        "enabled": "Activé",
+        "disabled": "Désactivé",
         "hint": "Lorsque activé, les différences de code dans le chat seront développées par défaut. Lorsque désactivé, les différences commencent réduites."
       },
       "taskCompletionNotification": {
-        "label": "Notification de fin de tâche",
+        "label": "Notification système de fin de tâche",
         "enabled": "Activé",
         "disabled": "Désactivé",
         "hint": "Lorsque activé, affiche une notification système lorsque la tâche AI est terminée. Lorsque désactivé, aucune notification apparaît."
       },
       "askUserQuestionNotification": {
-        "label": "Notification de question à l'utilisateur",
+        "label": "Notification système de question",
         "enabled": "Activé",
         "disabled": "Désactivé",
         "hint": "Lorsque activé, affiche une notification système lorsque Claude vous pose une question, pour ne pas la manquer. Lorsque désactivé, aucune notification apparaît."
@@ -262,6 +262,40 @@
         "enabled": "Activé",
         "disabled": "Désactivé",
         "hint": "Lorsque cette option est activée, le pied des messages affiche le coût estimé du tour quand il est disponible et inclut les accès au cache dans le résumé des tokens d’entrée. La consommation de tokens reste toujours visible."
+      },
+      "askUserQuestionSoundNotification": {
+        "label": "Son d'alerte de question",
+        "enabled": "Activé",
+        "disabled": "Désactivé",
+        "hint": "Lorsque activé, joue le son d'alerte configuré lorsque Claude vous pose une question. Utilise la sélection du son et les règles de focus ci-dessous."
+      },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "Afficher les notifications système uniquement lorsque l'IDE n'est pas au premier plan",
+        "enabled": "Activé",
+        "disabled": "Désactivé",
+        "hint": "Lorsque activé, les notifications système de fin de tâche et de question s'affichent uniquement lorsque l'IDE n'est pas au premier plan."
+      },
+      "soundNotification": {
+        "label": "Son d'alerte de fin de tâche",
+        "enabled": "Activé",
+        "disabled": "Désactivé",
+        "hint": "Lorsque activé, un son de notification est joué lorsque l'IA termine une tâche, afin que vous le sachiez même loin de l'écran.",
+        "onlyWhenUnfocused": "Jouer les sons d'alerte uniquement lorsque l'IDE n'est pas au premier plan",
+        "onlyWhenUnfocusedHint": "Lorsque activé, les sons d'alerte de fin de tâche et de question sont joués uniquement lorsque l'IDE n'est pas au premier plan.",
+        "selectSound": "Son de notification",
+        "soundDefault": "Par défaut",
+        "soundChime": "Carillon",
+        "soundBell": "Cloche",
+        "soundDing": "Ding",
+        "soundSuccess": "Succès",
+        "soundCustom": "Personnalisé...",
+        "customSound": "Fichier son personnalisé",
+        "customSoundPlaceholder": "Sélectionnez ou saisissez le chemin du fichier audio",
+        "customSoundHint": "Formats WAV, MP3 et AIFF pris en charge",
+        "testSound": "Tester",
+        "browse": "Parcourir",
+        "useDefault": "Utiliser par défaut",
+        "customSoundSaved": "Son personnalisé enregistré"
       },
       "sendShortcut": {
         "label": "Raccourci d'envoi",

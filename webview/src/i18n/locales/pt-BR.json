@@ -241,8 +241,8 @@
       },
       "diffExpanded": {
         "label": "Expandir Diffs por Padrão",
-        "enabled": "Expandido",
-        "disabled": "Recolhido",
+        "enabled": "Ativado",
+        "disabled": "Desativado",
         "hint": "Quando ativado, os diffs de código no chat ficam expandidos por padrão. Quando desativado, os diffs começam recolhidos e podem ser expandidos clicando."
       },
       "commitGeneration": {
@@ -258,13 +258,13 @@
         "hint": "Quando ativado, exibe informações do modelo e modo atual na barra de status da IDE (ex: GUI [Opus] {Auto}). Quando desativado, o widget fica oculto."
       },
       "taskCompletionNotification": {
-        "label": "Notificação de Conclusão de Tarefa",
+        "label": "Notificação do sistema de conclusão de tarefa",
         "enabled": "Ativado",
         "disabled": "Desativado",
         "hint": "Quando ativado, exibe uma notificação do sistema quando a tarefa AI é concluída. Quando desativado, nenhuma notificação aparece."
       },
       "askUserQuestionNotification": {
-        "label": "Notificação de Pergunta ao Usuário",
+        "label": "Notificação do sistema de pergunta",
         "enabled": "Ativado",
         "disabled": "Desativado",
         "hint": "Quando ativado, exibe uma notificação do sistema quando o Claude faz uma pergunta, para que você não a perca. Quando desativado, nenhuma notificação aparece."
@@ -274,6 +274,18 @@
         "enabled": "Ativado",
         "disabled": "Desativado",
         "hint": "Quando ativado, o rodapé das mensagens mostra o custo estimado do turno quando disponível e inclui os acertos de cache no resumo de tokens de entrada. O uso de tokens permanece sempre visível."
+      },
+      "askUserQuestionSoundNotification": {
+        "label": "Som de alerta de pergunta",
+        "enabled": "Ativado",
+        "disabled": "Desativado",
+        "hint": "Quando ativado, reproduz o som de alerta configurado quando o Claude faz uma pergunta. Usa a seleção de som e as regras de foco abaixo."
+      },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "Mostrar notificações do sistema somente quando a IDE não estiver em foco",
+        "enabled": "Ativado",
+        "disabled": "Desativado",
+        "hint": "Quando ativado, as notificações do sistema de conclusão de tarefa e pergunta aparecem somente quando a IDE não estiver em foco."
       },
       "sendShortcut": {
         "label": "Atalho de Envio",
@@ -311,12 +323,12 @@
         "softDarkDesc": "Mantém o contraste do código sem o fundo preto intenso"
       },
       "soundNotification": {
-        "label": "Som de Conclusão de Tarefa",
+        "label": "Som de alerta de conclusão de tarefa",
         "enabled": "Ativado",
         "disabled": "Desativado",
         "hint": "Quando ativado, um som de notificação será reproduzido quando a IA concluir uma tarefa, para você saber mesmo estando longe da tela.",
-        "onlyWhenUnfocused": "Reproduzir apenas quando a IDE não estiver em foco",
-        "onlyWhenUnfocusedHint": "Quando ativado, o som será reproduzido apenas quando a janela da IDE não estiver em foco.",
+        "onlyWhenUnfocused": "Reproduzir sons de alerta apenas quando a IDE não estiver em foco",
+        "onlyWhenUnfocusedHint": "Quando ativado, os sons de alerta de conclusão de tarefa e pergunta são reproduzidos somente quando a IDE não estiver em foco.",
         "selectSound": "Som de Notificação",
         "soundDefault": "Padrão",
         "soundChime": "Chime",

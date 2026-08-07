@@ -1606,6 +1606,62 @@ public class CodemossSettingsService {
         LOG.info("[CodemossSettings] Set ask user question notification enabled: " + enabled);
     }
 
+    /**
+     * Get whether the AskUserQuestion reminder sound notification is enabled.
+     *
+     * @return whether the reminder sound is enabled, default is false (opt-in)
+     */
+    public boolean getAskUserQuestionSoundNotificationEnabled() throws IOException {
+        JsonObject config = readConfig();
+
+        if (config.has("askUserQuestionSoundNotificationEnabled")
+                && !config.get("askUserQuestionSoundNotificationEnabled").isJsonNull()) {
+            return config.get("askUserQuestionSoundNotificationEnabled").getAsBoolean();
+        }
+
+        return false;
+    }
+
+    /**
+     * Set whether the AskUserQuestion reminder sound notification is enabled.
+     *
+     * @param enabled whether to enable
+     */
+    public void setAskUserQuestionSoundNotificationEnabled(boolean enabled) throws IOException {
+        JsonObject config = readConfig();
+        config.addProperty("askUserQuestionSoundNotificationEnabled", enabled);
+        writeConfig(config);
+        LOG.info("[CodemossSettings] Set ask user question sound notification enabled: " + enabled);
+    }
+
+    /**
+     * Get whether visual system notifications should only be shown when the IDE is not focused.
+     *
+     * @return whether only-when-unfocused is enabled, default is false
+     */
+    public boolean getSystemNotificationOnlyWhenUnfocused() throws IOException {
+        JsonObject config = readConfig();
+
+        if (config.has("systemNotificationOnlyWhenUnfocused")
+                && !config.get("systemNotificationOnlyWhenUnfocused").isJsonNull()) {
+            return config.get("systemNotificationOnlyWhenUnfocused").getAsBoolean();
+        }
+
+        return false;
+    }
+
+    /**
+     * Set whether visual system notifications should only be shown when the IDE is not focused.
+     *
+     * @param enabled whether to enable
+     */
+    public void setSystemNotificationOnlyWhenUnfocused(boolean enabled) throws IOException {
+        JsonObject config = readConfig();
+        config.addProperty("systemNotificationOnlyWhenUnfocused", enabled);
+        writeConfig(config);
+        LOG.info("[CodemossSettings] Set system notification only when unfocused: " + enabled);
+    }
+
     // ==================== AI Feature Toggle Management ====================
 
     /**

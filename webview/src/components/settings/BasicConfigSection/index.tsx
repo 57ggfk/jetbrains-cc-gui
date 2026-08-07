@@ -104,6 +104,10 @@ interface BasicConfigSectionProps {
   // Detailed output information configuration
   detailedOutputEnabled?: boolean;
   onDetailedOutputEnabledChange?: (enabled: boolean) => void;
+  systemNotificationOnlyWhenUnfocused?: boolean;
+  onSystemNotificationOnlyWhenUnfocusedChange?: (enabled: boolean) => void;
+  askUserQuestionSoundNotificationEnabled?: boolean;
+  onAskUserQuestionSoundNotificationEnabledChange?: (enabled: boolean) => void;
   // Permission dialog timeout configuration
   permissionDialogTimeoutSeconds?: number;
   onPermissionDialogTimeoutChange?: (seconds: number) => void;
@@ -194,6 +198,10 @@ const BasicConfigSection = (props: BasicConfigSectionProps) => {
           onAskUserQuestionNotificationEnabledChange={props.onAskUserQuestionNotificationEnabledChange}
           detailedOutputEnabled={props.detailedOutputEnabled}
           onDetailedOutputEnabledChange={props.onDetailedOutputEnabledChange}
+          systemNotificationOnlyWhenUnfocused={props.systemNotificationOnlyWhenUnfocused}
+          onSystemNotificationOnlyWhenUnfocusedChange={props.onSystemNotificationOnlyWhenUnfocusedChange}
+          askUserQuestionSoundNotificationEnabled={props.askUserQuestionSoundNotificationEnabled}
+          onAskUserQuestionSoundNotificationEnabledChange={props.onAskUserQuestionSoundNotificationEnabledChange}
           permissionDialogTimeoutSeconds={props.permissionDialogTimeoutSeconds}
           onPermissionDialogTimeoutChange={props.onPermissionDialogTimeoutChange}
         />

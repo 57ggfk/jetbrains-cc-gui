@@ -715,6 +715,38 @@ public class ProjectConfigHandler {
             "Failed to save ask user question notification setting");
     }
 
+    public void handleGetSystemNotificationOnlyWhenUnfocused() {
+        respondWithJson("window.updateSystemNotificationOnlyWhenUnfocused",
+            () -> jsonOf("systemNotificationOnlyWhenUnfocused", settingsService.getSystemNotificationOnlyWhenUnfocused()),
+            jsonOf("systemNotificationOnlyWhenUnfocused", false),
+            "Failed to get system notification only-when-unfocused");
+    }
+
+    public void handleSetSystemNotificationOnlyWhenUnfocused(String content) {
+        handleBooleanToggle(content, "systemNotificationOnlyWhenUnfocused", false,
+            "system notification only when unfocused",
+            settingsService::setSystemNotificationOnlyWhenUnfocused,
+            "window.updateSystemNotificationOnlyWhenUnfocused",
+            "Failed to save system notification focus setting");
+    }
+
+    public void handleGetAskUserQuestionSoundNotificationEnabled() {
+        respondWithJson("window.updateAskUserQuestionSoundNotificationEnabled",
+            () -> jsonOf("askUserQuestionSoundNotificationEnabled",
+                    settingsService.getAskUserQuestionSoundNotificationEnabled()),
+            jsonOf("askUserQuestionSoundNotificationEnabled", false),
+            "Failed to get ask user question sound notification enabled");
+    }
+
+    public void handleSetAskUserQuestionSoundNotificationEnabled(String content) {
+        // Default to disabled when payload is missing or the field is absent/null (opt-in feature).
+        handleBooleanToggle(content, "askUserQuestionSoundNotificationEnabled", false,
+            "ask user question sound notification enabled",
+            settingsService::setAskUserQuestionSoundNotificationEnabled,
+            "window.updateAskUserQuestionSoundNotificationEnabled",
+            "Failed to save ask user question sound notification setting");
+    }
+
     private void dispatchUiFontConfigUpdate() {
         try {
             String uiFontConfigJson = FontConfigService.getResolvedUiFontConfigJson(settingsService);

@@ -54,6 +54,8 @@ export interface SettingsWindowCallbacksDeps {
   setStatusBarWidgetEnabled?: (enabled: boolean) => void;
   setTaskCompletionNotificationEnabled?: (enabled: boolean) => void;
   setAskUserQuestionNotificationEnabled?: (enabled: boolean) => void;
+  setSystemNotificationOnlyWhenUnfocused?: (enabled: boolean) => void;
+  setAskUserQuestionSoundNotificationEnabled?: (enabled: boolean) => void;
   // Sound notification setters
   setSoundNotificationEnabled?: (enabled: boolean) => void;
   setSoundOnlyWhenUnfocused?: (enabled: boolean) => void;
@@ -378,6 +380,26 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       }
     };
 
+    // System notification focus gate config callback (default false)
+    window.updateSystemNotificationOnlyWhenUnfocused = (jsonStr: string) => {
+      try {
+        const data = JSON.parse(jsonStr);
+        d().setSystemNotificationOnlyWhenUnfocused?.(data.systemNotificationOnlyWhenUnfocused ?? false);
+      } catch (error) {
+        console.error('[SettingsView] Failed to parse system notification focus config:', error);
+      }
+    };
+
+    // AskUserQuestion reminder sound notification config callback (opt-in feature, default false)
+    window.updateAskUserQuestionSoundNotificationEnabled = (jsonStr: string) => {
+      try {
+        const data = JSON.parse(jsonStr);
+        d().setAskUserQuestionSoundNotificationEnabled?.(data.askUserQuestionSoundNotificationEnabled ?? false);
+      } catch (error) {
+        console.error('[SettingsView] Failed to parse ask user question sound notification config:', error);
+      }
+    };
+
     // Sound notification config callback
     window.updateSoundNotificationConfig = (jsonStr: string) => {
       try {
@@ -540,6 +562,8 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
     sendToJava('get_status_bar_widget_enabled:');
     sendToJava('get_task_completion_notification_enabled:');
     sendToJava('get_ask_user_question_notification_enabled:');
+    sendToJava('get_system_notification_only_when_unfocused:');
+    sendToJava('get_ask_user_question_sound_notification_enabled:');
     sendToJava('get_permission_dialog_timeout:');
 
     return () => {
@@ -578,6 +602,8 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       window.updateStatusBarWidgetEnabled = undefined;
       window.updateTaskCompletionNotificationEnabled = undefined;
       window.updateAskUserQuestionNotificationEnabled = undefined;
+      window.updateSystemNotificationOnlyWhenUnfocused = undefined;
+      window.updateAskUserQuestionSoundNotificationEnabled = undefined;
       window.updateAgents = previousUpdateAgents;
       window.agentOperationResult = undefined;
       window.agentImportPreviewResult = undefined;

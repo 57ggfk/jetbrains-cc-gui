@@ -204,6 +204,12 @@ const SettingsView = ({
     handleAskUserQuestionNotificationEnabledChange,
     detailedOutputEnabled,
     handleDetailedOutputEnabledChange,
+    systemNotificationOnlyWhenUnfocused,
+    setSystemNotificationOnlyWhenUnfocused,
+    handleSystemNotificationOnlyWhenUnfocusedChange,
+    askUserQuestionSoundNotificationEnabled,
+    setAskUserQuestionSoundNotificationEnabled,
+    handleAskUserQuestionSoundNotificationEnabledChange,
     permissionDialogTimeoutSeconds,
     handlePermissionDialogTimeoutChange,
     commitAiConfig,
@@ -359,6 +365,8 @@ const SettingsView = ({
     setStatusBarWidgetEnabled,
     setTaskCompletionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
+    setSystemNotificationOnlyWhenUnfocused,
+    setAskUserQuestionSoundNotificationEnabled,
   });
 
   // Save provider (wrapper function with validation logic)
@@ -551,6 +559,10 @@ const SettingsView = ({
               onAskUserQuestionNotificationEnabledChange={handleAskUserQuestionNotificationEnabledChange}
               detailedOutputEnabled={detailedOutputEnabled}
               onDetailedOutputEnabledChange={handleDetailedOutputEnabledChange}
+              systemNotificationOnlyWhenUnfocused={systemNotificationOnlyWhenUnfocused}
+              onSystemNotificationOnlyWhenUnfocusedChange={handleSystemNotificationOnlyWhenUnfocusedChange}
+              askUserQuestionSoundNotificationEnabled={askUserQuestionSoundNotificationEnabled}
+              onAskUserQuestionSoundNotificationEnabledChange={handleAskUserQuestionSoundNotificationEnabledChange}
               permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}
               onPermissionDialogTimeoutChange={handlePermissionDialogTimeoutChange}
             />
