@@ -37,6 +37,28 @@ import { handlePiCommand } from './channels/pi-channel.js';
 import { getSdkStatus, isClaudeSdkAvailable, isCodexSdkAvailable } from './utils/sdk-loader.js';
 import { injectStartupEnvVars, configureCliIdentity } from './config/api-config.js';
 
+/**
+ * Write a JSON payload to stdout and exit once the bytes are flushed.
+ *
+ * `console.log` followed by `process.exit` races the stdout buffer: for a
+ * piped stdout the underlying `process.stdout.write` is asynchronous, and
+ * `process.exit` does not wait for it to drain, truncating the JSON. Writing
+ * explicitly and exiting in the flush callback guarantees the payload reaches
+ * the OS pipe first. The timeout fallback ensures the process still terminates
+ * if the callback never fires (e.g. a broken pipe).
+ */
+function writeJsonAndExit(payload, code = 0) {
+  let exited = false;
+  const exitNow = () => {
+    if (!exited) {
+      exited = true;
+      process.exit(code);
+    }
+  };
+  process.stdout.write(JSON.stringify(payload) + '\n', 'utf8', exitNow);
+  setTimeout(exitNow, 5000);
+}
+
 // Sync proxy/TLS settings and AWS credentials from ~/.claude/settings.json
 // BEFORE any network activity, but only for explicitly authorized Local
 // settings.json / CLI Login modes. Without this, users behind corporate
@@ -67,20 +89,18 @@ console.error('[DIAG-ENTRY] Args:', args);
 // Error handling
 process.on('uncaughtException', (error) => {
   console.error('[UNCAUGHT_ERROR]', error.message);
-  console.log(JSON.stringify({
+  writeJsonAndExit({
     success: false,
     error: error.message
-  }));
-  process.exit(1);
+  }, 1);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('[UNHANDLED_REJECTION]', reason);
-  console.log(JSON.stringify({
+  writeJsonAndExit({
     success: false,
     error: String(reason)
-  }));
-  process.exit(1);
+  }, 1);
 });
 
 /**
@@ -114,11 +134,7 @@ async function handleSystemCommand(command, args, stdinData) {
       break;
 
     default:
-      console.log(JSON.stringify({
-        success: false,
-        error: 'Unknown system command: ' + command
-      }));
-      process.exit(1);
+      throw new Error('Unknown system command: ' + command);
   }
 }
 
@@ -140,21 +156,21 @@ const providerHandlers = {
     console.error('[DIAG-EXEC] Validating provider...');
     if (!provider || !providerHandlers[provider]) {
       console.error('Invalid provider. Use "claude", "codex", "grok", "kimi", "opencode", "pi", or "system"');
-      console.log(JSON.stringify({
+      writeJsonAndExit({
         success: false,
         error: 'Invalid provider: ' + provider
-      }));
-      process.exit(1);
+      }, 1);
+      return;
     }
 
     // Validate command
     if (!command) {
       console.error('No command specified');
-      console.log(JSON.stringify({
+      writeJsonAndExit({
         success: false,
         error: 'No command specified'
-      }));
-      process.exit(1);
+      }, 1);
+      return;
     }
 
     // Read stdin data
@@ -184,10 +200,9 @@ const providerHandlers = {
 
   } catch (error) {
     console.error('[COMMAND_ERROR]', error.message);
-    console.log(JSON.stringify({
+    writeJsonAndExit({
       success: false,
       error: error.message
-    }));
-    process.exit(1);
+    }, 1);
   }
 })();
