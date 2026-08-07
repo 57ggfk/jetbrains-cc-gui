@@ -159,6 +159,8 @@ export function useChatComputations({
   const fileChanges = useFileChanges({
     messages, getContentBlocks, findToolResult,
     startFromIndex: fileChangeMgmt.baseMessageIndex,
+    // Sidechain Edit/Write from Agent/Task tools must appear in the Edits tab too
+    subagentHistories,
   });
 
   const filteredFileChanges = useMemo(() => {
