@@ -3,6 +3,7 @@ export { useCompletionDropdown } from './useCompletionDropdown.js';
 export { useCompletionTriggerDetection } from './useCompletionTriggerDetection.js';
 export { useTextContent } from './useTextContent.js';
 export { useFileTags } from './useFileTags.js';
+export { useQuoteTags } from './useQuoteTags.js';
 export { useTooltip } from './useTooltip.js';
 export { useKeyboardNavigation } from './useKeyboardNavigation.js';
 export { useIMEComposition } from './useIMEComposition.js';

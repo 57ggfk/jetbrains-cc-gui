@@ -20,6 +20,7 @@ import { ResizeHandles } from './ResizeHandles.js';
 import {
   useTextContent,
   useFileTags,
+  useQuoteTags,
   useTooltip,
   useKeyboardNavigation,
   useIMEComposition,
@@ -175,6 +176,15 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       onCloseCompletions: closeAllCompletions,
     });
 
+    // Quote tags hook (inline quote chips)
+    const { renderQuoteTags } = useQuoteTags({ editableRef });
+
+    // Combined tag rendering: file tags first, then quote chips.
+    const renderTags = useCallback(() => {
+      renderFileTags();
+      renderQuoteTags();
+    }, [renderFileTags, renderQuoteTags]);
+
     // Tooltip hook
     const { tooltip, handleMouseOver, handleMouseLeave } = useTooltip();
 
@@ -212,8 +222,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
 
     // Create debounced version of renderFileTags
     const debouncedRenderFileTags = useMemo(
-      () => debounce(renderFileTags, DEBOUNCE_TIMING.FILE_TAG_RENDERING_MS),
-      [renderFileTags]
+      () => debounce(renderTags, DEBOUNCE_TIMING.FILE_TAG_RENDERING_MS),
+      [renderTags]
     );
 
     const {
@@ -357,8 +367,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     }, [rawHandleCompositionEnd]);
 
     useEffect(() => {
-      setRenderFileTags(renderFileTags);
-    }, [renderFileTags, setRenderFileTags]);
+      setRenderFileTags(renderTags);
+    }, [renderTags, setRenderFileTags]);
 
     const { record: recordInputHistory, handleKeyDown: handleHistoryKeyDown } = useInputHistory({
       editableRef,
@@ -520,7 +530,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       pathMappingRef,
       getTextContent,
       adjustHeight,
-      renderFileTags,
+      renderFileTags: renderTags,
       setHasContent,
       setInternalAttachments,
       onInput,
@@ -557,7 +567,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       pathMappingRef,
       getTextContent,
       adjustHeight,
-      renderFileTags,
+      renderFileTags: renderTags,
+      renderQuoteTags,
       setHasContent,
       onInput,
       closeAllCompletions,
