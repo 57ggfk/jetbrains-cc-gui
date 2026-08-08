@@ -989,7 +989,13 @@
   "markdown": {
     "copyCode": "Копировать код",
     "copyMessage": "Копировать сообщение",
-    "copySuccess": "Скопировано!"
+    "copySuccess": "Скопировано!",
+    "quoteMessage": "Цитировать сообщение",
+    "quoteSuccess": "Процитировано!"
+  },
+  "contextMenu": {
+    "copy": "Копировать",
+    "quote": "Цитировать"
   },
   "usage": {
     "checkingLabel": "Проверка tokentracker-cli…",

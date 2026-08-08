@@ -962,7 +962,13 @@
   "markdown": {
     "copyCode": "कोड कॉपी करें",
     "copyMessage": "संदेश कॉपी करें",
-    "copySuccess": "कॉपी हो गया"
+    "copySuccess": "कॉपी हो गया",
+    "quoteMessage": "संदेश उद्धृत करें",
+    "quoteSuccess": "उद्धृत किया गया!"
+  },
+  "contextMenu": {
+    "copy": "कॉपी करें",
+    "quote": "उद्धृत करें"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli की जाँच हो रही है…",

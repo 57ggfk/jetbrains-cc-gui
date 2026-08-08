@@ -962,7 +962,13 @@
   "markdown": {
     "copyCode": "Copier le code",
     "copyMessage": "Copier le message",
-    "copySuccess": "Copié !"
+    "copySuccess": "Copié !",
+    "quoteMessage": "Citer le message",
+    "quoteSuccess": "Cité !"
+  },
+  "contextMenu": {
+    "copy": "Copier",
+    "quote": "Citer"
   },
   "usage": {
     "checkingLabel": "Vérification de tokentracker-cli…",

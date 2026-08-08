@@ -1299,7 +1299,13 @@
   "markdown": {
     "copyCode": "复制代码",
     "copyMessage": "复制消息",
-    "copySuccess": "复制成功"
+    "copySuccess": "复制成功",
+    "quoteMessage": "引用消息",
+    "quoteSuccess": "已引用！"
+  },
+  "contextMenu": {
+    "copy": "复制",
+    "quote": "引用"
   },
   "usage": {
     "checkingLabel": "正在检测 tokentracker-cli…",
