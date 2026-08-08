@@ -1294,7 +1294,13 @@
   "markdown": {
     "copyCode": "Copy code",
     "copyMessage": "Copy message",
-    "copySuccess": "Copied!"
+    "copySuccess": "Copied!",
+    "quoteMessage": "Quote message",
+    "quoteSuccess": "Quoted!"
+  },
+  "contextMenu": {
+    "copy": "Copy",
+    "quote": "Quote"
   },
   "usage": {
     "checkingLabel": "Checking for tokentracker-cli…",
