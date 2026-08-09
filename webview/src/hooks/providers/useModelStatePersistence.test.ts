@@ -34,7 +34,7 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     selectedCodexModel: 'gpt-5-codex',
     claudePermissionMode: 'default' as PermissionMode,
     codexPermissionMode: 'default' as PermissionMode,
-    selectedGrokModel: 'grok',
+    selectedGrokModel: 'grok-4.5',
     selectedKimiModel: 'auto',
     selectedOpenCodeModel: 'opencode-default',
     selectedPiModel: 'auto',
@@ -287,14 +287,14 @@ describe('useModelStatePersistence — CLI provider persistence', () => {
   it('honors a backend-supplied CLI provider via __INITIAL_TAB_PROVIDER__', () => {
     const setCurrentProvider = vi.fn();
     (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__ = 'grok';
-    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'grok';
+    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'grok-4.5';
 
     renderHook(() => useModelStatePersistence(makeOptions({ setCurrentProvider })));
     vi.advanceTimersByTime(200);
 
     expect(setCurrentProvider).toHaveBeenCalledWith('grok');
     expect(bridgeEventsFor('set_provider')).toEqual([['set_provider', 'grok']]);
-    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'grok']]);
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'grok-4.5']]);
   });
 
   it('persists CLI model and permission selections in the snapshot', () => {
