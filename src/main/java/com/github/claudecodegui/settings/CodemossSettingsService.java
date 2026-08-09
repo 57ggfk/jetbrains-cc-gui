@@ -55,6 +55,158 @@ public class CodemossSettingsService {
     public static final String CODEX_RUNTIME_ACCESS_INACTIVE = "inactive";
     public static final String CODEX_RUNTIME_ACCESS_MANAGED = "managed";
     public static final String CODEX_RUNTIME_ACCESS_CLI_LOGIN = "cli_login";
+
+    public static final String GROK_AUTH_METHOD_AUTO = "auto";
+    public static final String GROK_AUTH_METHOD_OAUTH = "oauth";
+    public static final String GROK_AUTH_METHOD_API_KEY = "api_key";
+    public static final String DEFAULT_GROK_AUTH_METHOD = GROK_AUTH_METHOD_OAUTH;
+
+    public String getGrokAuthMethod() throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has("grok") || config.get("grok").isJsonNull()) {
+            return DEFAULT_GROK_AUTH_METHOD;
+        }
+        JsonObject grok = config.getAsJsonObject("grok");
+        if (!grok.has("authMethod") || grok.get("authMethod").isJsonNull()) {
+            return DEFAULT_GROK_AUTH_METHOD;
+        }
+        String method = grok.get("authMethod").getAsString();
+        return normalizeGrokAuthMethod(method);
+    }
+
+    public void setGrokAuthMethod(String method) throws IOException {
+        String normalized = normalizeGrokAuthMethod(method);
+        JsonObject config = readConfig();
+        JsonObject grok = config.has("grok") && !config.get("grok").isJsonNull()
+                ? config.getAsJsonObject("grok")
+                : new JsonObject();
+        grok.addProperty("authMethod", normalized);
+        config.add("grok", grok);
+        writeConfig(config);
+        LOG.info("[CodemossSettingsService] Set grok.authMethod=" + normalized);
+    }
+
+    public String getGrokApiKey() throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has("grok") || config.get("grok").isJsonNull()) {
+            return "";
+        }
+        JsonObject grok = config.getAsJsonObject("grok");
+        if (!grok.has("apiKey") || grok.get("apiKey").isJsonNull()) {
+            return "";
+        }
+        return grok.get("apiKey").getAsString();
+    }
+
+    public void setGrokApiKey(String apiKey) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject grok = config.has("grok") && !config.get("grok").isJsonNull()
+                ? config.getAsJsonObject("grok")
+                : new JsonObject();
+        String value = apiKey != null ? apiKey.trim() : "";
+        if (value.isEmpty()) {
+            grok.remove("apiKey");
+        } else {
+            grok.addProperty("apiKey", value);
+        }
+        config.add("grok", grok);
+        writeConfig(config);
+        LOG.info("[CodemossSettingsService] Updated grok.apiKey (present=" + !value.isEmpty() + ")");
+    }
+
+    public static String normalizeGrokAuthMethod(String method) {
+        if (method == null || method.trim().isEmpty()) {
+            return DEFAULT_GROK_AUTH_METHOD;
+        }
+        String m = method.trim().toLowerCase();
+        if (GROK_AUTH_METHOD_API_KEY.equals(m) || "xai.api_key".equals(m) || "apikey".equals(m)) {
+            return GROK_AUTH_METHOD_API_KEY;
+        }
+        if (GROK_AUTH_METHOD_AUTO.equals(m)) {
+            return GROK_AUTH_METHOD_AUTO;
+        }
+        if (GROK_AUTH_METHOD_OAUTH.equals(m) || "cached_token".equals(m) || "cli_login".equals(m) || "grok.com".equals(m)) {
+            return GROK_AUTH_METHOD_OAUTH;
+        }
+        return DEFAULT_GROK_AUTH_METHOD;
+    }
+
+    public String getGrokApiBaseUrl() throws IOException {
+        return getGrokStringSetting("apiBaseUrl");
+    }
+
+    public void setGrokApiBaseUrl(String url) throws IOException {
+        setGrokStringSetting("apiBaseUrl", url);
+        LOG.info("[CodemossSettingsService] Set grok.apiBaseUrl=" + redactUrl(url));
+    }
+
+    public String getGrokOauthBaseUrl() throws IOException {
+        return getGrokStringSetting("oauthBaseUrl");
+    }
+
+    public void setGrokOauthBaseUrl(String url) throws IOException {
+        setGrokStringSetting("oauthBaseUrl", url);
+        LOG.info("[CodemossSettingsService] Set grok.oauthBaseUrl=" + redactUrl(url));
+    }
+
+    public String getGrokGatewayOrigin() throws IOException {
+        return getGrokStringSetting("gatewayOrigin");
+    }
+
+    public void setGrokGatewayOrigin(String origin) throws IOException {
+        setGrokStringSetting("gatewayOrigin", origin);
+        LOG.info("[CodemossSettingsService] Set grok.gatewayOrigin=" + redactUrl(origin));
+    }
+
+    public String resolveGrokBaseUrlForAuth(String authMethod, String explicitBaseUrl) throws IOException {
+        if (explicitBaseUrl != null && !explicitBaseUrl.trim().isEmpty()) {
+            return explicitBaseUrl.trim();
+        }
+        String method = normalizeGrokAuthMethod(authMethod);
+        if (GROK_AUTH_METHOD_API_KEY.equals(method)) {
+            return getGrokApiBaseUrl();
+        }
+        if (GROK_AUTH_METHOD_OAUTH.equals(method)) {
+            return getGrokOauthBaseUrl();
+        }
+        String oauth = getGrokOauthBaseUrl();
+        if (!oauth.isEmpty()) {
+            return oauth;
+        }
+        return getGrokApiBaseUrl();
+    }
+
+    private String getGrokStringSetting(String field) throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has("grok") || config.get("grok").isJsonNull()) {
+            return "";
+        }
+        JsonObject grok = config.getAsJsonObject("grok");
+        if (!grok.has(field) || grok.get(field).isJsonNull()) {
+            return "";
+        }
+        return grok.get(field).getAsString();
+    }
+
+    private void setGrokStringSetting(String field, String value) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject grok = config.has("grok") && !config.get("grok").isJsonNull()
+                ? config.getAsJsonObject("grok")
+                : new JsonObject();
+        String v = value != null ? value.trim() : "";
+        if (v.isEmpty()) {
+            grok.remove(field);
+        } else {
+            grok.addProperty(field, v);
+        }
+        config.add("grok", grok);
+        writeConfig(config);
+    }
+
+    private String redactUrl(String url) {
+        if (url == null || url.trim().isEmpty()) return "(empty)";
+        return url.trim();
+    }
     private static final String COMMIT_AI_KEY = "commitAi";
     private static final String PROMPT_ENHANCER_KEY = "promptEnhancer";
     private static final String AI_FEATURE_PROVIDER_KEY = "provider";
