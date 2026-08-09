@@ -28,22 +28,298 @@ export function resolveGrokBinary() {
   return explicit || 'grok';
 }
 
-export function buildGrokEnv(baseEnv = process.env, apiKey, baseUrl, authMethod = '') {
+/** GROK_HOME or default ~/.grok */
+export function resolveGrokHomeDir() {
+  const env = process.env.GROK_HOME;
+  if (env && String(env).trim()) return String(env).trim();
+  return join(homedir(), '.grok');
+}
+
+/**
+ * True when ~/.grok/auth.json holds a usable OAuth/session credential.
+ * Empty `{}` / missing file → false (plugin should fall back to config api_key).
+ */
+export function hasGrokOAuthToken(grokHome = resolveGrokHomeDir()) {
+  try {
+    const path = join(grokHome, 'auth.json');
+    if (!existsSync(path)) return false;
+    const raw = readFileSync(path, 'utf8');
+    const data = JSON.parse(raw);
+    return credentialObjectHasToken(data);
+  } catch {
+    return false;
+  }
+}
+
+function nonEmptyString(v) {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+function credentialObjectHasToken(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  if (nonEmptyString(data.access_token) || nonEmptyString(data.token) || nonEmptyString(data.refresh_token)) {
+    return true;
+  }
+  for (const v of Object.values(data)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (nonEmptyString(v.access_token) || nonEmptyString(v.token) || nonEmptyString(v.refresh_token)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Minimal TOML parse for Grok CLI config credentials.
+ * Supports:
+ *   [models] default = "profile"
+ *   [model.profile] / [model."profile"] api_key / base_url
+ * If no default, uses the first [model.*] table that has api_key.
+ *
+ * @param {string} text
+ * @returns {{ apiKey: string, baseUrl: string, profile: string }}
+ */
+export function parseGrokConfigTomlCredentials(text) {
+  const empty = { apiKey: '', baseUrl: '', profile: '' };
+  const src = String(text || '');
+  if (!src.trim()) return empty;
+
+  const defaultMatch =
+    src.match(/^\s*default\s*=\s*"([^"]+)"\s*$/m) ||
+    src.match(/^\s*default\s*=\s*'([^']+)'\s*$/m);
+  const defaultProfile = defaultMatch ? defaultMatch[1].trim() : '';
+
+  /** @type {Map<string, { apiKey: string, baseUrl: string }>} */
+  const profiles = new Map();
+  const sectionRe = /^\s*\[([^\]]+)\]\s*$/gm;
+  const sections = [];
+  let m;
+  while ((m = sectionRe.exec(src)) !== null) {
+    sections.push({ name: m[1].trim(), start: m.index + m[0].length, headerEnd: m.index });
+  }
+  for (let i = 0; i < sections.length; i++) {
+    const end = i + 1 < sections.length ? sections[i + 1].headerEnd : src.length;
+    const body = src.slice(sections[i].start, end);
+    const name = sections[i].name;
+    // model.NAME or model."NAME" / model.'NAME'
+    const modelMatch =
+      name.match(/^model\."([^"]+)"$/) ||
+      name.match(/^model\.'([^']+)'$/) ||
+      name.match(/^model\.([^.]+)$/);
+    if (!modelMatch) continue;
+    const profile = modelMatch[1].trim();
+    if (!profile) continue;
+    const apiKey =
+      extractTomlString(body, 'api_key') ||
+      extractTomlString(body, 'apiKey') ||
+      '';
+    const baseUrl =
+      extractTomlString(body, 'base_url') ||
+      extractTomlString(body, 'baseUrl') ||
+      '';
+    profiles.set(profile, { apiKey, baseUrl });
+  }
+
+  if (defaultProfile && profiles.has(defaultProfile)) {
+    const p = profiles.get(defaultProfile);
+    return { apiKey: p.apiKey || '', baseUrl: p.baseUrl || '', profile: defaultProfile };
+  }
+  for (const [profile, p] of profiles) {
+    if (p.apiKey) {
+      return { apiKey: p.apiKey, baseUrl: p.baseUrl || '', profile };
+    }
+  }
+  if (defaultProfile && profiles.size === 0) {
+    return empty;
+  }
+  // No api_key anywhere — still return default profile base_url if present
+  if (defaultProfile && profiles.has(defaultProfile)) {
+    const p = profiles.get(defaultProfile);
+    return { apiKey: '', baseUrl: p.baseUrl || '', profile: defaultProfile };
+  }
+  return empty;
+}
+
+function extractTomlString(sectionBody, key) {
+  const reDq = new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`, 'm');
+  const reSq = new RegExp(`^\\s*${key}\\s*=\\s*'([^']*)'\\s*$`, 'm');
+  const match = sectionBody.match(reDq) || sectionBody.match(reSq);
+  return match ? match[1].trim() : '';
+}
+
+/**
+ * Read api_key + base_url from ~/.grok/config.toml (CLI-native credentials).
+ */
+export function readGrokConfigTomlCredentials(grokHome = resolveGrokHomeDir()) {
+  try {
+    const path = join(grokHome, 'config.toml');
+    if (!existsSync(path)) {
+      return { apiKey: '', baseUrl: '', profile: '' };
+    }
+    return parseGrokConfigTomlCredentials(readFileSync(path, 'utf8'));
+  } catch {
+    return { apiKey: '', baseUrl: '', profile: '' };
+  }
+}
+
+/**
+ * Resolve effective auth for ACP / daemon.
+ *
+ * Compatibility rule (default oauth):
+ * - If ~/.grok/auth.json has a token → stay oauth and strip API keys
+ *   (avoids SuperGrok 403 "no credits" from host team keys).
+ * - If OAuth token is missing → fall back to plugin apiKey or
+ *   ~/.grok/config.toml [model.*].api_key (+ base_url).
+ * - Never fall back to ambient process.env XAI_API_KEY on the oauth path
+ *   (same SuperGrok pitfall).
+ *
+ * @returns {{
+ *   authMethod: string,
+ *   apiKey: string,
+ *   baseUrl: string,
+ *   reason: string,
+ *   fellBackFromOauth: boolean,
+ * }}
+ */
+export function resolveEffectiveGrokAuth({
+  preferredAuth = '',
+  apiKey = '',
+  baseUrl = '',
+  hasOAuthToken = hasGrokOAuthToken,
+  readConfigCredentials = readGrokConfigTomlCredentials,
+} = {}) {
+  const preferred = normalizeAuthMethod(preferredAuth) || 'oauth';
+  const explicitKey = String(apiKey || '').trim();
+  const explicitBase = String(baseUrl || '').trim();
+
+  const loadConfig = () => {
+    try {
+      const c = readConfigCredentials() || {};
+      return {
+        apiKey: String(c.apiKey || '').trim(),
+        baseUrl: String(c.baseUrl || '').trim(),
+        profile: String(c.profile || '').trim(),
+      };
+    } catch {
+      return { apiKey: '', baseUrl: '', profile: '' };
+    }
+  };
+
+  if (preferred === 'api_key') {
+    const cfg = explicitKey && explicitBase ? { apiKey: '', baseUrl: '' } : loadConfig();
+    return {
+      authMethod: 'api_key',
+      apiKey: explicitKey || cfg.apiKey || '',
+      baseUrl: explicitBase || cfg.baseUrl || '',
+      reason: explicitKey ? 'api_key-explicit' : (cfg.apiKey ? 'api_key-from-config' : 'api_key-empty'),
+      fellBackFromOauth: false,
+    };
+  }
+
+  if (preferred === 'auto') {
+    if (typeof hasOAuthToken === 'function' ? hasOAuthToken() : !!hasOAuthToken) {
+      return {
+        authMethod: 'oauth',
+        apiKey: '',
+        baseUrl: explicitBase,
+        reason: 'auto-oauth-token',
+        fellBackFromOauth: false,
+      };
+    }
+    const cfg = loadConfig();
+    const key = explicitKey || cfg.apiKey || '';
+    if (key) {
+      return {
+        authMethod: 'api_key',
+        apiKey: key,
+        baseUrl: explicitBase || cfg.baseUrl || '',
+        reason: 'auto-api-key',
+        fellBackFromOauth: false,
+      };
+    }
+    return {
+      authMethod: 'oauth',
+      apiKey: '',
+      baseUrl: explicitBase,
+      reason: 'auto-oauth-login',
+      fellBackFromOauth: false,
+    };
+  }
+
+  // preferred === oauth (plugin default)
+  const oauthPresent = typeof hasOAuthToken === 'function' ? hasOAuthToken() : !!hasOAuthToken;
+  if (oauthPresent) {
+    return {
+      authMethod: 'oauth',
+      apiKey: '',
+      baseUrl: explicitBase,
+      reason: 'oauth-token',
+      fellBackFromOauth: false,
+    };
+  }
+
+  const cfg = loadConfig();
+  // Prefer explicit plugin key, then config.toml — never ambient env on this path.
+  const key = explicitKey || cfg.apiKey || '';
+  if (key) {
+    return {
+      authMethod: 'api_key',
+      apiKey: key,
+      baseUrl: explicitBase || cfg.baseUrl || '',
+      reason: explicitKey
+        ? 'oauth-empty-fallback-plugin-api-key'
+        : 'oauth-empty-fallback-config-api-key',
+      fellBackFromOauth: true,
+    };
+  }
+
+  return {
+    authMethod: 'oauth',
+    apiKey: '',
+    baseUrl: explicitBase,
+    reason: 'oauth-login-required',
+    fellBackFromOauth: false,
+  };
+}
+
+export function buildGrokEnv(baseEnv = process.env, apiKey, baseUrl, authMethod = '', resolveOptions = null) {
   const env = { ...baseEnv };
 
   // Clean up potentially conflicting vars
   delete env.CLAUDE_API_KEY;
   delete env.CODEX_API_KEY;
 
-  const method = normalizeAuthMethod(authMethod || env.GROK_AUTH_METHOD || '');
+  let method = normalizeAuthMethod(authMethod || env.GROK_AUTH_METHOD || '');
+  let effectiveKey = apiKey;
+  let effectiveBase = baseUrl;
+
+  // Apply OAuth-empty → config.toml / plugin api_key fallback before env assembly.
+  // resolveOptions === false disables (tests / callers that already resolved).
+  if (resolveOptions !== false) {
+    const resolved = resolveEffectiveGrokAuth({
+      preferredAuth: method || authMethod || env.GROK_AUTH_METHOD || '',
+      apiKey: effectiveKey,
+      baseUrl: effectiveBase,
+      ...(resolveOptions && typeof resolveOptions === 'object' ? resolveOptions : {}),
+    });
+    method = resolved.authMethod;
+    effectiveKey = resolved.apiKey;
+    effectiveBase = resolved.baseUrl;
+    if (resolved.fellBackFromOauth) {
+      console.error(
+        '[GROK] OAuth token missing; falling back to api_key (' + resolved.reason + ')'
+      );
+    }
+  }
 
   if (method === 'oauth') {
     // Do not let host/process API keys force xai.api_key over cached OAuth token.
     delete env.XAI_API_KEY;
     delete env.GROK_API_KEY;
-  } else if (apiKey) {
-    env.XAI_API_KEY = apiKey;
-    env.GROK_API_KEY = apiKey;
+  } else if (effectiveKey) {
+    env.XAI_API_KEY = effectiveKey;
+    env.GROK_API_KEY = effectiveKey;
   } else if (method === 'api_key') {
     // keep existing env keys if present
   }
@@ -52,7 +328,7 @@ export function buildGrokEnv(baseEnv = process.env, apiKey, baseUrl, authMethod 
     env.GROK_AUTH_METHOD = method;
   }
 
-  applyGrokBaseUrlEnv(env, method, baseUrl);
+  applyGrokBaseUrlEnv(env, method, effectiveBase);
 
   // Force non-interactive / no update noise on ACP stdio
   env.GROK_NO_AUTO_UPDATE = '1';

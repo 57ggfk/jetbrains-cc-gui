@@ -72,8 +72,12 @@ public class GrokSDKBridge extends BaseSDKBridge {
         env.put("GROK_NO_AUTO_UPDATE", "1");
         env.put("CI", "1");
 
-        String authMethod = resolveAuthMethod();
+        GrokLocalAuthResolver.ResolvedAuth resolved = resolveEffectiveAuth();
+        String authMethod = resolved.authMethod;
         env.put("GROK_AUTH_METHOD", authMethod);
+        if (resolved.fellBackFromOauth) {
+            LOG.info("[Grok] OAuth token missing; falling back to api_key (" + resolved.reason + ")");
+        }
 
         // OAuth mode must not inherit a team API key from the host environment —
         // that forces Grok CLI onto xai.api_key and yields 403 "no credits".
@@ -81,7 +85,10 @@ public class GrokSDKBridge extends BaseSDKBridge {
             env.remove("XAI_API_KEY");
             env.remove("GROK_API_KEY");
         } else {
-            String effectiveKey = resolveApiKeyForAuth(authMethod);
+            String effectiveKey = resolved.apiKey;
+            if (effectiveKey == null || effectiveKey.isEmpty()) {
+                effectiveKey = resolveApiKeyForAuth(authMethod);
+            }
             if (effectiveKey != null && !effectiveKey.isEmpty()) {
                 env.put("XAI_API_KEY", effectiveKey);
                 env.put("GROK_API_KEY", effectiveKey);
@@ -91,7 +98,10 @@ public class GrokSDKBridge extends BaseSDKBridge {
             }
         }
 
-        String effectiveBase = resolveEffectiveBaseUrl(authMethod);
+        String effectiveBase = resolved.baseUrl;
+        if (effectiveBase == null || effectiveBase.isEmpty()) {
+            effectiveBase = resolveEffectiveBaseUrl(authMethod);
+        }
         applyBaseUrlEnv(env, authMethod, effectiveBase);
     }
 
@@ -135,6 +145,10 @@ public class GrokSDKBridge extends BaseSDKBridge {
     }
 
     private String resolveAuthMethod() {
+        return resolveEffectiveAuth().authMethod;
+    }
+
+    private String resolvePreferredAuthMethod() {
         try {
             return settingsService.getGrokAuthMethod();
         } catch (Exception e) {
@@ -143,7 +157,45 @@ public class GrokSDKBridge extends BaseSDKBridge {
         }
     }
 
+    /**
+     * Plugin setting + local ~/.grok state:
+     * OAuth without token → config.toml / settings api_key.
+     */
+    private GrokLocalAuthResolver.ResolvedAuth resolveEffectiveAuth() {
+        String preferred = resolvePreferredAuthMethod();
+        String explicitKey = "";
+        if (apiKey != null && !apiKey.isEmpty()) {
+            explicitKey = apiKey;
+        } else {
+            try {
+                String stored = settingsService.getGrokApiKey();
+                if (stored != null && !stored.isEmpty()) {
+                    explicitKey = stored;
+                }
+            } catch (Exception e) {
+                LOG.debug("[Grok] Failed to read stored grok.apiKey: " + e.getMessage());
+            }
+        }
+        String explicitBase = this.baseUrl != null ? this.baseUrl : "";
+        if (explicitBase.isEmpty()) {
+            try {
+                explicitBase = settingsService.resolveGrokBaseUrlForAuth(preferred, null);
+            } catch (Exception e) {
+                LOG.debug("[Grok] Failed to resolve base URL for auth: " + e.getMessage());
+            }
+        }
+        return GrokLocalAuthResolver.resolve(preferred, explicitKey, explicitBase);
+    }
+
     private String resolveApiKeyForAuth(String authMethod) {
+        // Prefer resolved effective auth (includes config.toml fallback).
+        GrokLocalAuthResolver.ResolvedAuth resolved = resolveEffectiveAuth();
+        if (authMethod != null
+                && authMethod.equals(resolved.authMethod)
+                && resolved.apiKey != null
+                && !resolved.apiKey.isEmpty()) {
+            return resolved.apiKey;
+        }
         // Explicit bridge key wins when set by host
         if (apiKey != null && !apiKey.isEmpty()) {
             return apiKey;
@@ -628,11 +680,18 @@ public class GrokSDKBridge extends BaseSDKBridge {
         if (cwd != null && !cwd.isEmpty()) {
             params.addProperty("cwd", cwd);
         }
-        String authMethod = resolveAuthMethod();
+        GrokLocalAuthResolver.ResolvedAuth resolvedUsage = resolveEffectiveAuth();
+        String authMethod = resolvedUsage.authMethod;
         params.addProperty("authMethod", authMethod != null ? authMethod : "");
-        String effectiveKey = resolveApiKeyForAuth(authMethod);
+        String effectiveKey = resolvedUsage.apiKey;
+        if (effectiveKey == null || effectiveKey.isEmpty()) {
+            effectiveKey = resolveApiKeyForAuth(authMethod);
+        }
         params.addProperty("apiKey", effectiveKey != null ? effectiveKey : "");
-        String effectiveBase = resolveEffectiveBaseUrl(authMethod);
+        String effectiveBase = resolvedUsage.baseUrl;
+        if (effectiveBase == null || effectiveBase.isEmpty()) {
+            effectiveBase = resolveEffectiveBaseUrl(authMethod);
+        }
         params.addProperty("baseUrl", effectiveBase != null ? effectiveBase : "");
 
         AtomicReference<JsonObject> resultRef = new AtomicReference<>();
@@ -951,11 +1010,18 @@ public class GrokSDKBridge extends BaseSDKBridge {
         stdinInput.addProperty("cwd", cwd != null ? cwd : "");
         stdinInput.addProperty("permissionMode", permissionMode != null ? permissionMode : "");
         stdinInput.addProperty("model", model != null ? model : "");
-        String authMethod = resolveAuthMethod();
-        String effectiveBase = resolveEffectiveBaseUrl(authMethod);
+        GrokLocalAuthResolver.ResolvedAuth resolved = resolveEffectiveAuth();
+        String authMethod = resolved.authMethod;
+        String effectiveBase = resolved.baseUrl;
+        if (effectiveBase == null || effectiveBase.isEmpty()) {
+            effectiveBase = resolveEffectiveBaseUrl(authMethod);
+        }
         stdinInput.addProperty("baseUrl", effectiveBase != null ? effectiveBase : "");
         stdinInput.addProperty("authMethod", authMethod);
-        String effectiveKey = resolveApiKeyForAuth(authMethod);
+        String effectiveKey = resolved.apiKey;
+        if (effectiveKey == null || effectiveKey.isEmpty()) {
+            effectiveKey = resolveApiKeyForAuth(authMethod);
+        }
         stdinInput.addProperty("apiKey", effectiveKey != null ? effectiveKey : "");
         stdinInput.addProperty("agentPrompt", agentPrompt != null ? agentPrompt : "");
         stdinInput.addProperty("streaming", streaming == null || streaming);

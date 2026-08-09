@@ -11,7 +11,13 @@ import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { resolveGrokBinary, selectGrokAuthMethodId, normalizeAuthMethod, applyGrokBaseUrlEnv } from './grok-utils.js';
+import {
+  resolveGrokBinary,
+  selectGrokAuthMethodId,
+  normalizeAuthMethod,
+  applyGrokBaseUrlEnv,
+  resolveEffectiveGrokAuth,
+} from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost, isTerminalMethod } from './acp-terminal-host.js';
 
@@ -62,8 +68,20 @@ export async function initializeAndAuthenticate(client, { apiKey = '', baseUrl =
   const authMethodList = init.authMethods ?? [];
   const authMethods = new Set(authMethodList.map((m) => m.id));
   const defaultAuth = init._meta?.defaultAuthMethodId || null;
-  const hasApiKey = hasApiKeyFromEnv || !!(apiKey);
-  const preferred = normalizeAuthMethod(authMethod || process.env.GROK_AUTH_METHOD || '') || 'oauth';
+
+  // Safety net: OAuth with empty auth.json → config.toml / plugin api_key.
+  // Callers usually resolve first; this covers one-shot / partial env paths.
+  const resolved = resolveEffectiveGrokAuth({
+    preferredAuth: authMethod || process.env.GROK_AUTH_METHOD || '',
+    apiKey,
+    baseUrl,
+  });
+  const preferred = normalizeAuthMethod(resolved.authMethod) || 'oauth';
+  const effectiveKey = resolved.apiKey || apiKey || '';
+  const hasApiKey =
+    preferred === 'oauth'
+      ? false
+      : !!(hasApiKeyFromEnv || effectiveKey);
 
   let methodId = selectGrokAuthMethodId({
     authMethods,
@@ -80,7 +98,16 @@ export async function initializeAndAuthenticate(client, { apiKey = '', baseUrl =
     );
   }
 
-  console.error('[GROK-ACP] authenticate methodId=' + methodId + ' preferred=' + preferred + ' hasApiKey=' + hasApiKey);
+  console.error(
+    '[GROK-ACP] authenticate methodId=' +
+      methodId +
+      ' preferred=' +
+      preferred +
+      ' hasApiKey=' +
+      hasApiKey +
+      ' authReason=' +
+      resolved.reason
+  );
 
   await client.request('authenticate', {
     methodId,
@@ -88,7 +115,7 @@ export async function initializeAndAuthenticate(client, { apiKey = '', baseUrl =
   });
 
   client.initResult = init;
-  return { init, methodId };
+  return { init, methodId, resolvedAuth: resolved };
 }
 
 export async function ensureSession(client, { sessionId = '', cwd = '', model = '' } = {}) {
@@ -582,13 +609,26 @@ export async function runAcpTurn({
     if (typeof onEvent === 'function') onEvent(type, payload);
   };
 
+  const resolvedAuth = resolveEffectiveGrokAuth({
+    preferredAuth: authMethod || baseEnv.GROK_AUTH_METHOD || process.env.GROK_AUTH_METHOD || '',
+    apiKey,
+    baseUrl,
+  });
+  const effectiveAuthMethod = resolvedAuth.authMethod;
+  const effectiveApiKey = resolvedAuth.apiKey;
+  const effectiveBaseUrl = resolvedAuth.baseUrl;
+
   const env = { ...baseEnv };
-  if (apiKey) {
-    env.XAI_API_KEY = apiKey;
-    env.GROK_API_KEY = apiKey;
+  if (effectiveAuthMethod === 'oauth') {
+    delete env.XAI_API_KEY;
+    delete env.GROK_API_KEY;
+  } else if (effectiveApiKey) {
+    env.XAI_API_KEY = effectiveApiKey;
+    env.GROK_API_KEY = effectiveApiKey;
   }
-  if (baseUrl) {
-    applyGrokBaseUrlEnv(env, authMethod || process.env.GROK_AUTH_METHOD || '', baseUrl);
+  env.GROK_AUTH_METHOD = effectiveAuthMethod;
+  if (effectiveBaseUrl) {
+    applyGrokBaseUrlEnv(env, effectiveAuthMethod, effectiveBaseUrl);
   }
   env.GROK_NO_AUTO_UPDATE = '1';
   env.CI = env.CI || '1';
@@ -656,14 +696,18 @@ export async function runAcpTurn({
 
   try {
     // Use shared helpers (DRY with persistent-acp-service path)
-    const preferredAuth = String(authMethod || env.GROK_AUTH_METHOD || 'oauth').toLowerCase();
     const hasApiKeyFromEnv =
-      preferredAuth === 'oauth'
+      effectiveAuthMethod === 'oauth'
         ? false
-        : !!(apiKey || env.XAI_API_KEY || env.GROK_API_KEY);
-    const { init, methodId } = await initializeAndAuthenticate(client, { apiKey, baseUrl, hasApiKeyFromEnv, authMethod });
+        : !!(effectiveApiKey || env.XAI_API_KEY || env.GROK_API_KEY);
+    const { init, methodId } = await initializeAndAuthenticate(client, {
+      apiKey: effectiveApiKey,
+      baseUrl: effectiveBaseUrl,
+      hasApiKeyFromEnv,
+      authMethod: effectiveAuthMethod,
+    });
     emit('initialized', init);
-    emit('authenticated', { methodId, hasApiKey: hasApiKeyFromEnv });
+    emit('authenticated', { methodId, hasApiKey: hasApiKeyFromEnv, authReason: resolvedAuth.reason });
 
     const sessionInfo = await ensureSession(client, { sessionId, cwd: workCwd, model });
     const activeSessionId = sessionInfo.sessionId;

@@ -15,7 +15,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { buildGrokEnv, buildErrorPayload } from './grok-utils.js';
+import { buildGrokEnv, buildErrorPayload, resolveEffectiveGrokAuth } from './grok-utils.js';
 import { runAcpTurn } from './grok-acp-client.js';
 import { GrokEventNormalizer } from './grok-event-normalizer.js';
 
@@ -68,12 +68,23 @@ export async function sendMessage(
   });
 
   try {
+    const preferredAuth = authMethodOpt || process.env.GROK_AUTH_METHOD || '';
+    // OAuth empty → ~/.grok/config.toml api_key (or plugin key). Resolved once here;
+    // buildGrokEnv(resolveOptions=false) avoids double work / double log.
+    const resolvedAuth = resolveEffectiveGrokAuth({
+      preferredAuth,
+      apiKey: key,
+      baseUrl: url,
+    });
+
     console.error('[DEBUG] Grok sendMessage (ACP primary):', {
       hasSessionId: !!sid,
       cwd: workCwd || '(current)',
       model: modelId || '(default)',
-      hasApiKey: !!(key || process.env.XAI_API_KEY),
-      authMethod: authMethodOpt || process.env.GROK_AUTH_METHOD || '(default)',
+      hasApiKey: !!(resolvedAuth.apiKey || process.env.XAI_API_KEY),
+      authMethod: resolvedAuth.authMethod,
+      authReason: resolvedAuth.reason,
+      preferredAuth: preferredAuth || '(default)',
       hasOAuthAuthFile: existsSync(join(homedir(), '.grok', 'auth.json')),
       hasOpenedFiles: !!openedFiles,
       hasAgentPrompt: !!agentPrompt,
@@ -85,7 +96,13 @@ export async function sendMessage(
 
     normalizer.begin();
 
-    const env = buildGrokEnv(process.env, key, url, authMethodOpt || process.env.GROK_AUTH_METHOD || '');
+    const env = buildGrokEnv(
+      process.env,
+      resolvedAuth.apiKey,
+      resolvedAuth.baseUrl,
+      resolvedAuth.authMethod,
+      false
+    );
     if (reasoningEffort) {
       env.GROK_REASONING_EFFORT = String(reasoningEffort);
     }
@@ -95,9 +112,9 @@ export async function sendMessage(
       sessionId: sid,
       cwd: workCwd,
       model: modelId,
-      apiKey: key,
-      baseUrl: url,
-      authMethod: authMethodOpt || env.GROK_AUTH_METHOD || '',
+      apiKey: resolvedAuth.apiKey,
+      baseUrl: resolvedAuth.baseUrl,
+      authMethod: resolvedAuth.authMethod,
       permissionMode: perm,
       agentPrompt,
       openedFiles,

@@ -33,6 +33,7 @@ import {
   buildGrokContextUsagePayload,
   extractUsedTokens,
   extractUsageFromAcpEnvelope,
+  resolveEffectiveGrokAuth,
 } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost } from './acp-terminal-host.js';
@@ -141,7 +142,25 @@ async function createRuntime(params, { log } = {}) {
   }
 
   const workCwd = (params.cwd || '').trim() || process.cwd();
-  const env = buildGrokEnv(process.env, params.apiKey, params.baseUrl, params.authMethod || process.env.GROK_AUTH_METHOD || '');
+  // Resolve OAuth-empty → config.toml api_key before env/auth so ACP does not
+  // open device-code login when CLI-native credentials exist.
+  const resolvedAuth = resolveEffectiveGrokAuth({
+    preferredAuth: params.authMethod || process.env.GROK_AUTH_METHOD || '',
+    apiKey: params.apiKey || '',
+    baseUrl: params.baseUrl || '',
+  });
+  // Mutate params so later turns / logs see the effective method.
+  params.authMethod = resolvedAuth.authMethod;
+  params.apiKey = resolvedAuth.apiKey;
+  params.baseUrl = resolvedAuth.baseUrl;
+
+  const env = buildGrokEnv(
+    process.env,
+    resolvedAuth.apiKey,
+    resolvedAuth.baseUrl,
+    resolvedAuth.authMethod,
+    false
+  );
   if (params.reasoningEffort) {
     env.GROK_REASONING_EFFORT = String(params.reasoningEffort);
   }
@@ -214,7 +233,7 @@ async function createRuntime(params, { log } = {}) {
       apiKey: params.apiKey,
       baseUrl: params.baseUrl,
       hasApiKeyFromEnv,
-      authMethod: params.authMethod || env.GROK_AUTH_METHOD || '',
+      authMethod: preferredAuth,
     });
 
     await ensureSession(client, {
