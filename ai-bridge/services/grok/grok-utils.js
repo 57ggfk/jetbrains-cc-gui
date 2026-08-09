@@ -408,7 +408,6 @@ export function buildGrokContextUsagePayload({
 export function spawnGrok(args, env, cwd, onData) {
   return new Promise((resolve, reject) => {
     const bin = resolveGrokBinary();
-    console.error('[DEBUG] Spawning', bin, args.join(' '));
 
     const child = spawn(bin, args, {
       cwd: cwd || process.cwd(),

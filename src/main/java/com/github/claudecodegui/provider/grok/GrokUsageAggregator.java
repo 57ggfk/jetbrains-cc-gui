@@ -134,6 +134,7 @@ public final class GrokUsageAggregator {
                 SessionSummary s = new SessionSummary();
                 s.sessionId = info.sessionId;
                 s.timestamp = ts;
+                s.model = "grok";
                 s.summary = info.title;
                 s.cost = 0;
                 s.usage = new UsageData();
