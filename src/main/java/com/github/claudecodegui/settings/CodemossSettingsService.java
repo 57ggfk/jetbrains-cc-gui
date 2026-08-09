@@ -38,10 +38,27 @@ import java.util.Set;
 public class CodemossSettingsService {
 
     private static final Logger LOG = Logger.getInstance(CodemossSettingsService.class);
+    private static final int CONFIG_VERSION = 2;
+    private static final String CODEX_SANDBOX_MODE_WORKSPACE_WRITE = "workspace-write";
+    private static final String CODEX_SANDBOX_MODE_DANGER_FULL_ACCESS = "danger-full-access";
+    private static final String UI_FONT_CONFIG_KEY = "uiFont";
+    private static final String CODE_FONT_CONFIG_KEY = "codeFont";
+    // Shared by both UI font and code font: the persisted JSON keys ("mode" /
+    // "customFontPath") and the set of valid modes are identical for the two font kinds,
+    // so they reuse these UI_FONT_*-named constants. They are NOT UI-only despite the name.
+    private static final String UI_FONT_MODE_KEY = "mode";
+    private static final String UI_FONT_CUSTOM_PATH_KEY = "customFontPath";
+    private static final Set<String> VALID_UI_FONT_MODES = Set.of(
+            FontConfigService.UI_FONT_MODE_FOLLOW_EDITOR,
+            FontConfigService.UI_FONT_MODE_CUSTOM_FILE
+    );
+    public static final String CODEX_RUNTIME_ACCESS_INACTIVE = "inactive";
+    public static final String CODEX_RUNTIME_ACCESS_MANAGED = "managed";
+    public static final String CODEX_RUNTIME_ACCESS_CLI_LOGIN = "cli_login";
 
+    public static final String GROK_AUTH_METHOD_AUTO = "auto";
     public static final String GROK_AUTH_METHOD_OAUTH = "oauth";
     public static final String GROK_AUTH_METHOD_API_KEY = "api_key";
-    public static final String GROK_AUTH_METHOD_AUTO = "auto";
     public static final String DEFAULT_GROK_AUTH_METHOD = GROK_AUTH_METHOD_OAUTH;
 
     public String getGrokAuthMethod() throws IOException {
@@ -187,26 +204,11 @@ public class CodemossSettingsService {
     }
 
     private String redactUrl(String url) {
-        if (url == null || url.trim().isEmpty()) return "(empty)";
+        if (url == null || url.trim().isEmpty()) {
+            return "(empty)";
+        }
         return url.trim();
     }
-    private static final int CONFIG_VERSION = 2;
-    private static final String CODEX_SANDBOX_MODE_WORKSPACE_WRITE = "workspace-write";
-    private static final String CODEX_SANDBOX_MODE_DANGER_FULL_ACCESS = "danger-full-access";
-    private static final String UI_FONT_CONFIG_KEY = "uiFont";
-    private static final String CODE_FONT_CONFIG_KEY = "codeFont";
-    // Shared by both UI font and code font: the persisted JSON keys ("mode" /
-    // "customFontPath") and the set of valid modes are identical for the two font kinds,
-    // so they reuse these UI_FONT_*-named constants. They are NOT UI-only despite the name.
-    private static final String UI_FONT_MODE_KEY = "mode";
-    private static final String UI_FONT_CUSTOM_PATH_KEY = "customFontPath";
-    private static final Set<String> VALID_UI_FONT_MODES = Set.of(
-            FontConfigService.UI_FONT_MODE_FOLLOW_EDITOR,
-            FontConfigService.UI_FONT_MODE_CUSTOM_FILE
-    );
-    public static final String CODEX_RUNTIME_ACCESS_INACTIVE = "inactive";
-    public static final String CODEX_RUNTIME_ACCESS_MANAGED = "managed";
-    public static final String CODEX_RUNTIME_ACCESS_CLI_LOGIN = "cli_login";
     private static final String COMMIT_AI_KEY = "commitAi";
     private static final String PROMPT_ENHANCER_KEY = "promptEnhancer";
     private static final String AI_FEATURE_PROVIDER_KEY = "provider";

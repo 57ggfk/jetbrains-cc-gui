@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaudeMessage } from '../types';
+import { getLogicalOffsetTop } from '../utils/viewport';
 
 interface AnchorItem {
   id: string;
@@ -122,10 +123,12 @@ export const MessageAnchorRail = memo(function MessageAnchorRail({
     const container = containerRef.current;
     if (!node || !container) return;
 
-    const containerRect = container.getBoundingClientRect();
-    const nodeRect = node.getBoundingClientRect();
+    // getLogicalOffsetTop returns the layout-space delta (zoom-compensated),
+    // so it matches scrollTop/clientHeight units. The raw getBoundingClientRect
+    // delta is zoom-scaled under #app CSS zoom != 1, which made the target land
+    // short and converge only over repeated clicks.
     const targetTop =
-      container.scrollTop + (nodeRect.top - containerRect.top) - container.clientHeight * 0.28;
+      container.scrollTop + getLogicalOffsetTop(node, container) - container.clientHeight * 0.28;
 
     container.scrollTo({
       top: Math.max(0, targetTop),
