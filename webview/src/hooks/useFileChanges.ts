@@ -1,8 +1,14 @@
 import { useMemo } from 'react';
 import type { ClaudeMessage, ClaudeContentBlock, ToolResultBlock } from '../types';
 import type { FileChangeSummary, EditOperation, FileChangeStatus } from '../types/fileChanges';
+import type { SubagentHistoryResponse } from '../types/subagent';
 import { getFileName } from '../utils/helpers';
-import { FILE_MODIFY_TOOL_NAMES, isToolName, normalizeToolName } from '../utils/toolConstants';
+import {
+  FILE_MODIFY_TOOL_NAMES,
+  AGENT_TOOL_NAMES,
+  isToolName,
+  normalizeToolName,
+} from '../utils/toolConstants';
 import { normalizeToolInput } from '../utils/toolInputNormalization';
 import { getToolLineInfo } from '../utils/toolPresentation';
 
@@ -10,10 +16,8 @@ import { getToolLineInfo } from '../utils/toolPresentation';
 const WRITE_TOOL_NAMES = new Set(['write', 'write_file', 'create_file']);
 
 /**
- * Maximum lines to use LCS algorithm.
- * LCS has O(n*m) time and space complexity.
- * For files > 100 lines, we use a faster estimation to prevent UI freezes.
- * Threshold chosen based on: 100*100 = 10,000 operations, acceptable for UI thread.
+ * Maximum lines to use full LCS algorithm.
+ * LCS is O(n*m); above this threshold use multiset estimation (O(n+m)).
  */
 const LCS_MAX_LINES = 100;
 
@@ -21,25 +25,106 @@ const LCS_MAX_LINES = 100;
 const diffCache = new Map<string, { additions: number; deletions: number }>();
 const DIFF_CACHE_MAX_SIZE = 100;
 
-/**
- * Generate cache key from strings (using hash-like approach for large strings)
- */
-function getDiffCacheKey(oldString: string, newString: string): string {
-  // For small strings, use direct comparison
-  if (oldString.length + newString.length < 500) {
-    return `${oldString.length}:${newString.length}:${oldString.slice(0, 50)}:${newString.slice(0, 50)}`;
-  }
-  // For larger strings, use length + first/last chars as key
-  return `${oldString.length}:${newString.length}:${oldString.slice(0, 30)}:${oldString.slice(-20)}:${newString.slice(0, 30)}:${newString.slice(-20)}`;
+/** Clear module-level diff cache (for tests). */
+export function clearDiffCache(): void {
+  diffCache.clear();
 }
 
 /**
- * Compute diff statistics (additions and deletions count)
- * Using LCS-based algorithm for accuracy, with fallback for large files.
- * Results are cached to avoid redundant computations.
+ * djb2-style hash so cache keys cover full content, not just prefixes.
  */
-function computeDiffStats(oldString: string, newString: string): { additions: number; deletions: number } {
-  // Check cache first
+function hashString(value: string): string {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function getDiffCacheKey(oldString: string, newString: string): string {
+  return `${oldString.length}:${newString.length}:${hashString(oldString)}:${hashString(newString)}`;
+}
+
+/**
+ * Multiset line comparison: counts how many lines are shared (order-insensitive),
+ * then treats the rest as additions/deletions. Correct for full equal-line
+ * replacements (unlike net line-count), and O(n) for large snippets.
+ */
+function computeMultisetDiff(
+  oldLines: string[],
+  newLines: string[],
+): { additions: number; deletions: number } {
+  const remaining = new Map<string, number>();
+  for (const line of oldLines) {
+    remaining.set(line, (remaining.get(line) ?? 0) + 1);
+  }
+
+  let common = 0;
+  for (const line of newLines) {
+    const count = remaining.get(line) ?? 0;
+    if (count > 0) {
+      common += 1;
+      remaining.set(line, count - 1);
+    }
+  }
+
+  return {
+    additions: newLines.length - common,
+    deletions: oldLines.length - common,
+  };
+}
+
+/**
+ * LCS-based diff count for moderate-sized snippets.
+ */
+function computeLcsDiff(
+  oldLines: string[],
+  newLines: string[],
+  m: number,
+  n: number,
+): { additions: number; deletions: number } {
+  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i += 1) {
+    for (let j = 1; j <= n; j += 1) {
+      if (oldLines[i - 1] === newLines[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  let additions = 0;
+  let deletions = 0;
+  let i = m;
+  let j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      i -= 1;
+      j -= 1;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      additions += 1;
+      j -= 1;
+    } else {
+      deletions += 1;
+      i -= 1;
+    }
+  }
+
+  return { additions, deletions };
+}
+
+/**
+ * Compute diff statistics (additions and deletions count).
+ * Small snippets use LCS; large ones use multiset estimation so equal-line
+ * replacements still report both +N and -M instead of +0/-0.
+ */
+export function computeDiffStats(
+  oldString: string,
+  newString: string,
+): { additions: number; deletions: number } {
   const cacheKey = getDiffCacheKey(oldString, newString);
   const cached = diffCache.get(cacheKey);
   if (cached) {
@@ -60,24 +145,16 @@ function computeDiffStats(oldString: string, newString: string): { additions: nu
   } else {
     const m = oldLines.length;
     const n = newLines.length;
-
-    if (m > LCS_MAX_LINES || n > LCS_MAX_LINES) {
-      // Fallback to simple estimation for large files to prevent UI freezes
-      const diff = n - m;
-      result = diff >= 0
-        ? { additions: diff, deletions: 0 }
-        : { additions: 0, deletions: -diff };
-    } else {
-      // LCS-based diff count for reasonable file sizes
-      result = computeLcsDiff(oldLines, newLines, m, n);
-    }
+    result = (m > LCS_MAX_LINES || n > LCS_MAX_LINES)
+      ? computeMultisetDiff(oldLines, newLines)
+      : computeLcsDiff(oldLines, newLines, m, n);
   }
 
-  // Cache result with size limit
   if (diffCache.size >= DIFF_CACHE_MAX_SIZE) {
-    // Remove oldest entry (first key)
     const firstKey = diffCache.keys().next().value;
-    if (firstKey) diffCache.delete(firstKey);
+    if (firstKey) {
+      diffCache.delete(firstKey);
+    }
   }
   diffCache.set(cacheKey, result);
 
@@ -85,48 +162,7 @@ function computeDiffStats(oldString: string, newString: string): { additions: nu
 }
 
 /**
- * LCS-based diff calculation (extracted for clarity)
- */
-function computeLcsDiff(
-  oldLines: string[],
-  newLines: string[],
-  m: number,
-  n: number
-): { additions: number; deletions: number } {
-  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (oldLines[i - 1] === newLines[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  let additions = 0;
-  let deletions = 0;
-  let i = m, j = n;
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      additions++;
-      j--;
-    } else {
-      deletions++;
-      i--;
-    }
-  }
-
-  return { additions, deletions };
-}
-
-/**
- * Extract file path from tool input (handles various naming conventions)
- * Ensures the returned value is a string, not an object (e.g., MCP tool path can be an object)
+ * Extract file path from tool input (handles various naming conventions).
  */
 function extractFilePath(input: Record<string, unknown>): string | null {
   const pathValue = input.path;
@@ -136,57 +172,254 @@ function extractFilePath(input: Record<string, unknown>): string | null {
   const notebookPathValue = input.notebook_path;
 
   return (
-    (typeof input.filePath === 'string' ? input.filePath : undefined) ??
-    (typeof filePathValue === 'string' ? filePathValue : undefined) ??
-    (typeof pathValue === 'string' ? pathValue : undefined) ??
-    (typeof targetFileValue === 'string' ? targetFileValue : undefined) ??
-    (typeof targetFileValue2 === 'string' ? targetFileValue2 : undefined) ??
-    (typeof notebookPathValue === 'string' ? notebookPathValue : undefined) ??
-    null
+    (typeof input.filePath === 'string' ? input.filePath : undefined)
+    ?? (typeof filePathValue === 'string' ? filePathValue : undefined)
+    ?? (typeof pathValue === 'string' ? pathValue : undefined)
+    ?? (typeof targetFileValue === 'string' ? targetFileValue : undefined)
+    ?? (typeof targetFileValue2 === 'string' ? targetFileValue2 : undefined)
+    ?? (typeof notebookPathValue === 'string' ? notebookPathValue : undefined)
+    ?? null
   );
 }
 
-/**
- * Extract old and new strings from tool input
- */
-function extractStrings(input: Record<string, unknown>): { oldString: string; newString: string; replaceAll?: boolean } {
-  const oldString =
-    (typeof input.old_string === 'string' ? input.old_string : undefined) ??
-    (typeof input.oldString === 'string' ? input.oldString : undefined) ??
-    '';
-  const newString =
-    (typeof input.new_string === 'string' ? input.new_string : undefined) ??
-    (typeof input.newString === 'string' ? input.newString : undefined) ??
-    (typeof input.content === 'string' ? input.content : undefined) ?? // Write tool uses 'content'
-    '';
-  const replaceAll = typeof input.replace_all === 'boolean' ? input.replace_all : (typeof input.replaceAll === 'boolean' ? input.replaceAll : undefined);
+interface StringPair {
+  oldString: string;
+  newString: string;
+  replaceAll?: boolean;
+  filePath?: string | null;
+}
 
-  return { oldString, newString, replaceAll };
+function pairFromRecord(record: Record<string, unknown>): StringPair {
+  const oldString =
+    (typeof record.old_string === 'string' ? record.old_string : undefined)
+    ?? (typeof record.oldString === 'string' ? record.oldString : undefined)
+    ?? (typeof record.oldText === 'string' ? record.oldText : undefined)
+    ?? '';
+  const newString =
+    (typeof record.new_string === 'string' ? record.new_string : undefined)
+    ?? (typeof record.newString === 'string' ? record.newString : undefined)
+    ?? (typeof record.newText === 'string' ? record.newText : undefined)
+    ?? (typeof record.content === 'string' ? record.content : undefined)
+    ?? '';
+  const replaceAll =
+    typeof record.replace_all === 'boolean'
+      ? record.replace_all
+      : (typeof record.replaceAll === 'boolean' ? record.replaceAll : undefined);
+
+  return {
+    oldString,
+    newString,
+    replaceAll,
+    filePath: extractFilePath(record),
+  };
 }
 
 /**
- * Determine file status (A = Added, M = Modified)
+ * Expand tool input into one or more edit pairs.
+ * MultiEdit / edit_file may carry an edits[] array; plain Edit/Write use top-level fields.
  */
+function extractEditPairs(input: Record<string, unknown>): StringPair[] {
+  const edits = input.edits;
+  if (Array.isArray(edits) && edits.length > 0) {
+    const pairs: StringPair[] = [];
+    for (const item of edits) {
+      if (!item || typeof item !== 'object') continue;
+      const pair = pairFromRecord(item as Record<string, unknown>);
+      // Skip empty no-op entries
+      if (pair.oldString === '' && pair.newString === '') continue;
+      pairs.push(pair);
+    }
+    if (pairs.length > 0) return pairs;
+  }
+
+  return [pairFromRecord(input)];
+}
+
 function determineFileStatus(operations: EditOperation[]): FileChangeStatus {
   if (operations.length === 0) return 'M';
 
   const firstOp = operations[0];
-  // Write/create_file tools indicate a new file
   if (WRITE_TOOL_NAMES.has(normalizeToolName(firstOp.toolName))) {
     return 'A';
   }
-  // If first operation has empty oldString, it's likely a new file
   if (firstOp.oldString === '' && firstOp.newString !== '') {
     return 'A';
   }
   return 'M';
 }
 
-/**
- * Check if a tool result indicates success
- */
 function isSuccessfulResult(result?: ToolResultBlock | null): boolean {
   return result !== undefined && result !== null && result.is_error !== true;
+}
+
+function pushOperation(
+  map: Map<string, EditOperation[]>,
+  filePath: string,
+  operation: EditOperation,
+): void {
+  const existing = map.get(filePath) ?? [];
+  existing.push(operation);
+  map.set(filePath, existing);
+}
+
+function collectFromToolUse(params: {
+  toolName: string;
+  rawName?: string;
+  input: Record<string, unknown>;
+  result: ToolResultBlock | null | undefined;
+  map: Map<string, EditOperation[]>;
+}): void {
+  const { toolName, rawName, input, result, map } = params;
+  if (!isToolName(toolName, FILE_MODIFY_TOOL_NAMES)) return;
+  if (!isSuccessfulResult(result)) return;
+
+  const normalized = normalizeToolInput(rawName ?? toolName, input) as Record<string, unknown>;
+  const defaultPath = extractFilePath(normalized);
+  const pairs = extractEditPairs(normalized);
+  const lineInfo = getToolLineInfo(normalized, undefined, result);
+
+  for (const pair of pairs) {
+    const filePath = pair.filePath || defaultPath;
+    if (!filePath) continue;
+
+    // Skip completely empty pairs (no path-only noise)
+    if (pair.oldString === '' && pair.newString === '') continue;
+
+    const { additions, deletions } = computeDiffStats(pair.oldString, pair.newString);
+    pushOperation(map, filePath, {
+      toolName,
+      oldString: pair.oldString,
+      newString: pair.newString,
+      additions,
+      deletions,
+      replaceAll: pair.replaceAll,
+      lineStart: lineInfo.start,
+      lineEnd: lineInfo.end,
+    });
+  }
+}
+
+/**
+ * Read content blocks from either a ClaudeMessage-shaped object or a raw
+ * subagent transcript message (`message.content` or top-level `content`).
+ */
+function getRawContentBlocks(message: unknown): unknown[] {
+  if (!message || typeof message !== 'object') return [];
+  const record = message as Record<string, unknown>;
+  const nested = record.message;
+  if (nested && typeof nested === 'object') {
+    const nestedContent = (nested as Record<string, unknown>).content;
+    if (Array.isArray(nestedContent)) return nestedContent;
+  }
+  if (Array.isArray(record.content)) return record.content;
+  return [];
+}
+
+function isAssistantLike(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const record = message as Record<string, unknown>;
+  if (record.type === 'assistant' || record.role === 'assistant') return true;
+  const nested = record.message;
+  if (nested && typeof nested === 'object') {
+    const role = (nested as Record<string, unknown>).role;
+    if (role === 'assistant') return true;
+  }
+  return false;
+}
+
+function findToolResultInRawMessages(
+  messages: unknown[],
+  toolUseId: string,
+): ToolResultBlock | null {
+  for (const message of messages) {
+    for (const block of getRawContentBlocks(message)) {
+      if (!block || typeof block !== 'object') continue;
+      const item = block as Record<string, unknown>;
+      if (item.type === 'tool_result' && item.tool_use_id === toolUseId) {
+        return item as unknown as ToolResultBlock;
+      }
+    }
+  }
+  return null;
+}
+
+function collectFromSubagentHistories(
+  map: Map<string, EditOperation[]>,
+  subagentHistories: Record<string, SubagentHistoryResponse>,
+  allowedKeys: Set<string> | null,
+): void {
+  for (const [key, history] of Object.entries(subagentHistories)) {
+    if (!history?.success || !Array.isArray(history.messages)) continue;
+    if (allowedKeys && !allowedKeys.has(key)) {
+      // Also allow match by agentId field on the history payload
+      if (!history.agentId || !allowedKeys.has(history.agentId)) {
+        if (!history.toolUseId || !allowedKeys.has(history.toolUseId)) {
+          continue;
+        }
+      }
+    }
+
+    const rawMessages = history.messages;
+    for (const message of rawMessages) {
+      if (!isAssistantLike(message)) continue;
+      for (const block of getRawContentBlocks(message)) {
+        if (!block || typeof block !== 'object') continue;
+        const item = block as Record<string, unknown>;
+        if (item.type !== 'tool_use') continue;
+
+        const name = typeof item.name === 'string' ? item.name : '';
+        const toolName = normalizeToolName(name);
+        if (!isToolName(toolName, FILE_MODIFY_TOOL_NAMES)) continue;
+
+        const toolUseId = typeof item.id === 'string' ? item.id : undefined;
+        if (!toolUseId) continue;
+
+        const result = findToolResultInRawMessages(rawMessages, toolUseId);
+        const rawInput = item.input;
+        if (!rawInput || typeof rawInput !== 'object') continue;
+
+        collectFromToolUse({
+          toolName,
+          rawName: name,
+          input: rawInput as Record<string, unknown>,
+          result,
+          map,
+        });
+      }
+    }
+  }
+}
+
+function buildSummaries(map: Map<string, EditOperation[]>): FileChangeSummary[] {
+  const summaries: FileChangeSummary[] = [];
+
+  map.forEach((operations, filePath) => {
+    const totalAdditions = operations.reduce((sum, op) => sum + (op.additions || 0), 0);
+    const totalDeletions = operations.reduce((sum, op) => sum + (op.deletions || 0), 0);
+    const rawStatus = determineFileStatus(operations);
+    const status: FileChangeStatus = rawStatus === 'A' ? 'A' : 'M';
+    const firstLineOperation = operations.find((op) => typeof op.lineStart === 'number');
+
+    summaries.push({
+      filePath: String(filePath || ''),
+      fileName: String(getFileName(filePath) || filePath || 'unknown'),
+      status,
+      additions: totalAdditions,
+      deletions: totalDeletions,
+      lineStart: firstLineOperation?.lineStart,
+      lineEnd: firstLineOperation?.lineEnd,
+      operations,
+    });
+  });
+
+  summaries.sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === 'A' ? -1 : 1;
+    }
+    return a.filePath.localeCompare(b.filePath);
+  });
+
+  return summaries;
 }
 
 interface UseFileChangesParams {
@@ -195,26 +428,26 @@ interface UseFileChangesParams {
   findToolResult: (toolUseId?: string, messageIndex?: number) => ToolResultBlock | null;
   /** Start processing messages from this index (for Keep All feature) */
   startFromIndex?: number;
+  /** Background agent sidechain transcripts — their Edit/Write tools must also count */
+  subagentHistories?: Record<string, SubagentHistoryResponse>;
 }
 
 /**
- * Hook to extract and aggregate file changes from messages
+ * Hook to extract and aggregate file changes from messages (and optional subagent histories).
  */
 export function useFileChanges({
   messages,
   getContentBlocks,
   findToolResult,
   startFromIndex = 0,
+  subagentHistories,
 }: UseFileChangesParams): FileChangeSummary[] {
   return useMemo(() => {
-    // Map to collect operations by file path
     const fileOperationsMap = new Map<string, EditOperation[]>();
+    const agentKeysAfterBase = new Set<string>();
 
-    // Iterate through messages starting from startFromIndex
     messages.forEach((message, messageIndex) => {
-      // Skip messages before startFromIndex
       if (messageIndex < startFromIndex) return;
-
       if (message.type !== 'assistant') return;
 
       const blocks = getContentBlocks(message);
@@ -222,78 +455,44 @@ export function useFileChanges({
       blocks.forEach((block) => {
         if (block.type !== 'tool_use') return;
 
-        const toolName = normalizeToolName(block.name ?? '');
+        const rawName = block.name ?? '';
+        const toolName = normalizeToolName(rawName);
 
-        // Check if this is a file modification tool
+        // Track Agent/Task invocations so we only pull matching sidechain edits
+        // after the Keep All baseline.
+        if (isToolName(toolName, AGENT_TOOL_NAMES) && block.id) {
+          agentKeysAfterBase.add(block.id);
+        }
+
         if (!isToolName(toolName, FILE_MODIFY_TOOL_NAMES)) return;
 
         const rawInput = block.input as Record<string, unknown> | undefined;
-        const input = rawInput ? normalizeToolInput(block.name, rawInput) as Record<string, unknown> : undefined;
-        if (!input) return;
+        if (!rawInput) return;
 
-        const filePath = extractFilePath(input);
-        if (!filePath) return;
-
-        // Check if operation completed successfully
         const result = findToolResult(block.id, messageIndex);
-        if (!isSuccessfulResult(result)) return;
-
-        const { oldString, newString, replaceAll } = extractStrings(input);
-        const { additions, deletions } = computeDiffStats(oldString, newString);
-        const lineInfo = getToolLineInfo(input, undefined, result);
-
-        const operation: EditOperation = {
+        collectFromToolUse({
           toolName,
-          oldString,
-          newString,
-          additions,
-          deletions,
-          replaceAll,
-          lineStart: lineInfo.start,
-          lineEnd: lineInfo.end,
-        };
-
-        // Group by file path
-        const existing = fileOperationsMap.get(filePath) ?? [];
-        existing.push(operation);
-        fileOperationsMap.set(filePath, existing);
+          rawName,
+          input: rawInput,
+          result,
+          map: fileOperationsMap,
+        });
       });
     });
 
-    // Convert map to array of summaries
-    const summaries: FileChangeSummary[] = [];
+    if (subagentHistories && Object.keys(subagentHistories).length > 0) {
+      // When startFromIndex is 0, include every history; otherwise only agents
+      // launched after the Keep All baseline.
+      const allowedKeys = startFromIndex > 0 ? agentKeysAfterBase : null;
+      // Always also allow keys that appear in agentKeysAfterBase even when base is 0
+      // (null means unrestricted).
+      collectFromSubagentHistories(
+        fileOperationsMap,
+        subagentHistories,
+        allowedKeys && allowedKeys.size > 0 ? allowedKeys : (startFromIndex > 0 ? agentKeysAfterBase : null),
+      );
+    }
 
-    fileOperationsMap.forEach((operations, filePath) => {
-      // Calculate totals
-      const totalAdditions = operations.reduce((sum, op) => sum + (op.additions || 0), 0);
-      const totalDeletions = operations.reduce((sum, op) => sum + (op.deletions || 0), 0);
-
-      // Defensive: ensure status is a valid string
-      const rawStatus = determineFileStatus(operations);
-      const status: FileChangeStatus = rawStatus === 'A' ? 'A' : 'M';
-
-      const firstLineOperation = operations.find((op) => typeof op.lineStart === 'number');
-
-      summaries.push({
-        filePath: String(filePath || ''),
-        fileName: String(getFileName(filePath) || filePath || 'unknown'),
-        status,
-        additions: totalAdditions,
-        deletions: totalDeletions,
-        lineStart: firstLineOperation?.lineStart,
-        lineEnd: firstLineOperation?.lineEnd,
-        operations,
-      });
-    });
-
-    // Sort: Added files first, then by file path
-    summaries.sort((a, b) => {
-      if (a.status !== b.status) {
-        return a.status === 'A' ? -1 : 1;
-      }
-      return a.filePath.localeCompare(b.filePath);
-    });
-
-    return summaries;
-  }, [messages, getContentBlocks, findToolResult, startFromIndex]);
+    return buildSummaries(fileOperationsMap);
+  }, [messages, getContentBlocks, findToolResult, startFromIndex, subagentHistories]);
 }

@@ -46,6 +46,7 @@
     "removeAttachment": "Eliminar adjunto",
     "closePreview": "Cerrar vista previa",
     "loadingDropdown": "Cargando...",
+    "modelsLoadFailed": "Error al cargar los modelos. Haz clic para reintentar",
     "addAttachment": "Añadir adjunto",
     "stopGeneration": "Detener generación",
     "generatingResponse": "Generando respuesta",
@@ -81,6 +82,8 @@
     "disabled": "Deshabilitado",
     "sdkNotInstalled": "{{provider}} SDK no está instalado. Instala el SDK para comenzar a chatear.",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "No se pudo comprobar el estado del SDK.",
+    "retrySdkStatus": "Reintentar",
     "openSourceBanner": "Este proyecto garantiza ser 100% de código abierto y gratuito (cuidado con los proyectos pirateados)",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "Enlace copiado al portapapeles — pégalo en el navegador para acceder ⭐",
@@ -238,18 +241,18 @@
       },
       "diffExpanded": {
         "label": "Expandir diferencias por defecto",
-        "enabled": "Expandido",
-        "disabled": "Colapsado",
+        "enabled": "Activado",
+        "disabled": "Desactivado",
         "hint": "Cuando está habilitado, las diferencias de código en el chat se expandirán por defecto. Cuando está deshabilitado, las diferencias comienzan colapsadas."
       },
       "taskCompletionNotification": {
-        "label": "Notificación de tarea completada",
+        "label": "Notificación del sistema por tarea completada",
         "enabled": "Activado",
         "disabled": "Desactivado",
         "hint": "Cuando está activado, muestra una notificación del sistema cuando la tarea AI se completa. Cuando está desactivado, no aparece ninguna notificación."
       },
       "askUserQuestionNotification": {
-        "label": "Notificación de pregunta al usuario",
+        "label": "Notificación del sistema por pregunta",
         "enabled": "Activado",
         "disabled": "Desactivado",
         "hint": "Cuando está activado, muestra una notificación del sistema cuando Claude te hace una pregunta, para que no la pierdas. Cuando está desactivado, no aparece ninguna notificación."
@@ -259,6 +262,40 @@
         "enabled": "Activado",
         "disabled": "Desactivado",
         "hint": "Cuando está activada, el pie de cada mensaje muestra el coste estimado del turno cuando esté disponible e incluye los aciertos de caché dentro del resumen de tokens de entrada. El uso de tokens siempre permanece visible."
+      },
+      "askUserQuestionSoundNotification": {
+        "label": "Sonido de alerta por pregunta",
+        "enabled": "Activado",
+        "disabled": "Desactivado",
+        "hint": "Cuando está activado, reproduce el sonido de alerta configurado cuando Claude te hace una pregunta. Usa la selección de sonido y las reglas de foco de abajo."
+      },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "Mostrar notificaciones del sistema solo cuando el IDE no tenga el foco",
+        "enabled": "Activado",
+        "disabled": "Desactivado",
+        "hint": "Cuando está activado, las notificaciones del sistema por tarea completada y pregunta solo se muestran cuando el IDE no tiene el foco."
+      },
+      "soundNotification": {
+        "label": "Sonido de alerta por tarea completada",
+        "enabled": "Activado",
+        "disabled": "Desactivado",
+        "hint": "Cuando está activado, se reproduce un sonido de notificación cuando la IA completa una tarea, para que lo sepas aunque estés lejos de la pantalla.",
+        "onlyWhenUnfocused": "Reproducir sonidos de alerta solo cuando el IDE no tenga el foco",
+        "onlyWhenUnfocusedHint": "Cuando está activado, los sonidos de alerta por tarea completada y pregunta solo se reproducen cuando el IDE no tiene el foco.",
+        "selectSound": "Sonido de notificación",
+        "soundDefault": "Predeterminado",
+        "soundChime": "Campanilla",
+        "soundBell": "Campana",
+        "soundDing": "Ding",
+        "soundSuccess": "Éxito",
+        "soundCustom": "Personalizado...",
+        "customSound": "Archivo de sonido personalizado",
+        "customSoundPlaceholder": "Selecciona o introduce la ruta del archivo de audio",
+        "customSoundHint": "Admite formatos WAV, MP3 y AIFF",
+        "testSound": "Probar",
+        "browse": "Examinar",
+        "useDefault": "Usar predeterminado",
+        "customSoundSaved": "Sonido personalizado guardado"
       },
       "sendShortcut": {
         "label": "Atajo de envío",
@@ -278,6 +315,12 @@
         "reset": "Restablecer",
         "hint": "Personalizar el color de fondo del área de chat. Dejar vacío para seguir el tema predeterminado."
       },
+      "chatBarColor": {
+        "label": "Color del encabezado y la barra de estado",
+        "custom": "Personalizado",
+        "reset": "Restablecer",
+        "hint": "Usa un color de tema para el encabezado de sesión y la barra de estado de tareas. Déjalo vacío para seguir el tema actual."
+      },
       "userMsgColor": {
         "label": "Color de mensajes del usuario",
         "custom": "Personalizado",
@@ -295,7 +338,8 @@
     "providersDesc": "Gestionar configuración de proveedores de API Claude y Codex, cambiar entre diferentes proveedores de servicio API",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "Modelos personalizados",
@@ -316,6 +360,13 @@
         "cacheReadShort": "Lectura de caché",
         "invalidValue": "El precio debe ser un número no negativo",
         "defaultPricing": "Usando el precio predeterminado"
+      },
+      "contextWindow": {
+        "label": "Contexto máximo (K tokens)",
+        "placeholder": "p. ej. 500",
+        "hint": "Opcional. Introduce un número entero de miles de tokens (500 = 500.000 tokens). Solo se usa para mostrar el uso de contexto del plugin.",
+        "invalidValue": "El contexto máximo debe ser un entero positivo en unidades K",
+        "summary": "Contexto: {{value}} tokens"
       },
       "configuredSectionTitle": "Modelos de Claude configurados",
       "configuredSectionDesc": "Los modelos del proveedor de Claude activo o settings.json ya aparecen en el selector. Aquí solo se puede modificar el precio.",
@@ -760,6 +811,56 @@
         "confirmAdd": "Create",
         "saveChanges": "Save"
       }
+    },
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "Install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "Agente de codificación de terminal minimalista con soporte multi-proveedor"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "Herramientas CLI locales",
+      "summary": "{{installed}} / {{total}} instaladas",
+      "moreComingSoon": "Pronto más compatibilidad",
+      "copyPath": "Copiar ruta"
     }
   },
   "history": {
@@ -1503,11 +1604,23 @@
     "codex": {
       "label": "Codex"
     },
+    "grok": {
+      "label": "Grok CLI"
+    },
+    "kimi": {
+      "label": "Kimi CLI"
+    },
     "gemini": {
       "label": "Gemini Cli"
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "pi": {
+      "label": "PI CLI"
     }
   },
   "promptEnhancer": {

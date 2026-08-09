@@ -102,6 +102,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       onToggleStatusPanel,
       sdkInstalled = true, // Default to true to avoid disabling input box on initial state
       sdkStatusLoading = false, // SDK status loading state
+      sdkStatusError = false,
+      onRetrySdkStatus,
       onInstallSdk,
       addToast,
       messageQueue,
@@ -317,6 +319,11 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         // If determined empty (only zero-width characters), pass empty string to parent
         debouncedOnInput(isEmpty ? '' : text);
 
+        // Trigger file tag rendering so @path text is converted to chips.
+        // Covers non-keyboard input paths (history restore, paste, etc.)
+        // that don't fire the space-key listener.
+        debouncedRenderFileTags();
+
         timer.end();
       },
       [
@@ -324,6 +331,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         adjustHeight,
         debouncedDetectCompletion,
         debouncedOnInput,
+        debouncedRenderFileTags,
         invalidateCache,
         syncInlineCompletion,
       ]
@@ -590,8 +598,10 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
 
         <ChatInputBoxHeader
           sdkStatusLoading={sdkStatusLoading}
+          sdkStatusError={sdkStatusError}
           sdkInstalled={sdkInstalled}
           currentProvider={currentProvider}
+          onRetrySdkStatus={onRetrySdkStatus}
           onInstallSdk={onInstallSdk}
           t={t}
           attachments={attachments}

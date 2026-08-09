@@ -68,6 +68,7 @@ function getStructuralRawBlockSignature(
 export function registerMessageCallbacks(
   options: UseWindowCallbacksOptions,
   resetTransientUiState: () => void,
+  requestHistoryRenderCommit: (refreshEpoch: number) => void,
 ): void {
   const {
     addToast,
@@ -172,6 +173,20 @@ export function registerMessageCallbacks(
     window.__pendingUpdateSequence = null;
   };
   window.__cancelPendingUpdateMessages = cancelPendingUpdateMessages;
+
+  const requestNativeHistoryRefresh = () => {
+    const refreshEpoch = (window.__historySurfaceRefreshEpoch ?? 0) + 1;
+    window.__historySurfaceRefreshEpoch = refreshEpoch;
+    requestHistoryRenderCommit(refreshEpoch);
+  };
+
+  const refreshRestoredHistoryIfPending = (acceptedMessageCount: number) => {
+    if (window.__pendingHistoryRefreshMessageCount !== acceptedMessageCount) {
+      return;
+    }
+    window.__pendingHistoryRefreshMessageCount = undefined;
+    requestNativeHistoryRefresh();
+  };
 
   const processUpdateMessages = (json: string, sequence: number | null = null) => {
     // Re-check the session-transition guard inside processUpdateMessages so the
@@ -415,6 +430,8 @@ export function registerMessageCallbacks(
 
         return finalizeMessageList(prev, patched);
       });
+      window.__lastAcceptedMessageCount = backendMessages.length;
+      refreshRestoredHistoryIfPending(backendMessages.length);
     } catch (error) {
       console.error('[Frontend] Failed to parse messages:', error);
     }
@@ -726,6 +743,9 @@ export function registerMessageCallbacks(
     pendingCodexHistoryPages.clear();
     window.__prependedHistoryMessageCount = 0;
     window.__messageBaseIndex = 0;
+    window.__lastAcceptedMessageCount = undefined;
+    window.__pendingHistoryRefreshMessageCount = undefined;
+    window.__historySurfaceRefreshEpoch = (window.__historySurfaceRefreshEpoch ?? 0) + 1;
     resetTransientUiState();
     closeContextUsageDialog();
     setMessages([]);
@@ -925,7 +945,7 @@ export function registerMessageCallbacks(
 
   window.codexHistoryPageRenderComplete = refreshLoadedHistoryMessages;
 
-  window.historyLoadComplete = () => {
+  window.historyLoadComplete = (expectedMessageCountArg) => {
     releaseSessionTransition();
     const pendingToast = window.__pendingSessionTransitionToast;
     if (pendingToast) {
@@ -933,7 +953,32 @@ export function registerMessageCallbacks(
       addToast(pendingToast.message, pendingToast.type);
     }
     refreshLoadedHistoryMessages();
+
+    const expectedMessageCount = typeof expectedMessageCountArg === 'number'
+      ? expectedMessageCountArg
+      : typeof expectedMessageCountArg === 'string' && expectedMessageCountArg.trim().length > 0
+        ? Number.parseInt(expectedMessageCountArg, 10)
+        : Number.NaN;
+    if (Number.isSafeInteger(expectedMessageCount) && expectedMessageCount >= 0) {
+      const emptyHistoryNeedsNoSnapshot = expectedMessageCount === 0
+        && window.__lastAcceptedMessageCount === undefined;
+      if (window.__lastAcceptedMessageCount === expectedMessageCount || emptyHistoryNeedsNoSnapshot) {
+        if (emptyHistoryNeedsNoSnapshot) {
+          window.__lastAcceptedMessageCount = 0;
+        }
+        window.__pendingHistoryRefreshMessageCount = undefined;
+        requestNativeHistoryRefresh();
+      } else {
+        window.__pendingHistoryRefreshMessageCount = expectedMessageCount;
+      }
+    }
   };
+
+  const pendingHistoryLoadComplete = window.__pendingHistoryLoadComplete;
+  if (pendingHistoryLoadComplete) {
+    window.__pendingHistoryLoadComplete = undefined;
+    window.historyLoadComplete(pendingHistoryLoadComplete.expectedMessageCount);
+  }
 
   window.addUserMessage = (content: string) => {
     if (window.__sessionTransitioning) return;

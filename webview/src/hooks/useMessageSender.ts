@@ -43,7 +43,7 @@ export interface UseMessageSenderOptions {
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
   selectedAgent: SelectedAgent | null;
-  sdkStatusLoaded: boolean;
+  sdkStatusLoading: boolean;
   currentSdkInstalled: boolean;
   sentAttachmentsRef: RefObject<Map<string, Array<{ fileName: string; mediaType: string }>>>;
   chatInputRef: RefObject<ChatInputBoxHandle | null>;
@@ -76,7 +76,7 @@ export function useMessageSender({
   reasoningEffort,
   codexFastMode,
   selectedAgent,
-  sdkStatusLoaded,
+  sdkStatusLoading,
   currentSdkInstalled,
   sentAttachmentsRef,
   chatInputRef,
@@ -318,7 +318,7 @@ export function useMessageSender({
     if (!text && !hasAttachments) return;
 
     // Check SDK status
-    if (!sdkStatusLoaded) {
+    if (sdkStatusLoading) {
       addToast(t('chat.sdkStatusLoading'), 'info');
       return;
     }
@@ -397,7 +397,7 @@ export function useMessageSender({
     // Send message to backend
     sendMessageToBackend(text, attachments, agentInfo, fileTagsInfo, permissionMode);
   }, [
-    sdkStatusLoaded,
+    sdkStatusLoading,
     currentSdkInstalled,
     currentProvider,
     permissionMode,

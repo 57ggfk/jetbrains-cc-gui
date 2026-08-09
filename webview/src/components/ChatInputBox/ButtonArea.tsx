@@ -2,10 +2,12 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
-import { CLAUDE_MODELS, CODEX_MODELS } from './types';
+import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS } from './types';
+import { buildCodexModelList } from './codexModelList';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
+import { useCliModels } from '../../hooks/providers/useCliModels';
 
 /**
  * Get custom Codex model list from localStorage
@@ -97,6 +99,7 @@ export const ButtonArea = ({
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
+  const { cliModels, cliModelsLoading, cliModelsError, cliDefaultModel, cliCatalogHasEntries, refreshCliModels } = useCliModels(currentProvider);
 
   // Track changes to custom models in localStorage
   // When localStorage changes, updating this version number triggers useMemo recalculation
@@ -157,8 +160,14 @@ export const ButtonArea = ({
   // customModelsVersion triggers recalculation when localStorage changes
   const availableModels = useMemo(() => {
     if (currentProvider === 'codex') {
-      // Merge built-in models and custom models
       const customModels = getCustomCodexModels();
+      if (cliCatalogHasEntries) {
+        // Dynamic catalog arrived (config.toml model + model_catalog_json):
+        // show what the codex CLI picker would show, customs appended.
+        return buildCodexModelList(cliModels, customModels);
+      }
+      // No catalog yet (still loading, fetch failed, or official provider):
+      // legacy merge of built-in models and custom models.
       if (customModels.length === 0) {
         return CODEX_MODELS;
       }
@@ -167,6 +176,12 @@ export const ButtonArea = ({
       const customIds = new Set(customModels.map(m => m.id));
       const filteredBuiltIn = CODEX_MODELS.filter(m => !customIds.has(m.id));
       return [...customModels, ...filteredBuiltIn];
+    }
+    if (currentProvider === 'grok') {
+      return GROK_MODELS;
+    }
+    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
+      return cliModels;
     }
     if (typeof window === 'undefined' || !window.localStorage) {
       return CLAUDE_MODELS;
@@ -192,7 +207,23 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion]);
+  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, cliCatalogHasEntries]);
+
+  // When a dynamic model catalog arrives, ensure selection is a real entry.
+  useEffect(() => {
+    const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
+      || currentProvider === 'pi' || currentProvider === 'codex';
+    if (!isDynamicProvider) return;
+    // Codex: only correct the selection once a real catalog arrived. With the
+    // official-provider fallback list (built-in GPT models) the user's explicit
+    // choice must be kept as-is.
+    if (currentProvider === 'codex' && !cliCatalogHasEntries) return;
+    if (!availableModels.length || !onModelSelect) return;
+    const exists = availableModels.some((model) => model.id === selectedModel);
+    if (!exists) {
+      onModelSelect(cliDefaultModel ?? availableModels[0].id);
+    }
+  }, [availableModels, currentProvider, onModelSelect, selectedModel, cliDefaultModel, cliCatalogHasEntries]);
 
   /**
    * Handle submit button click
@@ -273,7 +304,18 @@ export const ButtonArea = ({
           compact
         />
         <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
-        <ModelSelect value={selectedModel} onChange={handleModelSelect} models={availableModels} currentProvider={currentProvider} onAddModel={onAddModel} longContextEnabled={longContextEnabled} onLongContextChange={onLongContextChange} />
+        <ModelSelect
+          value={selectedModel}
+          onChange={handleModelSelect}
+          models={availableModels}
+          currentProvider={currentProvider}
+          loading={cliModelsLoading}
+          error={cliModelsError}
+          onRetry={() => refreshCliModels(currentProvider)}
+          onAddModel={onAddModel}
+          longContextEnabled={longContextEnabled}
+          onLongContextChange={onLongContextChange}
+        />
         <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />

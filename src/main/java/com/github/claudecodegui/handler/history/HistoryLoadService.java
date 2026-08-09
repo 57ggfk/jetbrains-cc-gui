@@ -8,6 +8,7 @@ import com.github.claudecodegui.cache.SessionIndexCache;
 import com.github.claudecodegui.cache.SessionIndexManager;
 import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
+import com.github.claudecodegui.provider.grok.GrokHistoryReader;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -63,6 +64,15 @@ class HistoryLoadService {
                     CodexHistoryReader codexReader = new CodexHistoryReader();
                     historyJson = codexReader.getSessionsForProjectAsJson(projectPath);
                     LOG.info("[HistoryHandler] CodexHistoryReader 返回的 JSON 长度: " + historyJson.length());
+                } else if ("grok".equals(provider)) {
+                    LOG.info("[HistoryHandler] 使用 GrokHistoryReader 读取 Grok 会话 (项目: " + projectPath + ")");
+                    GrokHistoryReader grokReader = new GrokHistoryReader();
+                    historyJson = grokReader.getSessionsForProjectAsJson(projectPath);
+                    LOG.info("[HistoryHandler] GrokHistoryReader 返回的 JSON 长度: " + historyJson.length());
+                } else if ("kimi".equals(provider) || "opencode".equals(provider) || "pi".equals(provider)) {
+                    // History disk readers are deferred; live multi-turn uses sessionId resume.
+                    LOG.info("[HistoryHandler] " + provider + " history list not implemented yet; returning empty");
+                    historyJson = "{\"success\":true,\"sessions\":[],\"provider\":\"" + provider + "\"}";
                 } else {
                     // Default: use ClaudeHistoryReader to read Claude sessions
                     LOG.info("[HistoryHandler] 使用 ClaudeHistoryReader 读取 Claude 会话");
@@ -140,6 +150,11 @@ class HistoryLoadService {
             if ("codex".equals(provider)) {
                 SessionIndexCache.getInstance().clearAllCodexCache();
                 SessionIndexManager.getInstance().clearAllCodexIndex();
+            } else if ("grok".equals(provider)) {
+                // Grok history is read live from disk; no dedicated index cache yet.
+                LOG.info("[HistoryHandler] Grok deep search: reloading from ~/.grok/sessions");
+            } else if ("kimi".equals(provider) || "opencode".equals(provider) || "pi".equals(provider)) {
+                LOG.info("[HistoryHandler] " + provider + " deep search: no disk index yet");
             } else if (projectPath != null) {
                 SessionIndexCache.getInstance().clearProject(projectPath);
                 SessionIndexManager.getInstance().clearProjectIndex("claude", projectPath);

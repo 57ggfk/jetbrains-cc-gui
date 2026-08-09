@@ -147,20 +147,21 @@ const App = () => {
   // ── Model/Provider state ──
   const {
     currentProvider, selectedModel, permissionMode,
-    selectedAgent, sdkStatusLoaded, currentSdkInstalled,
+    selectedAgent, sdkStatusLoading, sdkStatusError, currentSdkInstalled,
     claudeSdkMeetsMinimum,
     currentProviderRef,
     activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
     reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
     longContextEnabled,
     usagePercentage, usageUsedTokens, usageMaxTokens,
-    setPermissionMode,
+    setPermissionMode, setCurrentProvider,
     setClaudePermissionMode, setCodexPermissionMode,
     setSelectedClaudeModel, setSelectedCodexModel,
+    setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled, setStreamingEnabledSetting,
     setSendShortcut, setAutoOpenFileEnabled,
-    setSdkStatus, setSdkStatusLoaded, setSelectedAgent,
+    setSdkStatus, setSdkStatusLoaded, setSdkStatusError, retrySdkStatus, setSelectedAgent,
     setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens,
     syncActiveProviderModelMapping,
     handleModeSelect, handleModelSelect, handleProviderSelect,
@@ -281,12 +282,13 @@ const App = () => {
     setMessages, setStatus, setLoading, setLoadingStartTime,
     setIsThinking, setStreamingActive, setHistoryData,
     setCurrentSessionId, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens,
-    setPermissionMode, setClaudePermissionMode, setCodexPermissionMode,
+    setPermissionMode, setCurrentProvider, setClaudePermissionMode, setCodexPermissionMode,
     setSelectedClaudeModel, setSelectedCodexModel,
+    setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled, setStreamingEnabledSetting,
     setSendShortcut, setAutoOpenFileEnabled,
-    setSdkStatus, setSdkStatusLoaded,
+    setSdkStatus, setSdkStatusLoaded, setSdkStatusError,
     setIsRewinding, setRewindDialogOpen, setCurrentRewindRequest,
     setContextInfo, setSelectedAgent,
     setSubagentHistories,
@@ -332,7 +334,7 @@ const App = () => {
   } = useMessageSender({
     t, addToast,
     currentProvider, selectedModel, permissionMode, reasoningEffort, selectedAgent, codexFastMode,
-    sdkStatusLoaded, currentSdkInstalled,
+    sdkStatusLoading, currentSdkInstalled,
     sentAttachmentsRef, chatInputRef, messagesContainerRef,
     isUserAtBottomRef, userPausedRef, isStreamingRef,
     setMessages, setLoading, setLoadingStartTime, setStreamingActive,
@@ -407,7 +409,11 @@ const App = () => {
   );
 
   // Stabilize context value references for SubagentContext consumers.
-  const { subagentHistoryCtxValue, sessionIdCtxValue } = useSubagentContextValues(subagentHistories, currentSessionId);
+  const { subagentHistoryCtxValue, sessionIdCtxValue } = useSubagentContextValues(
+    subagentHistories,
+    currentSessionId,
+    currentProvider,
+  );
 
   const handleNavigateToProviderSettings = useCallback(() => {
     setSettingsInitialTab('providers');
@@ -532,7 +538,9 @@ const App = () => {
           selectedModel={selectedModel}
           permissionMode={permissionMode}
           selectedAgent={selectedAgent}
-          sdkStatusLoaded={sdkStatusLoaded}
+          sdkStatusLoading={sdkStatusLoading}
+          sdkStatusError={sdkStatusError}
+          onRetrySdkStatus={retrySdkStatus}
           currentSdkInstalled={currentSdkInstalled}
           activeProviderConfig={activeProviderConfig}
           claudeSettingsAlwaysThinkingEnabled={claudeSettingsAlwaysThinkingEnabled}

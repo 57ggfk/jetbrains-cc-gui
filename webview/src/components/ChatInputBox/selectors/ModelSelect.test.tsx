@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ModelSelect } from './ModelSelect';
 import { CLAUDE_MODELS, CODEX_MODELS } from '../types';
@@ -101,5 +101,73 @@ describe('ModelSelect', () => {
       'gpt-5.5',
       'gpt-5.4',
     ]);
+  });
+
+  it('loading 时应显示加载状态', () => {
+    render(
+      <ModelSelect
+        value="opencode-default"
+        onChange={vi.fn()}
+        models={[
+          {
+            id: 'opencode-default',
+            label: 'OpenCode Default',
+            description: 'Use OpenCode CLI default model',
+          },
+        ]}
+        currentProvider="opencode"
+        loading
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByTestId('model-loading')).toBeTruthy();
+    expect(screen.getByText('chat.loadingDropdown')).toBeTruthy();
+  });
+
+  it('error 时应显示失败状态并支持点击重试', () => {
+    const onRetry = vi.fn();
+    render(
+      <ModelSelect
+        value="auto"
+        onChange={vi.fn()}
+        models={[
+          {
+            id: 'auto',
+            label: 'PI Auto',
+            description: 'Use PI CLI default model',
+          },
+        ]}
+        currentProvider="pi"
+        error="pi --list-models failed"
+        onRetry={onRetry}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const errorRow = screen.getByTestId('model-load-error');
+    expect(errorRow).toBeTruthy();
+    expect(screen.getByText('chat.modelsLoadFailed')).toBeTruthy();
+
+    fireEvent.click(errorRow);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('loading 时不应同时显示 error 状态', () => {
+    render(
+      <ModelSelect
+        value="auto"
+        onChange={vi.fn()}
+        models={[{ id: 'auto', label: 'PI Auto' }]}
+        currentProvider="pi"
+        loading
+        error="timeout"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByTestId('model-loading')).toBeTruthy();
+    expect(screen.queryByTestId('model-load-error')).toBeNull();
   });
 });

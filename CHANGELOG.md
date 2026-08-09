@@ -1,3 +1,75 @@
+##### **2026年8月9日（v0.5）**
+
+English:
+
+✨ Features
+- Add **Grok / Kimi / OpenCode / Pi CLI providers**: local CLI-based providers sit alongside Claude and Codex, with bridge channels, Java session routing, CLI status detection, webview provider selection, a beta notice, and a dedicated CLI section in settings (by @zhukunpenglinyutong)
+- Add a **Persistent Multi-Turn ACP Daemon for Grok**: Grok no longer spawns a fresh CLI process per turn. A warm multi-turn JSON-RPC daemon streams text / thinking deltas, tool_use and tool_result natively, with prewarm / lifecycle coordination and history tools instead of polling `chat_history.jsonl` (by @toxeh)
+- Add a **500k Grok Context Ring**: Grok models resolve native 500k context capacity (legacy grok-2 stays 128k). Usage is synthesized into the IDE ring / grid dialog (Conversation vs Free space) from ACP totals and persistent usage, so the context UI matches Claude / Codex (by @toxeh)
+- Add **Codex custom model context windows**: users can set per-model context limits (k-unit input) for Codex custom models; the input bar shows live current-context usage, and recovery prefers the real current-turn snapshot over session-cumulative totals (by @EzioX1459)
+- Add **Codex models from `config.toml` / model catalog**: the Codex model picker uses the same dynamic `listModels` path as other CLI providers — top-level `model` / `model_provider` / `model_catalog_json` plus defensive catalog JSON shapes — so catalog-only ids (e.g. kimi-k3) can be selected and restored after restart (by @zhukunpenglinyutong)
+- Add **compact clickable `@file` references** in user messages: `@path` tokens render as compact links that open the file in the IDE, with path spaces, Windows / POSIX paths, line numbers, `@@` escapes, and hover titles for the full path (by @Cyber0xFE, @zhukunpenglinyutong)
+- Add **AskUserQuestion sound alerts** and a **"system notifications only when IDE is unfocused"** toggle: permission / question prompts can play a sound; system notifications can be limited to unfocused / minimized IDE windows, with focused-window detection and multi-language settings copy (by @adminkk)
+- Add **streaming AI commit-message generation**: Commit AI streams partial results into the VCS commit panel (Git4Idea-backed real diffs), cancels in-flight runs on re-trigger, and restores the user's draft if generation fails (by @azurewy)
+- Add **chat bar theme color customization**: the chat input bar accent color is user-configurable from the webview theme settings (by @elexiang)
+- Improve **streaming markdown fidelity**: replace the lightweight streaming renderer with per-block memoization of the full marked pipeline so mid-stream tables / lists match the final render (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Enlarge **CLI section controls** in settings for better touch / click targets (by @zhukunpenglinyutong)
+- Resolve **Grok effective auth** across the Java / Node bridge: empty `~/.grok/auth.json` no longer forces OAuth or ambient host keys; falls back to plugin key then `~/.grok/config.toml` api_key / base_url, while real OAuth tokens stay key-free (by @zhukunpenglinyutong)
+- Surface **CLI model-load failures** in the model dropdown with a clickable retry row and i18n strings (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **Webview watchdog recovery memory leak**: soft recovery uses `CefBrowser.reload()` instead of re-`loadHTML()` on every cycle (which retained generated file-URL payloads in JCEF and drove memory / CPU up after multi-project startup or sleep/wake storms) (by @jianhong-li)
+- Fix **hidden-tab recovery storms**: only active unready tabs run bridge fallback timers / startup watchdog work; inactive tabs pause recovery so multi-project multi-tab startup no longer burns config reads and reload loops in the background (by @jianhong-li)
+- Fix **first-tab OSR blank history**: restored history is published through OSR frame fences (`history_dom_committed` + content revision) so the Remote JCEF surface gets a full frame after multi-project startup instead of a blank / partial backing image until hover or resize (by @jianhong-li)
+- Fix **daemon heartbeat restart storms** after sleep/wake: reset the heartbeat baseline when restarting so a stale `lastHeartbeatResponse` from the dead process cannot immediately kill the freshly spawned daemon (by @hebulin, closes #1512)
+- Fix **Webview startup bridge recovery** staying alive through readiness and settling **SDK status query failures** without leaving the UI stuck (by @GGMGG)
+- Fix **Codex context usage accuracy**: treat `last_token_usage` + `model_context_window` as the authoritative current-context snapshot (not session-cumulative `total_token_usage`); recover from JSONL when the SDK omits `token_count`, and keep turn usage as a delta from the current-turn baseline (by @EzioX1459, @jianhong-li)
+- Fix **Codex subagent history and stable anchors**: restore Codex history correctly and keep message anchors stable across subagent turns (by @GGMGG)
+- Fix **Claude large session-query JSON truncation**: flush session-query stdout before process exit so payloads above the pipe high-water mark are not cut mid-JSON (`MalformedJsonException` on `$.messages[N].cwd`) (by @gadfly3173)
+- Fix **npm ≥9 nested `versions --json` arrays**: unwrap array-of-array layers so the SDK version dropdown receives remote versions instead of falling back to built-ins with a false "remote versions unavailable" banner (by @PctAIGM)
+- Fix **anchor-dot scroll under CSS zoom**: convert zoom-scaled `getBoundingClientRect` deltas into layout space so one click lands on the target instead of converging after 3–4 tries (by @gadfly3173)
+- Fix **StatusPanel Edits file count / diff stats**: large equal-line replacements no longer collapse to net-line estimates; MultiEdit / `edits[]` and subagent sidechain edits are included; cache keys use full-content hashes (by @hpstream)
+- Fix **per-turn cost billed on Claude slot id**: resolve the provider-mapped model (same path as context limits) before pricing so custom DeepSeek / relay rates are used instead of built-in Claude tables (by @EzioX1459)
+- Fix **Windows `.cmd` / `.bat` CLI shims**: resolve PATHEXT-aware shims and shell-spawn them (CVE-2024-27980-safe) so npm-global CLI tools start correctly on Windows (by @zhukunpenglinyutong)
+
+中文：
+
+✨ 新功能
+- 新增 **Grok / Kimi / OpenCode / Pi CLI Provider**：在 Claude / Codex 之外接入本地 CLI 类 provider，涵盖 bridge 通道、Java 会话路由、CLI 状态检测、webview provider 选择、beta 提示，以及设置页独立的 CLI 分区（by @zhukunpenglinyutong）
+- 新增 **Grok 持久化多轮 ACP Daemon**：Grok 不再每轮冷启动 CLI，改为常驻多轮 JSON-RPC daemon，原生流式推送 text / thinking delta、tool_use 与 tool_result，并配合 prewarm / 生命周期协调与历史工具，替代对 `chat_history.jsonl` 的轮询（by @toxeh）
+- 新增 **Grok 50 万 Context Ring**：Grok 模型按原生 500k 上下文容量解析（旧版 grok-2 仍为 128k）；用量由 ACP 总量与持久化 usage 合成为 IDE 圆环 / 网格对话框（对话 vs 空闲），与 Claude / Codex 上下文 UI 对齐（by @toxeh）
+- 新增 **Codex 自定义模型上下文窗口**：可为 Codex 自定义模型设置上下文上限（k 单位输入）；输入栏展示当前上下文用量，恢复时优先使用真实当前轮快照而非会话累计 token（by @EzioX1459）
+- 新增 **从 `config.toml` / model catalog 发现 Codex 模型**：Codex 模型选择器走与其他 CLI provider 相同的动态 `listModels` 路径——解析顶层 `model` / `model_provider` / `model_catalog_json` 及多种 catalog JSON 形态，catalog 专有 id（如 kimi-k3）可被选择并在重启后恢复（by @zhukunpenglinyutong）
+- 新增用户消息中的 **紧凑可点击 `@file` 引用**：`@path` 渲染为可在 IDE 打开的紧凑链接，支持路径空格、Windows / POSIX 路径、行号、`@@` 转义，以及 hover 显示完整路径（by @Cyber0xFE、@zhukunpenglinyutong）
+- 新增 **AskUserQuestion 声音提醒** 与 **「仅在 IDE 未聚焦时显示系统通知」开关**：权限 / 提问提示可播放声音；系统通知可限制为 IDE 未聚焦 / 最小化时弹出，并完善焦点检测与多语言设置文案（by @adminkk）
+- 新增 **流式 AI Commit Message 生成**：Commit AI 将部分结果流式写入 VCS 提交面板（基于 Git4Idea 的真实 diff），再次触发时取消进行中的生成，失败时恢复用户草稿（by @azurewy）
+- 新增 **聊天栏主题色自定义**：可在 webview 主题设置中配置聊天输入栏强调色（by @elexiang）
+- 改进 **流式 Markdown 保真度**：用完整 marked 管线的按块 memo 替换轻量流式渲染器，使流式过程中的表格 / 列表与最终渲染一致（by @zhukunpenglinyutong）
+
+🔧 优化
+- 放大设置页 **CLI 分区控件**，提升点击 / 触控命中区域（by @zhukunpenglinyutong）
+- 贯通 Java / Node 的 **Grok 有效鉴权解析**：空的 `~/.grok/auth.json` 不再强行走 OAuth 或继承宿主环境密钥；依次回退到插件配置密钥与 `~/.grok/config.toml` 的 api_key / base_url，真实 OAuth token 仍保持无 key 路径（by @zhukunpenglinyutong）
+- 在模型下拉中 **展示 CLI 模型加载失败**，提供可点击重试行与 i18n 文案（by @zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **Webview 看门狗恢复内存泄漏**：软恢复改为 `CefBrowser.reload()`，避免每次 `loadHTML()` 在 JCEF 中堆积 file-URL payload，导致多项目启动或休眠唤醒后内存 / CPU 飙升（by @jianhong-li）
+- 修复 **隐藏 Tab 恢复风暴**：仅对当前激活且未就绪的 Tab 跑 bridge 回退定时器 / 启动看门狗；非激活 Tab 暂停恢复，避免多项目多 Tab 启动时后台狂刷配置读取与 reload（by @jianhong-li）
+- 修复 **首个 Tab OSR 历史空白**：经 OSR 帧栅栏（`history_dom_committed` + 内容 revision）发布恢复后的历史，使 Remote JCEF 在多项目启动后拿到完整帧，而不再直到 hover / 缩放才出现内容（by @jianhong-li）
+- 修复休眠唤醒后 **daemon 心跳重启风暴**：重启时重置心跳基线，避免已死进程的陈旧 `lastHeartbeatResponse` 立刻杀死刚拉起的 daemon（by @hebulin，关闭 #1512）
+- 修复 **Webview 启动 bridge 恢复** 能持续到就绪，并妥善处理 **SDK 状态查询失败**，避免 UI 卡住（by @GGMGG）
+- 修复 **Codex 上下文用量准确性**：以 `last_token_usage` + `model_context_window` 为当前上下文权威快照（而非会话累计 `total_token_usage`）；SDK 省略 `token_count` 时从 JSONL 恢复，单轮用量按当前轮基线差分（by @EzioX1459、@jianhong-li）
+- 修复 **Codex 子代理历史与锚点稳定性**：正确恢复 Codex 历史，并在 subagent 轮次间保持消息锚点稳定（by @GGMGG）
+- 修复 **Claude 大会话 session-query JSON 截断**：进程退出前 flush session-query stdout，避免超过管道高水位的 payload 被截断成半截 JSON（`$.messages[N].cwd` 的 `MalformedJsonException`）（by @gadfly3173）
+- 修复 **npm ≥9 嵌套的 `versions --json` 数组**：展开 array-of-array 层，使 SDK 版本下拉能拿到远端版本，而不再误报「remote versions unavailable」并回退到内置列表（by @PctAIGM）
+- 修复 **CSS zoom 下锚点滚动偏差**：将 zoom 缩放后的 `getBoundingClientRect` 差值换算回 layout 空间，一次点击即可落到目标，无需 3–4 次收敛（by @gadfly3173）
+- 修复 **StatusPanel 编辑文件数 / diff 统计**：大段等行替换不再塌缩为净行估算；纳入 MultiEdit / `edits[]` 与 subagent 侧链编辑；缓存键使用全文 hash（by @hpstream）
+- 修复 **按 Claude 槽位 id 计费**：计费前解析 provider 映射后的真实模型（与上下文上限同一路径），自定义 DeepSeek / 中转价格生效，不再误用内置 Claude 价表（by @EzioX1459）
+- 修复 **Windows `.cmd` / `.bat` CLI 垫片启动**：按 PATHEXT 解析垫片并以 shell 方式 spawn（兼容 CVE-2024-27980），确保 npm 全局 CLI 在 Windows 上可正常启动（by @zhukunpenglinyutong）
+
+---
+
 ##### **2026年7月29日（v0.4.9）**
 
 English:

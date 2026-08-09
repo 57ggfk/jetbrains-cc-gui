@@ -46,6 +46,7 @@
     "removeAttachment": "添付ファイルを削除",
     "closePreview": "プレビューを閉じる",
     "loadingDropdown": "読み込み中...",
+    "modelsLoadFailed": "モデルの読み込みに失敗しました。クリックして再試行",
     "addAttachment": "添付ファイルを追加",
     "stopGeneration": "生成を停止",
     "generatingResponse": "応答を生成中",
@@ -81,6 +82,8 @@
     "disabled": "無効",
     "sdkNotInstalled": "{{provider}} SDKがインストールされていません。チャットを開始するにはSDKをインストールしてください。",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "SDK の状態を確認できませんでした。",
+    "retrySdkStatus": "再試行",
     "openSourceBanner": "このプロジェクトは100%オープンソースかつ無料を保証します（海賊版プロジェクトにご注意ください）",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "リポジトリのURLをクリップボードにコピーしました。ブラウザに貼り付けてアクセスできます ⭐",
@@ -238,18 +241,18 @@
       },
       "diffExpanded": {
         "label": "差分をデフォルトで展開",
-        "enabled": "展開",
-        "disabled": "折りたたみ",
+        "enabled": "有効",
+        "disabled": "無効",
         "hint": "有効にすると、チャット内のコード差分がデフォルトで展開表示されます。無効の場合、差分は折りたたまれた状態で表示されます。"
       },
       "taskCompletionNotification": {
-        "label": "タスク完了通知",
+        "label": "タスク完了システム通知",
         "enabled": "有効",
         "disabled": "無効",
         "hint": "有効にすると、AIタスクが完了した時にシステム通知を表示します。無効の場合、通知は表示されません。"
       },
       "askUserQuestionNotification": {
-        "label": "ユーザー質問通知",
+        "label": "質問システム通知",
         "enabled": "有効",
         "disabled": "無効",
         "hint": "有効にすると、Claude が質問した時にシステム通知を表示し、見逃しを防ぎます。無効の場合、通知は表示されません。"
@@ -259,6 +262,40 @@
         "enabled": "有効",
         "disabled": "無効",
         "hint": "有効にすると、利用可能な場合にメッセージ下部へターンの推定コストを表示し、入力 Token の概要内にキャッシュヒットを含めます。Token 消費量は常に表示されます。"
+      },
+      "askUserQuestionSoundNotification": {
+        "label": "質問アラート音",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、Claude が質問した時に設定済みのアラート音を再生します。下のサウンド選択とフォーカス規則を使用します。"
+      },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "IDE がフォーカスされていない時だけシステム通知を表示",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、タスク完了と質問のシステム通知は IDE がフォーカスされていない時だけ表示されます。"
+      },
+      "soundNotification": {
+        "label": "タスク完了アラート音",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、AI タスクが完了した時に通知音を再生します。画面から離れていても完了に気づけます。",
+        "onlyWhenUnfocused": "IDE がフォーカスされていない時だけアラート音を再生",
+        "onlyWhenUnfocusedHint": "有効にすると、タスク完了と質問のアラート音は IDE がフォーカスされていない時だけ再生されます。",
+        "selectSound": "通知音",
+        "soundDefault": "デフォルト",
+        "soundChime": "チャイム",
+        "soundBell": "ベル",
+        "soundDing": "ディン",
+        "soundSuccess": "成功",
+        "soundCustom": "カスタム...",
+        "customSound": "カスタム音声ファイル",
+        "customSoundPlaceholder": "音声ファイルのパスを選択または入力",
+        "customSoundHint": "WAV、MP3、AIFF 形式に対応",
+        "testSound": "テスト",
+        "browse": "参照",
+        "useDefault": "デフォルトを使用",
+        "customSoundSaved": "カスタム音声を保存しました"
       },
       "sendShortcut": {
         "label": "送信ショートカット",
@@ -278,6 +315,12 @@
         "reset": "デフォルトに戻す",
         "hint": "チャットエリアの背景色をカスタマイズします。空欄の場合はテーマのデフォルト色に従います。"
       },
+      "chatBarColor": {
+        "label": "ヘッダーとステータスバーの色",
+        "custom": "カスタム",
+        "reset": "リセット",
+        "hint": "セッションヘッダーとタスクステータスバーに共通のテーマ色を設定します。空欄の場合は現在のUIテーマに従います。"
+      },
       "userMsgColor": {
         "label": "ユーザーメッセージの色",
         "custom": "カスタム",
@@ -295,7 +338,8 @@
     "providersDesc": "ClaudeとCodex APIプロバイダー設定を管理し、異なるAPIサービスプロバイダー間で切り替え",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "カスタムモデル",
@@ -316,6 +360,13 @@
         "cacheReadShort": "キャッシュ読み取り",
         "invalidValue": "料金は0以上の数値で入力してください",
         "defaultPricing": "既定料金を使用中"
+      },
+      "contextWindow": {
+        "label": "最大コンテキスト（Kトークン）",
+        "placeholder": "例: 500",
+        "hint": "任意。トークン数を千単位の整数で入力します（500 = 500,000トークン）。プラグインの使用量表示にのみ使用されます。",
+        "invalidValue": "最大コンテキストはK単位の正の整数で入力してください",
+        "summary": "コンテキスト: {{value}} トークン"
       },
       "configuredSectionTitle": "設定済みの Claude モデル",
       "configuredSectionDesc": "現在の Claude プロバイダーまたは settings.json のモデルは既にモデル選択リストに表示されています。ここでは料金のみ変更できます。",
@@ -765,6 +816,56 @@
         "confirmAdd": "Create",
         "saveChanges": "Save"
       }
+    },
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "Install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "マルチプロバイダーのモデルに対応したミニマルなターミナルコーディングエージェント"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "ローカル CLI ツール",
+      "summary": "{{installed}} / {{total}} インストール済み",
+      "moreComingSoon": "今後さらに対応予定",
+      "copyPath": "パスをコピー"
     }
   },
   "history": {
@@ -1513,6 +1614,9 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
     }
   },
   "promptEnhancer": {

@@ -12,6 +12,8 @@ import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -43,6 +45,7 @@ public class DaemonBridge {
     private static final long ACTIVE_REQUEST_HEARTBEAT_TIMEOUT_MS = 180_000;
     private static final int MAX_RESTART_ATTEMPTS = 3;
     private static final long RESTART_WINDOW_MS = 30_000; // Reset restart counter after this period of stability
+    private static final int STDERR_RING_CAPACITY = 40;
 
     private final NodeDetector nodeDetector;
     private final BridgeDirectoryResolver directoryResolver;
@@ -61,6 +64,10 @@ public class DaemonBridge {
     private final AtomicLong lastHeartbeatResponse = new AtomicLong(0);
     private final AtomicLong lastDaemonActivity = new AtomicLong(0);
     private final AtomicInteger activeRequestCount = new AtomicInteger(0);
+    /** True while {@link #start()} is blocked waiting for the daemon "ready" event. */
+    private final AtomicBoolean awaitingReady = new AtomicBoolean(false);
+    private final Deque<String> recentStderrLines = new ArrayDeque<>();
+    private final Object stderrRingLock = new Object();
     private final Object startLock = new Object();
 
     // Pending request handlers: requestId -> handler
@@ -149,7 +156,14 @@ public class DaemonBridge {
                 lastSuccessfulStart.set(System.currentTimeMillis());
                 markDaemonActivity();
 
-                LOG.info("[DaemonBridge] Daemon process started, PID: " + daemonProcess.pid());
+                LOG.info("[DaemonBridge] Daemon process started, PID: " + daemonProcess.pid()
+                        + ", cmd: " + String.join(" ", daemonCmd)
+                        + ", cwd: " + bridgeDir.getAbsolutePath());
+
+                awaitingReady.set(true);
+                synchronized (stderrRingLock) {
+                    recentStderrLines.clear();
+                }
 
                 // Setup stdin writer
                 daemonStdin = new BufferedWriter(
@@ -170,7 +184,7 @@ public class DaemonBridge {
                         break;
                     }
                     if (daemonProcess == null || !daemonProcess.isAlive() || !isRunning.get()) {
-                        LOG.error("[DaemonBridge] Daemon exited before signaling ready");
+                        logDaemonStartupFailure("exited_before_ready");
                         isRunning.set(false);
                         return false;
                     }
@@ -178,7 +192,7 @@ public class DaemonBridge {
                 if (!ready) {
                     LOG.warn("[DaemonBridge] Daemon did not signal ready within timeout");
                     if (daemonProcess == null || !daemonProcess.isAlive() || !isRunning.get()) {
-                        LOG.error("[DaemonBridge] Daemon is not alive after ready timeout");
+                        logDaemonStartupFailure("not_alive_after_ready_timeout");
                         isRunning.set(false);
                         return false;
                     }
@@ -194,6 +208,8 @@ public class DaemonBridge {
                 LOG.error("[DaemonBridge] Failed to start daemon", e);
                 isRunning.set(false);
                 return false;
+            } finally {
+                awaitingReady.set(false);
             }
         }
     }
@@ -432,6 +448,7 @@ public class DaemonBridge {
                     new InputStreamReader(daemonProcess.getErrorStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    appendStderrLine(line);
                     LOG.debug("[DaemonBridge:stderr] " + line);
                 }
             } catch (IOException e) {
@@ -584,6 +601,12 @@ public class DaemonBridge {
                 }
                 break;
 
+            case "startup_failed": {
+                String startupError = obj.has("error") ? obj.get("error").getAsString() : "unknown";
+                LOG.error("[DaemonBridge] Daemon reported startup_failed: " + startupError);
+                break;
+            }
+
             case "sdk_loaded":
                 sdkPreloaded.set(true);
                 LOG.info("[DaemonBridge] SDK pre-loaded successfully");
@@ -722,6 +745,13 @@ public class DaemonBridge {
             restartAttempts.set(0);
         }
 
+        if (awaitingReady.get()) {
+            LOG.warn("[DaemonBridge] Daemon died during startup wait; skipping auto-restart"
+                    + " (coordinator will fall back to per-process mode). "
+                    + formatRecentStderrTail());
+            return;
+        }
+
         int attempts = restartAttempts.incrementAndGet();
         if (attempts <= MAX_RESTART_ATTEMPTS) {
             LOG.info("[DaemonBridge] Attempting restart (" + attempts + "/" + MAX_RESTART_ATTEMPTS
@@ -762,6 +792,51 @@ public class DaemonBridge {
 
     public boolean isSdkPreloaded() {
         return sdkPreloaded.get();
+    }
+
+    private void appendStderrLine(String line) {
+        if (line == null) { return; }
+        synchronized (stderrRingLock) {
+            recentStderrLines.addLast(line);
+            while (recentStderrLines.size() > STDERR_RING_CAPACITY) {
+                recentStderrLines.removeFirst();
+            }
+        }
+    }
+
+    private String formatRecentStderrTail() {
+        synchronized (stderrRingLock) {
+            if (recentStderrLines.isEmpty()) {
+                return "stderr=(empty)";
+            }
+            return "stderrTail=" + String.join(" | ", recentStderrLines);
+        }
+    }
+
+    private void logDaemonStartupFailure(String phase) {
+        int exitCode = Integer.MIN_VALUE;
+        Process process = daemonProcess;
+        if (process != null) {
+            try {
+                if (!process.isAlive()) {
+                    exitCode = process.exitValue();
+                } else {
+                    boolean finished = process.waitFor(500, TimeUnit.MILLISECONDS);
+                    if (finished) {
+                        exitCode = process.exitValue();
+                    }
+                }
+            } catch (IllegalThreadStateException stillRunning) {
+                exitCode = Integer.MIN_VALUE;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        String exitLabel = exitCode == Integer.MIN_VALUE ? "unknown" : String.valueOf(exitCode);
+        LOG.error("[DaemonBridge] Daemon exited before signaling ready"
+                + " (phase=" + phase
+                + ", exitCode=" + exitLabel
+                + ", " + formatRecentStderrTail() + ")");
     }
 
     static boolean shouldTreatAsUnresponsive(long heartbeatAgeMs, long activityAgeMs, int activeRequestCount) {

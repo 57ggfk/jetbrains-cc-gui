@@ -6,12 +6,15 @@ import com.github.claudecodegui.settings.CodexSettingsManager;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -30,6 +33,7 @@ public class SessionSendService {
     private final Gson gson;
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final Map<String, MarkerCliBridge> cliBridges;
     private final SessionContextService contextService;
 
     public SessionSendService(
@@ -41,6 +45,7 @@ public class SessionSendService {
             Gson gson,
             ClaudeSDKBridge claudeSDKBridge,
             CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
             SessionContextService contextService
     ) {
         this.project = project;
@@ -51,6 +56,7 @@ public class SessionSendService {
         this.gson = gson;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
+        this.cliBridges = cliBridges != null ? cliBridges : Collections.emptyMap();
         this.contextService = contextService;
     }
 
@@ -135,6 +141,23 @@ public class SessionSendService {
             );
         }
 
+        if (cliBridges.containsKey(currentProvider)) {
+            if (attachments != null && !attachments.isEmpty()) {
+                LOG.warn("[CliProvider] Dropping " + attachments.size()
+                        + " attachment(s): CLI providers do not support attachments (provider="
+                        + currentProvider + ")");
+            }
+            return sendToCliProvider(
+                    currentProvider,
+                    channelId,
+                    input,
+                    openedFilesJson,
+                    agentPrompt,
+                    fileTagPaths,
+                    normalizedRequestedEffort
+            );
+        }
+
         return sendToClaude(channelId, input, attachments, openedFilesJson, agentPrompt,
                 effectivePermissionMode, normalizedRequestedEffort);
     }
@@ -178,7 +201,8 @@ public class SessionSendService {
             resolvedMode = "default";
         }
 
-        if ("codex".equals(provider) && "plan".equals(resolvedMode)) {
+        // Codex + headless CLI providers have no plan mode equivalent.
+        if (("codex".equals(provider) || SessionProviderRouter.isCliProvider(provider)) && "plan".equals(resolvedMode)) {
             return "default";
         }
         return resolvedMode;
@@ -279,6 +303,115 @@ public class SessionSendService {
                 effectiveCodexServiceTier,
                 handler
         ).thenApply(result -> null);
+    }
+
+    private CompletableFuture<Void> sendToCliProvider(
+            String provider,
+            String channelId,
+            String input,
+            JsonObject openedFilesJson,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String requestedReasoningEffort
+    ) {
+        MarkerCliBridge bridge = cliBridges.get(provider);
+        if (bridge == null) {
+            CodexMessageHandler handler = new CodexMessageHandler(state, callbackFacade.getCallbackHandler());
+            handler.onError("CLI provider not registered: " + provider);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        // CLI providers reuse Codex streaming marker handling (content/thinking/session_id/tools).
+        CodexMessageHandler handler = new CodexMessageHandler(state, callbackFacade.getCallbackHandler());
+
+        String contextAppend = contextService.buildCodexContextAppend(openedFilesJson, fileTagPaths);
+        String finalInput = (input != null ? input : "") + contextAppend;
+        if (agentPrompt != null && !agentPrompt.isEmpty()) {
+            finalInput = finalInput + "\n\n## Agent Role and Instructions\n\n" + agentPrompt;
+            LOG.info("[Agent] ✓ Appending agentPrompt to user message for " + provider
+                    + " (length: " + agentPrompt.length() + " chars)");
+        }
+
+        String effort = normalizeCliReasoningEffort(
+                requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort()
+        );
+        String modelForCli = normalizeCliModelForProvider(provider, state.getModel());
+
+        LOG.info("[Lifecycle] sendToCli provider=" + provider
+                + " sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
+                + ", cwd=" + state.getCwd()
+                + ", modelRaw=" + state.getModel()
+                + ", modelCli=" + (modelForCli != null ? modelForCli : "(config-default)")
+                + ", effort=" + effort);
+
+        return bridge.sendMessage(
+                channelId,
+                finalInput,
+                state.getSessionId(),
+                state.getCwd(),
+                modelForCli != null ? modelForCli : "",
+                effort,
+                handler
+        ).thenApply(result -> null);
+    }
+
+    static String normalizeCliReasoningEffort(String effort) {
+        if (effort == null) {
+            return "medium";
+        }
+        String normalized = effort.trim().toLowerCase();
+        if ("low".equals(normalized) || "medium".equals(normalized) || "high".equals(normalized)) {
+            return normalized;
+        }
+        return "medium";
+    }
+
+    /**
+     * Map UI model selection to CLI model flag. Returns null to omit the flag
+     * (provider CLI uses its own default / config).
+     */
+    static String normalizeCliModelForProvider(String provider, String model) {
+        if (model == null) {
+            return null;
+        }
+        String trimmed = model.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String lower = trimmed.toLowerCase();
+        if ("__config_default__".equals(lower)
+                || "auto".equals(lower)
+                || "default".equals(lower)
+                || "(default)".equals(lower)
+                || "config-default".equals(lower)
+                || "config_default".equals(lower)
+                || "opencode default".equals(lower)
+                || "opencode-default".equals(lower)) {
+            return null;
+        }
+        // Leftovers after a provider switch without model reset. OpenCode
+        // legitimately supports OpenAI models, so gpt-* is only filtered for
+        // the other CLI providers.
+        if (lower.startsWith("claude-") || (lower.startsWith("gpt-") && !"opencode".equals(provider))) {
+            LOG.warn("[" + provider + "] Ignoring non-provider model leftover for CLI: " + trimmed);
+            return null;
+        }
+        if ("grok".equals(provider)) {
+            // Legacy UI stored upstream API id "grok-4.5"; CLI needs profile name "grok".
+            if ("grok-4.5".equals(lower) || "grok-4".equals(lower) || "grok-4.5-build".equals(lower)) {
+                LOG.info("[Grok] Remapping upstream model id '" + trimmed + "' to config profile 'grok'");
+                return "grok";
+            }
+        }
+        return trimmed;
+    }
+
+    /**
+     * @deprecated use {@link #normalizeCliModelForProvider(String, String)}
+     */
+    @Deprecated
+    static String normalizeGrokModelForCli(String model) {
+        return normalizeCliModelForProvider("grok", model);
     }
 
     private CompletableFuture<Void> sendToClaude(

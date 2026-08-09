@@ -19,8 +19,14 @@ export function formatSubagentDuration(
 
 function getRawContent(message: unknown): unknown[] {
   if (!message || typeof message !== 'object') return [];
-  const raw = message as Record<string, any>;
-  const content = raw.message?.content ?? raw.content;
+  const record = message as Record<string, unknown>;
+  const frontendRaw = record.raw && typeof record.raw === 'object'
+    ? record.raw as Record<string, unknown>
+    : undefined;
+  const nestedMessage = record.message && typeof record.message === 'object'
+    ? record.message as Record<string, unknown>
+    : undefined;
+  const content = frontendRaw?.content ?? nestedMessage?.content ?? record.content;
   return Array.isArray(content) ? content : [];
 }
 

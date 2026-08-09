@@ -2,8 +2,10 @@ package com.github.claudecodegui.session;
 
 import com.github.claudecodegui.session.ClaudeSession.Message;
 import com.github.claudecodegui.handler.SettingsHandler;
+import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.common.MessageCallback;
+import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.util.TokenUsageUtils;
 import com.github.claudecodegui.util.UsageCostCalculator;
@@ -30,6 +32,7 @@ public class ClaudeMessageHandler implements MessageCallback {
     private final MessageMerger messageMerger;
     private final ReplayDeduplicator replayDedup = new ReplayDeduplicator();
     private final Gson gson;
+    private final CodemossSettingsService settingsService;
 
     // Content accumulator for the current assistant message
     private final StringBuilder assistantContent = new StringBuilder();
@@ -66,12 +69,30 @@ public class ClaudeMessageHandler implements MessageCallback {
             MessageMerger messageMerger,
             Gson gson
     ) {
+        this(project, state, callbackHandler, messageParser, messageMerger, gson, null);
+    }
+
+    /**
+     * Constructor with an injectable settings service. The service is used to resolve the
+     * model actually billed for a turn (slot ID → provider-mapped real ID); tests inject a
+     * fake so pricing never depends on the developer's real config file.
+     */
+    ClaudeMessageHandler(
+            Project project,
+            SessionState state,
+            CallbackHandler callbackHandler,
+            MessageParser messageParser,
+            MessageMerger messageMerger,
+            Gson gson,
+            CodemossSettingsService settingsService
+    ) {
         this.project = project;
         this.state = state;
         this.callbackHandler = callbackHandler;
         this.messageParser = messageParser;
         this.messageMerger = messageMerger;
         this.gson = gson;
+        this.settingsService = settingsService != null ? settingsService : new CodemossSettingsService();
     }
 
     /**
@@ -362,7 +383,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                 JsonObject messageObj = mergedRaw.getAsJsonObject("message");
                 if (messageObj.has("usage") && messageObj.get("usage").isJsonObject()) {
                     JsonObject usage = messageObj.getAsJsonObject("usage");
-                    int usedTokens = TokenUsageUtils.extractUsedTokens(usage, state.getProvider());
+                    int usedTokens = TokenUsageUtils.extractContextTokens(usage, state.getProvider());
                     int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
@@ -592,6 +613,27 @@ public class ClaudeMessageHandler implements MessageCallback {
     }
 
     /**
+     * Resolve the model that should be billed for this turn.
+     *
+     * <p>The chat UI selects Claude slot IDs (e.g. {@code claude-sonnet-4-6[1m]}), which the
+     * active provider's env maps to real model IDs (e.g. {@code deepseek-v4-flash}) before the
+     * request reaches the API. Pricing must use the real ID — otherwise a custom price configured
+     * for the mapped model is never matched and the turn is billed at built-in Claude rates
+     * (same resolution used for the context limit at {@link ModelProviderHandler}).
+     */
+    private String resolvePricingModel(String model) {
+        try {
+            JsonObject claudeSettings = settingsService.readClaudeSettings();
+            if (claudeSettings != null && claudeSettings.has("env") && claudeSettings.get("env").isJsonObject()) {
+                return ModelProviderHandler.resolveConfiguredClaudeModel(model, claudeSettings.getAsJsonObject("env"));
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to resolve pricing model: " + e.getMessage());
+        }
+        return model;
+    }
+
+    /**
      * Handle the result message as a fallback for non-streaming mode.
      * In streaming mode, usage is updated via handleUsage() from [USAGE] tags.
      * In non-streaming mode, [USAGE] tags may not be emitted, so result.usage
@@ -613,7 +655,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                 // for the status bar and must keep its semantics.
                 JsonObject turnUsage = resultJson.getAsJsonObject("usage");
                 currentAssistantMessage.raw.add("turnUsage", turnUsage.deepCopy());
-                Double turnCostUsd = UsageCostCalculator.calculateTurnCostUsd(state.getProvider(), turnUsage, state.getModel());
+                Double turnCostUsd = UsageCostCalculator.calculateTurnCostUsd(state.getProvider(), turnUsage, resolvePricingModel(state.getModel()));
                 if (turnCostUsd != null) {
                     currentAssistantMessage.raw.addProperty("turnCostUsd", turnCostUsd);
                 }
@@ -628,7 +670,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                     if (msg != null) {
                         msg.add("usage", usageJson);
                     }
-                    int usedTokens = TokenUsageUtils.extractUsedTokens(usageJson, state.getProvider());
+                    int usedTokens = TokenUsageUtils.extractContextTokens(usageJson, state.getProvider());
                     int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
@@ -959,7 +1001,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         if (content == null || content.isEmpty() || !content.startsWith("{")) { return; }
         try {
             JsonObject usageJson = gson.fromJson(content, JsonObject.class);
-            int usedTokens = TokenUsageUtils.extractUsedTokens(usageJson, state.getProvider());
+            int usedTokens = TokenUsageUtils.extractContextTokens(usageJson, state.getProvider());
             int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
             ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
             // Notify webview of usage update

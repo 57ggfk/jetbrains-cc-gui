@@ -391,6 +391,78 @@ export const CODEX_MODELS: ModelInfo[] = [
 ];
 
 /**
+ * Grok CLI `-m` value must be a **config profile name** from
+ * `~/.grok/config.toml` (`[model."name"]`), NOT the nested `model = "grok-4.5"`
+ * upstream id. Your default profile is typically:
+ *
+ *   [models]
+ *   default = "grok"
+ *
+ *   [model."grok"]
+ *   model = "grok-4.5"
+ *   base_url = "..."
+ *   api_key = "..."
+ *
+ * Passing `-m grok-4.5` hits official cli-chat-proxy and ignores custom base_url/api_key.
+ */
+export const GROK_DEFAULT_MODEL_ID = 'grok';
+
+/**
+ * Grok CLI model picker entries.
+ * id = profile name for CLI `-m`; label can show the human-facing model name.
+ */
+export const GROK_MODELS: ModelInfo[] = [
+  {
+    id: GROK_DEFAULT_MODEL_ID,
+    label: 'Grok 4.5',
+    description: 'xAI Grok 4.5',
+  },
+];
+
+/** Kimi CLI default: omit `--model` when empty / auto. */
+export const KIMI_DEFAULT_MODEL_ID = 'auto';
+
+export const KIMI_MODELS: ModelInfo[] = [
+  {
+    id: KIMI_DEFAULT_MODEL_ID,
+    label: 'Kimi Auto',
+    description: 'Use Kimi CLI default model',
+  },
+  {
+    id: 'kimi-k2.5',
+    label: 'Kimi K2.5',
+    description: 'Moonshot Kimi coding model',
+  },
+  {
+    id: 'kimi-k3',
+    label: 'Kimi K3',
+    description: 'Moonshot Kimi K3',
+  },
+];
+
+/** OpenCode default: omit `--model` so CLI resolves its own default. */
+export const OPENCODE_DEFAULT_MODEL_ID = 'opencode-default';
+
+export const OPENCODE_MODELS: ModelInfo[] = [
+  {
+    id: OPENCODE_DEFAULT_MODEL_ID,
+    label: 'OpenCode Default',
+    description: 'Use OpenCode CLI default model',
+  },
+];
+
+/** PI default: omit `--model` so CLI resolves its own default. */
+export const PI_DEFAULT_MODEL_ID = 'auto';
+
+export const PI_MODELS: ModelInfo[] = [
+  {
+    id: PI_DEFAULT_MODEL_ID,
+    label: 'PI Auto',
+    description: 'Use PI CLI default model',
+  },
+];
+
+/**
  * Available models (backward compatibility)
  */
 export const AVAILABLE_MODELS = CLAUDE_MODELS;
@@ -403,6 +475,8 @@ export interface ProviderInfo {
   label: string;
   icon: string;
   enabled: boolean;
+  /** When true, show a Beta badge and first-click notice dialog. */
+  beta?: boolean;
 }
 
 /**
@@ -411,8 +485,10 @@ export interface ProviderInfo {
 export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'claude', label: 'Claude Code', icon: 'codicon-terminal', enabled: true },
   { id: 'codex', label: 'Codex', icon: 'codicon-terminal', enabled: true },
-  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: false },
-  { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: false },
+  { id: 'grok', label: 'Grok CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'kimi', label: 'Kimi CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: true, beta: true },
 ];
 
 /**
@@ -663,6 +739,10 @@ export interface ChatInputBoxProps {
   sdkInstalled?: boolean;
   /** SDK status loading state */
   sdkStatusLoading?: boolean;
+  /** SDK status query failed; chat remains available until the user retries */
+  sdkStatusError?: boolean;
+  /** Retry SDK status query callback */
+  onRetrySdkStatus?: () => void;
   /** Go to install SDK callback */
   onInstallSdk?: () => void;
   /** Show toast message */
