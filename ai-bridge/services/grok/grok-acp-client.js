@@ -17,6 +17,7 @@ import {
   normalizeAuthMethod,
   applyGrokBaseUrlEnv,
   resolveEffectiveGrokAuth,
+  normalizeGrokModelId,
 } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost, isTerminalMethod } from './acp-terminal-host.js';
@@ -138,13 +139,15 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
     }
   }
 
+  const effectiveModel = normalizeGrokModelId(model);
+
   if (!activeSessionId) {
     const newParams = {
       cwd: workCwd,
       mcpServers: [],
     };
-    if (model && model.trim()) {
-      newParams._meta = { ...(newParams._meta || {}), modelId: model.trim() };
+    if (effectiveModel) {
+      newParams._meta = { ...(newParams._meta || {}), modelId: effectiveModel };
     }
     sessionMeta = await client.request('session/new', newParams);
     activeSessionId = sessionMeta.sessionId || sessionMeta.session?.sessionId || '';
@@ -157,11 +160,11 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
   client.activeSessionId = activeSessionId;
 
   // Best-effort model set
-  if (model && model.trim()) {
+  if (effectiveModel) {
     try {
       await client.request('session/set_model', {
         sessionId: activeSessionId,
-        modelId: model.trim(),
+        modelId: effectiveModel,
       });
     } catch {
       // optional

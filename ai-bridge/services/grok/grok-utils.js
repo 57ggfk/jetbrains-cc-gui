@@ -28,6 +28,18 @@ export function resolveGrokBinary() {
   return explicit || 'grok';
 }
 
+/**
+ * Normalize model identifier for Grok.
+ * Sentinel or fallback values like "grok", "", "default", "(default)" map to "grok-4.5".
+ */
+export function normalizeGrokModelId(modelId) {
+  const trimmed = String(modelId || '').trim();
+  if (!trimmed || trimmed.toLowerCase() === 'grok' || trimmed.toLowerCase() === 'default' || trimmed.toLowerCase() === '(default)') {
+    return 'grok-4.5';
+  }
+  return trimmed;
+}
+
 /** GROK_HOME or default ~/.grok */
 export function resolveGrokHomeDir() {
   const env = process.env.GROK_HOME;

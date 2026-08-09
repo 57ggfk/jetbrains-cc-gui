@@ -187,8 +187,9 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         }
       };
       const applyGrokModel = makeCliModelApplier((id) => {
-        restoredGrokModel = id;
-        setSelectedGrokModel(id);
+        const normalized = id === 'grok' ? GROK_DEFAULT_MODEL_ID : id;
+        restoredGrokModel = normalized;
+        setSelectedGrokModel(normalized);
       });
       const applyKimiModel = makeCliModelApplier((id) => {
         restoredKimiModel = id;

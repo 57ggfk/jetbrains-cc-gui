@@ -405,17 +405,32 @@ export const CODEX_MODELS: ModelInfo[] = [
  *
  * Passing `-m grok-4.5` hits official cli-chat-proxy and ignores custom base_url/api_key.
  */
-export const GROK_DEFAULT_MODEL_ID = 'grok';
+export const GROK_DEFAULT_MODEL_ID = 'grok-4.5';
 
 /**
  * Grok CLI model picker entries.
- * id = profile name for CLI `-m`; label can show the human-facing model name.
+ * id = model ID passed via ACP session/set_model or _meta.modelId.
  */
 export const GROK_MODELS: ModelInfo[] = [
   {
     id: GROK_DEFAULT_MODEL_ID,
     label: 'Grok 4.5',
     description: 'xAI Grok 4.5',
+  },
+  {
+    id: 'grok-3',
+    label: 'Grok 3',
+    description: 'xAI Grok 3',
+  },
+  {
+    id: 'grok-2',
+    label: 'Grok 2',
+    description: 'xAI Grok 2',
+  },
+  {
+    id: 'grok-beta',
+    label: 'Grok Beta',
+    description: 'xAI Grok Beta',
   },
 ];
 
