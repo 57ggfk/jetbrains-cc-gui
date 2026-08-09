@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sendBridgeEvent } from '../../utils/bridge';
 import type { ModelInfo } from '../../components/ChatInputBox/types';
-import { CODEX_MODELS, KIMI_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
+import { CODEX_MODELS, GROK_MODELS, KIMI_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
 import { subscribeActiveCodexProvider } from '../../utils/runtimeProviderCapabilities';
 
@@ -11,6 +11,7 @@ type CliModelsByProvider = Record<string, ModelInfo[]>;
 const CLI_MODELS_TIMEOUT_MS = 15_000;
 
 function fallbackModels(providerId: string): ModelInfo[] {
+  if (providerId === 'grok') return GROK_MODELS;
   if (providerId === 'kimi') return KIMI_MODELS;
   if (providerId === 'opencode') return OPENCODE_MODELS;
   if (providerId === 'pi') return PI_MODELS;
@@ -22,11 +23,10 @@ function fallbackModels(providerId: string): ModelInfo[] {
  * Providers whose model list is discovered dynamically via `get_cli_models`.
  * Codex is included even though it is not a CLI-only provider: its list comes
  * from ~/.codex/config.toml + model_catalog_json, same as the codex CLI picker.
- * Grok is excluded (static profile list).
  */
 function supportsDynamicModels(providerId: string): boolean {
   if (providerId === 'codex') return true;
-  return isCliOnlyProvider(providerId) && providerId !== 'grok';
+  return isCliOnlyProvider(providerId);
 }
 
 function normalizeModels(raw: unknown): ModelInfo[] {
