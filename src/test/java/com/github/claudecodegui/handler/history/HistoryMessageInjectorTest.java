@@ -34,7 +34,7 @@ public class HistoryMessageInjectorTest {
         injector.handleLoadSession(
                 "{\"sessionId\":\"hist-codex\",\"provider\":\"codex\"}",
                 "claude",
-                (sessionId, projectPath, provider) -> callbackInvoked[0] = true
+                (sessionId, projectPath, provider, model) -> callbackInvoked[0] = true
         );
 
         assertEquals("hist-codex", injector.loadedCodexSessionId);
@@ -44,15 +44,16 @@ public class HistoryMessageInjectorTest {
     @Test
     public void handleLoadSessionUsesPayloadProviderForClaudeEvenWhenCurrentProviderIsCodex() {
         RecordingHistoryMessageInjector injector = new RecordingHistoryMessageInjector(createContext("D:/project/demo"));
-        String[] callbackArgs = new String[3];
+        String[] callbackArgs = new String[4];
 
         injector.handleLoadSession(
-                "{\"sessionId\":\"hist-claude\",\"provider\":\"claude\"}",
+                "{\"sessionId\":\"hist-claude\",\"provider\":\"claude\",\"model\":\"claude-sonnet-4-6\"}",
                 "codex",
-                (sessionId, projectPath, provider) -> {
+                (sessionId, projectPath, provider, model) -> {
                     callbackArgs[0] = sessionId;
                     callbackArgs[1] = projectPath;
                     callbackArgs[2] = provider;
+                    callbackArgs[3] = model;
                 }
         );
 
@@ -60,6 +61,7 @@ public class HistoryMessageInjectorTest {
         assertEquals("hist-claude", callbackArgs[0]);
         assertEquals("D:/project/demo", callbackArgs[1]);
         assertEquals("claude", callbackArgs[2]);
+        assertEquals("claude-sonnet-4-6", callbackArgs[3]);
     }
 
     @Test
@@ -70,7 +72,7 @@ public class HistoryMessageInjectorTest {
         injector.handleLoadSession(
                 "{\"sessionId\":\"hist-codex\",\"provider\":\"codex\"}",
                 "claude",
-                (sessionId, projectPath, provider) -> callbackInvoked[0] = true
+                (sessionId, projectPath, provider, model) -> callbackInvoked[0] = true
         );
 
         assertNull(injector.loadedCodexSessionId);
@@ -831,6 +833,11 @@ public class HistoryMessageInjectorTest {
 
         @Override
         void loadCodexSession(String sessionId) {
+            loadCodexSession(sessionId, null);
+        }
+
+        @Override
+        void loadCodexSession(String sessionId, String model) {
             this.loadedCodexSessionId = sessionId;
         }
 

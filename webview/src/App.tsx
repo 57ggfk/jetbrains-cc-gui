@@ -157,6 +157,8 @@ const App = () => {
     setPermissionMode, setCurrentProvider,
     setClaudePermissionMode, setCodexPermissionMode,
     setSelectedClaudeModel, setSelectedCodexModel,
+    setSelectedGrokModel, setSelectedKimiModel,
+    setSelectedOpenCodeModel, setSelectedPiModel,
     setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled, setStreamingEnabledSetting,
@@ -272,6 +274,37 @@ const App = () => {
     setTaskEvents,
     setSubagentHistories,
     clearToasts, addToast, t,
+    applyHistoryModel: (provider, model, agent) => {
+      // Switch provider first when history row differs, then apply model.
+      if (provider && provider !== currentProvider) {
+        handleProviderSelect(provider);
+      }
+      if (model) {
+        // handleModelSelect reads currentProvider; after provider switch state
+        // may not have flushed yet — send bridge + setter for the target provider.
+        if (provider === 'codex') {
+          setSelectedCodexModel(model);
+          sendBridgeEvent('set_model', model);
+        } else if (provider === 'grok') {
+          setSelectedGrokModel(model);
+          sendBridgeEvent('set_model', model);
+        } else if (provider === 'kimi') {
+          setSelectedKimiModel(model);
+          sendBridgeEvent('set_model', model);
+        } else if (provider === 'opencode') {
+          setSelectedOpenCodeModel(model);
+          sendBridgeEvent('set_model', model);
+        } else if (provider === 'pi') {
+          setSelectedPiModel(model);
+          sendBridgeEvent('set_model', model);
+        } else {
+          handleModelSelect(model);
+        }
+      }
+      if (agent && provider === 'claude') {
+        handleAgentSelect({ id: agent, name: agent, prompt: '' });
+      }
+    },
   });
 
   useHistoryLoader({ currentView, currentProvider });
@@ -500,84 +533,95 @@ const App = () => {
           permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}
           onPermissionDialogTimeoutChange={setPermissionDialogTimeoutSeconds}
         />
-      ) : currentView === 'chat' ? (
-        <ChatScreen
-          mergedMessages={mergedMessages}
-          sessionTitle={sessionTitle}
-          getMessageText={getMessageText}
-          getContentBlocks={getContentBlocks}
-          findToolResult={findToolResult}
-          getToolResultRaw={getToolResultRaw}
-          subagents={subagents}
-          globalTodos={globalTodos}
-          filteredFileChanges={filteredFileChanges}
-          subagentHistoryCtxValue={subagentHistoryCtxValue}
-          sessionIdCtxValue={sessionIdCtxValue}
-          chatInputRef={chatInputRef}
-          messagesContainerRef={messagesContainerRef}
-          messagesEndRef={messagesEndRef}
-          inputAreaRef={inputAreaRef}
-          messageNodeMapRef={messageNodeMapRef}
-          userCollapsedRef={userCollapsedRef}
-          messageListRef={messageListRef}
-          isAutoScrollingRef={isAutoScrollingRef}
-          anchorCollapsedCount={anchorCollapsedCount}
-          setAnchorCollapsedCount={setAnchorCollapsedCount}
-          onMessageNodeRef={handleMessageNodeRef}
-          statusPanelExpanded={statusPanelExpanded}
-          forceStatusUpdate={forceStatusUpdate}
-          onUndoFile={handleUndoFile}
-          onDiscardAll={onDiscardAll}
-          onKeepAll={handleKeepAll}
-          onSubmit={handleSubmit}
-          onInterrupt={interruptSession}
-          onRewind={handleOpenRewindSelectDialog}
-          onNavigateToProviderSettings={handleNavigateToProviderSettings}
-          onProviderSelect={wrappedHandleProviderSelect}
-          currentProvider={currentProvider}
-          selectedModel={selectedModel}
-          permissionMode={permissionMode}
-          selectedAgent={selectedAgent}
-          sdkStatusLoading={sdkStatusLoading}
-          sdkStatusError={sdkStatusError}
-          onRetrySdkStatus={retrySdkStatus}
-          currentSdkInstalled={currentSdkInstalled}
-          activeProviderConfig={activeProviderConfig}
-          claudeSettingsAlwaysThinkingEnabled={claudeSettingsAlwaysThinkingEnabled}
-          reasoningEffort={reasoningEffort}
-          codexFastMode={codexFastMode}
-          streamingEnabledSetting={streamingEnabledSetting}
-          sendShortcut={sendShortcut}
-          autoOpenFileEnabled={autoOpenFileEnabled}
-          longContextEnabled={longContextEnabled}
-          usagePercentage={usagePercentage}
-          usageUsedTokens={usageUsedTokens}
-          usageMaxTokens={usageMaxTokens}
-          onModeSelect={handleModeSelect}
-          onModelSelect={handleModelSelect}
-          onAgentSelect={handleAgentSelect}
-          onReasoningChange={handleReasoningChange}
-          onCodexFastModeChange={handleCodexFastModeChange}
-          onToggleThinking={handleToggleThinking}
-          onStreamingEnabledChange={handleStreamingEnabledChange}
-          onAutoOpenFileEnabledChange={handleAutoOpenFileEnabledChange}
-          onLongContextChange={handleLongContextChange}
-          messageQueue={messageQueue}
-          onRemoveFromQueue={dequeueMessage}
-        />
       ) : (
-        <HistoryView
-          historyData={historyData}
-          currentProvider={currentProvider}
-          currentSessionId={currentSessionId}
-          onLoadSession={loadHistorySession}
-          onDeleteSession={deleteHistorySession}
-          onDeleteSessions={deleteHistorySessions}
-          onExportSession={exportHistorySession}
-          onToggleFavorite={toggleFavoriteSession}
-          onUpdateTitle={updateHistoryTitle}
-          onConvertToCliSession={convertToCliSession}
-        />
+        <>
+          {/* Keep ChatScreen mounted while browsing history so model catalog,
+              scroll position, and draft attachments survive history ↔ chat. */}
+          <div
+            style={currentView === 'chat'
+              ? { display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', overflow: 'hidden' }
+              : { display: 'none' }}
+          >
+            <ChatScreen
+              mergedMessages={mergedMessages}
+              sessionTitle={sessionTitle}
+              getMessageText={getMessageText}
+              getContentBlocks={getContentBlocks}
+              findToolResult={findToolResult}
+              getToolResultRaw={getToolResultRaw}
+              subagents={subagents}
+              globalTodos={globalTodos}
+              filteredFileChanges={filteredFileChanges}
+              subagentHistoryCtxValue={subagentHistoryCtxValue}
+              sessionIdCtxValue={sessionIdCtxValue}
+              chatInputRef={chatInputRef}
+              messagesContainerRef={messagesContainerRef}
+              messagesEndRef={messagesEndRef}
+              inputAreaRef={inputAreaRef}
+              messageNodeMapRef={messageNodeMapRef}
+              userCollapsedRef={userCollapsedRef}
+              messageListRef={messageListRef}
+              isAutoScrollingRef={isAutoScrollingRef}
+              anchorCollapsedCount={anchorCollapsedCount}
+              setAnchorCollapsedCount={setAnchorCollapsedCount}
+              onMessageNodeRef={handleMessageNodeRef}
+              statusPanelExpanded={statusPanelExpanded}
+              forceStatusUpdate={forceStatusUpdate}
+              onUndoFile={handleUndoFile}
+              onDiscardAll={onDiscardAll}
+              onKeepAll={handleKeepAll}
+              onSubmit={handleSubmit}
+              onInterrupt={interruptSession}
+              onRewind={handleOpenRewindSelectDialog}
+              onNavigateToProviderSettings={handleNavigateToProviderSettings}
+              onProviderSelect={wrappedHandleProviderSelect}
+              currentProvider={currentProvider}
+              selectedModel={selectedModel}
+              permissionMode={permissionMode}
+              selectedAgent={selectedAgent}
+              sdkStatusLoading={sdkStatusLoading}
+              sdkStatusError={sdkStatusError}
+              onRetrySdkStatus={retrySdkStatus}
+              currentSdkInstalled={currentSdkInstalled}
+              activeProviderConfig={activeProviderConfig}
+              claudeSettingsAlwaysThinkingEnabled={claudeSettingsAlwaysThinkingEnabled}
+              reasoningEffort={reasoningEffort}
+              codexFastMode={codexFastMode}
+              streamingEnabledSetting={streamingEnabledSetting}
+              sendShortcut={sendShortcut}
+              autoOpenFileEnabled={autoOpenFileEnabled}
+              longContextEnabled={longContextEnabled}
+              usagePercentage={usagePercentage}
+              usageUsedTokens={usageUsedTokens}
+              usageMaxTokens={usageMaxTokens}
+              onModeSelect={handleModeSelect}
+              onModelSelect={handleModelSelect}
+              onAgentSelect={handleAgentSelect}
+              onReasoningChange={handleReasoningChange}
+              onCodexFastModeChange={handleCodexFastModeChange}
+              onToggleThinking={handleToggleThinking}
+              onStreamingEnabledChange={handleStreamingEnabledChange}
+              onAutoOpenFileEnabledChange={handleAutoOpenFileEnabledChange}
+              onLongContextChange={handleLongContextChange}
+              messageQueue={messageQueue}
+              onRemoveFromQueue={dequeueMessage}
+            />
+          </div>
+          {currentView === 'history' && (
+            <HistoryView
+              historyData={historyData}
+              currentProvider={currentProvider}
+              currentSessionId={currentSessionId}
+              onLoadSession={loadHistorySession}
+              onDeleteSession={deleteHistorySession}
+              onDeleteSessions={deleteHistorySessions}
+              onExportSession={exportHistorySession}
+              onToggleFavorite={toggleFavoriteSession}
+              onUpdateTitle={updateHistoryTitle}
+              onConvertToCliSession={convertToCliSession}
+            />
+          )}
+        </>
       )}
 
       <div id="image-preview-root" />

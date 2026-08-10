@@ -406,7 +406,7 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(permissionHandler);
 
         HistoryHandler historyHandler = new HistoryHandler(handlerContext);
-        historyHandler.setSessionLoadCallback((sessionId, projectPath, provider) -> {
+        historyHandler.setSessionLoadCallback((sessionId, projectPath, provider, model) -> {
             ClaudeSession current = host.getSession();
             boolean sameSession = current != null
                     && sessionId != null
@@ -417,9 +417,12 @@ public class ChatWindowDelegate {
                 // Re-opening the very session already active: soft-reload its transcript
                 // instead of interrupting the in-flight turn.
                 LOG.info("[HistoryHandler] Same-session resume, soft-reloading transcript: " + sessionId);
+                if (model != null && !model.trim().isEmpty()) {
+                    current.setModel(model.trim());
+                }
                 host.reloadActiveSessionMessages();
             } else {
-                host.getSessionLifecycleManager().loadHistorySession(sessionId, projectPath, provider);
+                host.getSessionLifecycleManager().loadHistorySession(sessionId, projectPath, provider, model);
             }
         });
         host.setHistoryHandler(historyHandler);

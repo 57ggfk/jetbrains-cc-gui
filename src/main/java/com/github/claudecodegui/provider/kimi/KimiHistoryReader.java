@@ -1,6 +1,7 @@
 package com.github.claudecodegui.provider.kimi;
 
 import com.github.claudecodegui.bridge.NodeDetector;
+import com.github.claudecodegui.provider.common.HistoryPathMatcher;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -20,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -607,35 +607,11 @@ public class KimiHistoryReader {
     }
 
     static String normalizePath(String path) {
-        if (path == null) {
-            return "";
-        }
-        String p = path.trim().replace('\\', '/');
-        if (p.length() >= 2 && p.charAt(1) == ':') {
-            p = Character.toLowerCase(p.charAt(0)) + p.substring(1);
-        }
-        while (p.endsWith("/") && p.length() > 1) {
-            p = p.substring(0, p.length() - 1);
-        }
-        return p;
+        return HistoryPathMatcher.normalize(path);
     }
 
     static boolean pathsMatch(String sessionCwd, String projectPath) {
-        if (sessionCwd == null || projectPath == null) {
-            return false;
-        }
-        String a = normalizePath(sessionCwd).toLowerCase(Locale.ROOT);
-        String b = normalizePath(projectPath).toLowerCase(Locale.ROOT);
-        if (a.equals(b)) {
-            return true;
-        }
-        if (a.startsWith("/private/") && a.substring("/private".length()).equals(b)) {
-            return true;
-        }
-        if (b.startsWith("/private/") && b.substring("/private".length()).equals(a)) {
-            return true;
-        }
-        return false;
+        return HistoryPathMatcher.matches(sessionCwd, projectPath);
     }
 
     static boolean isSafeSessionId(String sessionId) {

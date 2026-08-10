@@ -197,13 +197,22 @@ public class SessionLifecycleManager {
      * Load a history session by ID.
      */
     public void loadHistorySession(String sessionId, String projectPath) {
-        loadHistorySession(sessionId, projectPath, null);
+        loadHistorySession(sessionId, projectPath, null, null);
     }
 
     /**
      * Load a history session by ID and provider.
      */
     public void loadHistorySession(String sessionId, String projectPath, String provider) {
+        loadHistorySession(sessionId, projectPath, provider, null);
+    }
+
+    /**
+     * Load a history session by ID, provider, and optional model from the history row.
+     *
+     * @param model when non-blank, restores that model instead of keeping the previous UI selection
+     */
+    public void loadHistorySession(String sessionId, String projectPath, String provider, String model) {
         LOG.info("Loading history session: " + sessionId + " from project: " + projectPath);
 
         ClaudeSession oldSession = host.getSession();
@@ -224,8 +233,10 @@ public class SessionLifecycleManager {
             previousProvider = defaultSession.getProvider();
             previousModel = defaultSession.getModel();
         }
+        String modelToRestore = (model != null && !model.trim().isEmpty()) ? model.trim() : previousModel;
         LOG.info("Preserving session state when loading history: mode=" + previousPermissionMode
-                         + ", provider=" + previousProvider + ", model=" + previousModel);
+                         + ", provider=" + previousProvider + ", model=" + modelToRestore
+                         + (model != null && !model.trim().isEmpty() ? " (from history)" : " (previous)"));
 
         host.invalidateSessionCallbacks();
         long clearBarrierSeq = host.getStreamCoalescer().resetStreamState();
@@ -251,9 +262,9 @@ public class SessionLifecycleManager {
                     host.getCliBridges());
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
-            newSession.setModel(previousModel);
+            newSession.setModel(modelToRestore);
             LOG.info("Restored session state to loaded session: mode=" + previousPermissionMode
-                             + ", provider=" + newSession.getProvider() + ", model=" + previousModel);
+                             + ", provider=" + newSession.getProvider() + ", model=" + modelToRestore);
 
             host.setSession(newSession);
             host.getHandlerContext().setSession(newSession);

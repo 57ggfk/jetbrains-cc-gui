@@ -1,6 +1,7 @@
 package com.github.claudecodegui.provider.opencode;
 
 import com.github.claudecodegui.bridge.NodeDetector;
+import com.github.claudecodegui.provider.common.HistoryPathMatcher;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -25,7 +26,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -105,6 +105,10 @@ public class OpenCodeHistoryReader {
         public String cwd;
         public long fileSize;
         public String provider = "opencode";
+        /** Restored model id (e.g. opencode/deepseek-v4-flash-free). Optional. */
+        public String model;
+        /** OpenCode agent name when known. Optional. */
+        public String agent;
     }
 
     public String getSessionsForProjectAsJson(String projectPath) {
@@ -167,10 +171,13 @@ public class OpenCodeHistoryReader {
             if (conn == null || !tableExists(conn, "session")) {
                 return sessions;
             }
+            // Skip child/subagent sessions (parent_id set) so the main list stays clean.
             String sql = """
                     SELECT s.id, s.directory, s.title, s.time_created, s.time_updated,
+                           s.model, s.agent, s.parent_id,
                            (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS message_count
                     FROM session s
+                    WHERE s.parent_id IS NULL OR TRIM(s.parent_id) = ''
                     """;
             try (Statement st = conn.createStatement();
                  ResultSet rs = st.executeQuery(sql)) {
@@ -187,6 +194,11 @@ public class OpenCodeHistoryReader {
                     info.lastTimestamp = rs.getLong("time_updated");
                     info.messageCount = rs.getInt("message_count");
                     info.provider = "opencode";
+                    info.model = normalizeOpenCodeModel(rs.getString("model"));
+                    info.agent = blankToNull(rs.getString("agent"));
+                    if (info.model == null) {
+                        info.model = inferModelFromLastAssistant(conn, info.sessionId);
+                    }
                     try {
                         info.fileSize = Files.size(databasePath);
                     } catch (IOException ignored) {
@@ -211,6 +223,90 @@ public class OpenCodeHistoryReader {
             LOG.warn("[OpenCodeHistoryReader] SQLite list failed (" + databasePath + "): " + e.getMessage());
         }
         return sessions;
+    }
+
+    private String inferModelFromLastAssistant(Connection conn, String sessionId) {
+        String sql = """
+                SELECT data FROM message
+                WHERE session_id = ?
+                ORDER BY time_created DESC
+                LIMIT 40
+                """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, sessionId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    JsonObject msg = parseObject(rs.getString("data"));
+                    if (msg == null || !"assistant".equals(text(msg, "role"))) {
+                        continue;
+                    }
+                    String model = normalizeOpenCodeModelFromMessage(msg);
+                    if (model != null) {
+                        return model;
+                    }
+                }
+            }
+        } catch (SQLException ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * OpenCode stores model as JSON {@code {"id":"…","providerID":"…"}} or a plain string.
+     * UI / CLI expect {@code provider/model}.
+     */
+    static String normalizeOpenCodeModel(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("{")) {
+            JsonObject obj = parseObject(trimmed);
+            if (obj == null) {
+                return null;
+            }
+            return normalizeOpenCodeModelFromMessage(obj);
+        }
+        return trimmed;
+    }
+
+    static String normalizeOpenCodeModelFromMessage(JsonObject msg) {
+        if (msg == null) {
+            return null;
+        }
+        if (msg.has("model") && msg.get("model").isJsonObject()) {
+            JsonObject nested = msg.getAsJsonObject("model");
+            String provider = text(nested, "providerID");
+            String modelId = text(nested, "modelID");
+            if (modelId == null || modelId.isBlank()) {
+                modelId = text(nested, "id");
+            }
+            if (modelId != null && !modelId.isBlank()) {
+                if (provider != null && !provider.isBlank() && !modelId.contains("/")) {
+                    return provider + "/" + modelId;
+                }
+                return modelId;
+            }
+        }
+        String provider = text(msg, "providerID");
+        String modelId = text(msg, "modelID");
+        if (modelId == null || modelId.isBlank()) {
+            modelId = text(msg, "id");
+        }
+        if (modelId == null || modelId.isBlank()) {
+            return null;
+        }
+        if (provider != null && !provider.isBlank() && !modelId.contains("/")) {
+            return provider + "/" + modelId;
+        }
+        return modelId;
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private String firstUserTitleFromDb(Connection conn, String sessionId) {
@@ -425,12 +521,28 @@ public class OpenCodeHistoryReader {
             if (id == null || id.isBlank() || !isSafeSessionId(id)) {
                 return null;
             }
+            // Skip child/subagent sessions in the main list.
+            String parentId = text(obj, "parentID");
+            if (parentId == null || parentId.isBlank()) {
+                parentId = text(obj, "parent_id");
+            }
+            if (parentId != null && !parentId.isBlank()) {
+                return null;
+            }
 
             SessionInfo info = new SessionInfo();
             info.sessionId = id;
             info.cwd = text(obj, "directory");
             info.provider = "opencode";
             info.title = text(obj, "title");
+            info.agent = blankToNull(text(obj, "agent"));
+            if (obj.has("model") && !obj.get("model").isJsonNull()) {
+                if (obj.get("model").isJsonPrimitive()) {
+                    info.model = normalizeOpenCodeModel(obj.get("model").getAsString());
+                } else if (obj.get("model").isJsonObject()) {
+                    info.model = normalizeOpenCodeModelFromMessage(obj.getAsJsonObject("model"));
+                }
+            }
             info.fileSize = Files.size(file);
 
             JsonObject time = obj.has("time") && obj.get("time").isJsonObject()
@@ -868,26 +980,11 @@ public class OpenCodeHistoryReader {
     }
 
     static String normalizePath(String path) {
-        if (path == null) {
-            return "";
-        }
-        String p = path.trim().replace('\\', '/');
-        if (p.length() >= 2 && p.charAt(1) == ':') {
-            p = Character.toLowerCase(p.charAt(0)) + p.substring(1);
-        }
-        while (p.endsWith("/") && p.length() > 1) {
-            p = p.substring(0, p.length() - 1);
-        }
-        return p;
+        return HistoryPathMatcher.normalize(path);
     }
 
     static boolean pathsMatch(String sessionCwd, String projectPath) {
-        if (sessionCwd == null || projectPath == null) {
-            return false;
-        }
-        String a = normalizePath(sessionCwd).toLowerCase(Locale.ROOT);
-        String b = normalizePath(projectPath).toLowerCase(Locale.ROOT);
-        return a.equals(b);
+        return HistoryPathMatcher.matches(sessionCwd, projectPath);
     }
 
     static boolean isSafeSessionId(String sessionId) {

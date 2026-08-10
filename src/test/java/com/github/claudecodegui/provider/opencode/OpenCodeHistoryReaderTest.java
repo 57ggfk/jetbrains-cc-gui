@@ -26,6 +26,33 @@ public class OpenCodeHistoryReaderTest {
     }
 
     @Test
+    public void pathsMatchAcceptsParentAndChildDirectories() {
+        assertTrue(OpenCodeHistoryReader.pathsMatch(
+                "/Users/me/proj",
+                "/Users/me/proj/ai-bridge"));
+        assertTrue(OpenCodeHistoryReader.pathsMatch(
+                "/Users/me/proj/ai-bridge",
+                "/Users/me/proj"));
+        assertTrue(OpenCodeHistoryReader.pathsMatch(
+                "/private/tmp/work",
+                "/tmp/work"));
+        assertFalse(OpenCodeHistoryReader.pathsMatch(
+                "/Users/me/proj-a",
+                "/Users/me/proj-b"));
+    }
+
+    @Test
+    public void normalizeOpenCodeModelParsesJsonAndPlainIds() {
+        assertEquals(
+                "opencode/deepseek-v4-flash-free",
+                OpenCodeHistoryReader.normalizeOpenCodeModel(
+                        "{\"id\":\"deepseek-v4-flash-free\",\"providerID\":\"opencode\",\"variant\":\"default\"}"));
+        assertEquals(
+                "openai/gpt-5",
+                OpenCodeHistoryReader.normalizeOpenCodeModel("openai/gpt-5"));
+    }
+
+    @Test
     public void listsAndLoadsSessionFromStorageLayout() throws Exception {
         Path storage = Files.createTempDirectory("oc-history-test");
         String sessionId = "ses_test123abc";
@@ -136,7 +163,9 @@ public class OpenCodeHistoryReaderTest {
                       title text NOT NULL,
                       version text NOT NULL,
                       time_created integer NOT NULL,
-                      time_updated integer NOT NULL
+                      time_updated integer NOT NULL,
+                      model text,
+                      agent text
                     )
                     """);
             st.execute("""
@@ -161,8 +190,13 @@ public class OpenCodeHistoryReaderTest {
             st.execute("INSERT INTO project (id, worktree, vcs, name, time_created, time_updated, sandboxes) "
                     + "VALUES ('proj1', '" + projectPath + "', 'git', null, 1, 2, '[]')");
             st.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, "
-                    + "time_created, time_updated) VALUES ('" + sessionId + "', 'proj1', null, 'slug', "
-                    + "'" + projectPath + "', 'SQLite OpenCode chat', '1.4.6', 1000, 2000)");
+                    + "time_created, time_updated, model, agent) VALUES ('" + sessionId + "', 'proj1', null, 'slug', "
+                    + "'" + projectPath + "', 'SQLite OpenCode chat', '1.4.6', 1000, 2000, "
+                    + "'{\"id\":\"deepseek-v4-flash-free\",\"providerID\":\"opencode\"}', 'build')");
+            // Child session should be filtered from the main list
+            st.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, "
+                    + "time_created, time_updated, model, agent) VALUES ('ses_child_1', 'proj1', '" + sessionId
+                    + "', 'child', '" + projectPath + "', 'Background child', '1.4.6', 1001, 2001, null, null)");
             st.execute("INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES "
                     + "('" + userMsgId + "', '" + sessionId + "', 1001, 1001, "
                     + "'{\"role\":\"user\",\"time\":{\"created\":1001}}')");
@@ -191,6 +225,11 @@ public class OpenCodeHistoryReaderTest {
         assertEquals(sessionId, listed.get(0).sessionId);
         assertEquals("SQLite OpenCode chat", listed.get(0).title);
         assertEquals(2, listed.get(0).messageCount);
+        assertEquals("opencode/deepseek-v4-flash-free", listed.get(0).model);
+        assertEquals("build", listed.get(0).agent);
+
+        // Parent/child path match: session under project root still matches
+        assertEquals(1, reader.listSessionsForProject(projectPath + "/src").size());
 
         List<JsonObject> messages = reader.getSessionMessages(sessionId, projectPath);
         assertFalse(messages.isEmpty());
