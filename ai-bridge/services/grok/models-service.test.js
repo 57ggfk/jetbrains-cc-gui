@@ -39,6 +39,20 @@ test('parseModelsCacheJson extracts models from models_cache.json payload', () =
   assert.ok(seen.has('grok-3'));
 });
 
+test('parseModelsCacheJson skips scalar metadata keys in root-map layout', () => {
+  const json = JSON.stringify({
+    fetched_at: '2026-08-09T12:04:19Z',
+    'grok-4.5': {
+      id: 'grok-4.5',
+      name: 'Grok 4.5',
+    },
+  });
+
+  const { models } = parseModelsCacheJson(json);
+  assert.equal(models.length, 1);
+  assert.deepEqual(models[0], { id: 'grok-4.5', label: 'Grok 4.5', description: 'grok-4.5' });
+});
+
 test('parseGrokProfilesFromToml extracts custom profiles from config.toml', () => {
   const toml = `
 [models]

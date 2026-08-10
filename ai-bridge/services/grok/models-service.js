@@ -22,13 +22,16 @@ export function parseModelsCacheJson(jsonText) {
     if (modelsObj && typeof modelsObj === 'object') {
       for (const [id, entry] of Object.entries(modelsObj)) {
         if (!id || seen.has(id)) continue;
-        const info = entry?.info || entry || {};
-        if (info.hidden === true) continue;
+        // Skip scalar metadata keys (e.g. `fetched_at`) that appear in
+        // root-map layouts without a `models` wrapper.
+        if (!entry || typeof entry !== 'object') continue;
+        const raw = entry.info && typeof entry.info === 'object' ? entry.info : entry;
+        if (raw.hidden === true) continue;
         seen.add(id);
         models.push({
           id,
-          label: info.name || info.id || id,
-          description: info.description || info.model || id,
+          label: raw.name || raw.id || id,
+          description: raw.description || raw.model || id,
         });
       }
     }
@@ -43,6 +46,8 @@ export function parseGrokProfilesFromToml(tomlText, seenSet = new Set()) {
   let defaultModel = null;
   const src = String(tomlText || '');
 
+  // Grok keeps `default` inside the `[models]` section (not at TOML top level),
+  // so this intentionally matches anywhere in the file, first occurrence wins.
   const defaultMatch = src.match(/^\s*default\s*=\s*"([^"]+)"/m);
   if (defaultMatch) {
     defaultModel = defaultMatch[1].trim();
@@ -98,6 +103,8 @@ export function listModels() {
   }
 
   if (allModels.length === 0) {
+    // Last-resort static list, used only when neither the CLI's models cache
+    // nor config.toml profiles exist (e.g. grok CLI never ran).
     allModels = [
       { id: 'grok-4.5', label: 'Grok 4.5', description: "SpaceXAI's new frontier model" },
       { id: 'grok-3', label: 'Grok 3', description: 'xAI Grok 3' },
