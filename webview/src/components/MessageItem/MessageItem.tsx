@@ -45,6 +45,12 @@ export interface MessageItemProps {
 /** Map provider id to a human-readable label used in UI text. */
 function getProviderDisplayName(providerId?: string): string {
   if (providerId === 'codex') return 'Codex';
+  if (providerId === 'grok') return 'Grok';
+  if (providerId === 'gemini') return 'Gemini';
+  if (providerId === 'opencode') return 'OpenCode';
+  if (providerId === 'kimi') return 'Kimi';
+  if (providerId === 'pi') return 'Pi';
+  if (providerId) return providerId.charAt(0).toUpperCase() + providerId.slice(1);
   return 'Claude';
 }
 
