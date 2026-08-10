@@ -32,6 +32,7 @@ import com.github.claudecodegui.ui.detached.DetachedChatFrame;
 import com.github.claudecodegui.ui.detached.DetachedWindowManager;
 import com.github.claudecodegui.util.HtmlLoader;
 import com.github.claudecodegui.util.JsUtils;
+import com.github.claudecodegui.util.ThemeConfigService;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -151,6 +152,11 @@ public class ClaudeChatWindow {
     // Daemon event listener for AI title forwarding. Held so it can be removed on dispose.
     private DaemonBridge.DaemonEventListener titleEventListener;
     private volatile int fetchedSlashCommandsCount = 0;
+
+    // Theme-change callback handle for updating Swing component backgrounds (mainPanel, browser).
+    // Separate from the SettingsHandler's JS-notification callback: this one ensures the Java-side
+    // Swing containers repaint with the new theme color, not just the webview's CSS.
+    private ThemeConfigService.RegisteredCallback swingThemeCallbackHandle;
 
     // Coalesces session_updated reloads. SessionState's message list is not
     // thread-safe and loadFromServer() runs async, so concurrent background-task
@@ -390,6 +396,32 @@ public class ClaudeChatWindow {
             }
         });
         editorContextTracker.registerListeners();
+
+        // Register a Swing-level theme change callback to update the background color of
+        // mainPanel and the browser component when the IDE theme changes. This ensures
+        // Java-side containers repaint with the correct color, complementing the webview's
+        // CSS theme update (handled by SettingsHandler). Fixes issue #1586.
+        swingThemeCallbackHandle = ThemeConfigService.registerThemeChangeListener(themeConfig -> {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (disposed) {
+                    return;
+                }
+                Color bgColor = ThemeConfigService.getBackgroundColor();
+                mainPanel.setBackground(bgColor);
+                JBCefBrowser currentBrowser = browser;
+                if (currentBrowser != null) {
+                    try {
+                        java.awt.Component browserComp = currentBrowser.getComponent();
+                        if (browserComp != null) {
+                            browserComp.setBackground(bgColor);
+                        }
+                    } catch (Exception | LinkageError e) {
+                        LOG.debug("Failed to update browser component background on theme change: " + e.getMessage());
+                    }
+                }
+                mainPanel.repaint();
+            });
+        }, true);
 
         this.webviewInitializer = new WebviewInitializer(createWebviewHost());
 
@@ -2717,6 +2749,12 @@ public class ClaudeChatWindow {
         chatWindowDelegate.dispose();
         editorContextTracker.dispose();
         streamCoalescer.dispose();
+        // Unregister the Swing-level theme change callback to prevent background updates
+        // on a disposed panel. The SettingsHandler's callback is cleaned up via chatWindowDelegate.dispose().
+        if (swingThemeCallbackHandle != null) {
+            ThemeConfigService.unregisterThemeChangeListener(swingThemeCallbackHandle);
+            swingThemeCallbackHandle = null;
+        }
         Disposer.dispose(surfaceRefreshAlarmDisposable);
         deferredReloadSafetyAlarm.cancelAllRequests();
         Disposer.dispose(safetyAlarmDisposable);
