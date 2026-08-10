@@ -161,21 +161,13 @@ export const ButtonArea = ({
   const availableModels = useMemo(() => {
     if (currentProvider === 'codex') {
       const customModels = getCustomCodexModels();
-      if (cliCatalogHasEntries) {
-        // Dynamic catalog arrived (config.toml model + model_catalog_json):
-        // show what the codex CLI picker would show, customs appended.
-        return buildCodexModelList(cliModels, customModels);
-      }
-      // No catalog yet (still loading, fetch failed, or official provider):
-      // legacy merge of built-in models and custom models.
-      if (customModels.length === 0) {
-        return CODEX_MODELS;
-      }
-      // Custom models first, built-in models after
-      // Filter out built-in models that duplicate custom models
-      const customIds = new Set(customModels.map(m => m.id));
-      const filteredBuiltIn = CODEX_MODELS.filter(m => !customIds.has(m.id));
-      return [...customModels, ...filteredBuiltIn];
+      // Real catalog entries only (config default / model_catalog_json). When
+      // empty, cliModels is the static CODEX_MODELS fallback from useCliModels —
+      // pass [] so built-ins are applied once via the third argument, not twice.
+      const catalogModels = cliCatalogHasEntries ? cliModels : [];
+      // customs → catalog → built-ins (deduped). Keeps plugin customs and the
+      // full built-in lineup even when a custom provider only returns its default.
+      return buildCodexModelList(catalogModels, customModels, CODEX_MODELS);
     }
     if (currentProvider === 'grok') {
       return GROK_MODELS;
