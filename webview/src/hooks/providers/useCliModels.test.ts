@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useCliModels } from './useCliModels';
+import { __resetCliModelsCacheForTests, useCliModels } from './useCliModels';
 import { CODEX_MODELS, KIMI_MODELS } from '../../components/ChatInputBox/types';
 import { installRuntimeProviderDispatchers } from '../../utils/runtimeProviderCapabilities';
 
@@ -19,11 +19,13 @@ function emitCliModels(payload: unknown) {
 describe('useCliModels', () => {
   beforeEach(() => {
     sendBridgeEventMock.mockClear();
+    __resetCliModelsCacheForTests();
     installRuntimeProviderDispatchers();
   });
 
   afterEach(() => {
     delete window.setCliModels;
+    __resetCliModelsCacheForTests();
     vi.useRealTimers();
   });
 
@@ -145,5 +147,35 @@ describe('useCliModels', () => {
     expect(result.current.cliModelsLoading).toBe(false);
     expect(result.current.cliModelsError).toBe('timeout');
     expect(result.current.cliModels).toEqual(CODEX_MODELS);
+  });
+
+  it('reuses the module cache on remount so history→chat does not re-fetch', () => {
+    const first = renderHook(() => useCliModels('opencode'));
+    emitCliModels({
+      success: true,
+      provider: 'opencode',
+      defaultModel: 'openai/gpt-5',
+      models: [
+        { id: 'opencode-default', label: 'OpenCode Default' },
+        { id: 'openai/gpt-5', label: 'gpt-5' },
+      ],
+    });
+    expect(first.result.current.cliModels.map((m) => m.id)).toEqual([
+      'opencode-default',
+      'openai/gpt-5',
+    ]);
+    first.unmount();
+
+    sendBridgeEventMock.mockClear();
+    const second = renderHook(() => useCliModels('opencode'));
+    // Cache already has entries — no bridge round-trip on remount.
+    expect(sendBridgeEventMock).not.toHaveBeenCalled();
+    expect(second.result.current.cliModels.map((m) => m.id)).toEqual([
+      'opencode-default',
+      'openai/gpt-5',
+    ]);
+    expect(second.result.current.cliCatalogHasEntries).toBe(true);
+    expect(second.result.current.cliDefaultModel).toBe('openai/gpt-5');
+    expect(second.result.current.cliModelsLoading).toBe(false);
   });
 });

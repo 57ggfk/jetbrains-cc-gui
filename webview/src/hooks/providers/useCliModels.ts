@@ -10,6 +10,22 @@ type CliModelsByProvider = Record<string, ModelInfo[]>;
 /** Java may never answer get_cli_models — don't leave the spinner on forever. */
 const CLI_MODELS_TIMEOUT_MS = 15_000;
 
+/**
+ * Module-level caches so switching away from chat (history/settings) and back
+ * does not drop the catalog and re-trigger a spinner + auto-select reset.
+ * ChatScreen unmounts on view change; these survive that remount.
+ */
+const modelsCache: CliModelsByProvider = {};
+const defaultModelCache: Record<string, string> = {};
+const catalogHasEntriesCache: Record<string, boolean> = {};
+
+/** Test-only: clear module caches between cases. */
+export function __resetCliModelsCacheForTests() {
+  for (const key of Object.keys(modelsCache)) delete modelsCache[key];
+  for (const key of Object.keys(defaultModelCache)) delete defaultModelCache[key];
+  for (const key of Object.keys(catalogHasEntriesCache)) delete catalogHasEntriesCache[key];
+}
+
 function fallbackModels(providerId: string): ModelInfo[] {
   if (providerId === 'grok') return GROK_MODELS;
   if (providerId === 'kimi') return KIMI_MODELS;
@@ -53,10 +69,15 @@ function normalizeModels(raw: unknown): ModelInfo[] {
  * via channel-manager `listModels`. Falls back to static defaults until loaded.
  */
 export function useCliModels(currentProvider: string) {
-  const [modelsByProvider, setModelsByProvider] = useState<CliModelsByProvider>({});
-  const [defaultModelByProvider, setDefaultModelByProvider] = useState<Record<string, string>>({});
+  // Seed from module cache so history→chat remounts keep the last catalog.
+  const [modelsByProvider, setModelsByProvider] = useState<CliModelsByProvider>(() => ({ ...modelsCache }));
+  const [defaultModelByProvider, setDefaultModelByProvider] = useState<Record<string, string>>(
+    () => ({ ...defaultModelCache }),
+  );
   /** Whether the last payload for a provider carried real catalog entries (vs empty → fallback). */
-  const [catalogHasEntriesByProvider, setCatalogHasEntriesByProvider] = useState<Record<string, boolean>>({});
+  const [catalogHasEntriesByProvider, setCatalogHasEntriesByProvider] = useState<Record<string, boolean>>(
+    () => ({ ...catalogHasEntriesCache }),
+  );
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
   const [errorByProvider, setErrorByProvider] = useState<Record<string, string>>({});
   const pendingLoadRef = useRef<{ provider: string; timer: ReturnType<typeof setTimeout> } | null>(null);
@@ -105,14 +126,22 @@ export function useCliModels(currentProvider: string) {
       if (!payload?.provider) return;
       const provider = payload.provider;
       const models = normalizeModels(payload.models);
+      const resolvedModels = models.length > 0 ? models : fallbackModels(provider);
+      modelsCache[provider] = resolvedModels;
+      catalogHasEntriesCache[provider] = models.length > 0;
       setModelsByProvider((prev) => ({
         ...prev,
-        [provider]: models.length > 0 ? models : fallbackModels(provider),
+        [provider]: resolvedModels,
       }));
       setCatalogHasEntriesByProvider((prev) => ({ ...prev, [provider]: models.length > 0 }));
       const defaultModel = typeof payload.defaultModel === 'string' && payload.defaultModel.trim()
         ? payload.defaultModel.trim()
         : null;
+      if (defaultModel) {
+        defaultModelCache[provider] = defaultModel;
+      } else {
+        delete defaultModelCache[provider];
+      }
       setDefaultModelByProvider((prev) => {
         const next = { ...prev };
         if (defaultModel) {
@@ -164,6 +193,9 @@ export function useCliModels(currentProvider: string) {
   // and refetch when the chat is currently on codex.
   useEffect(() => {
     return subscribeActiveCodexProvider(() => {
+      delete modelsCache.codex;
+      delete defaultModelCache.codex;
+      delete catalogHasEntriesCache.codex;
       setModelsByProvider((prev) => {
         if (!('codex' in prev)) return prev;
         const next = { ...prev };

@@ -7,6 +7,9 @@ import org.junit.Test;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -71,7 +74,9 @@ public class OpenCodeHistoryReaderTest {
                 }
                 """.formatted(asstMsgId), StandardCharsets.UTF_8);
 
-        OpenCodeHistoryReader reader = new OpenCodeHistoryReader(storage, new Gson());
+        // No SQLite file → pure legacy JSON path.
+        Path missingDb = storage.resolveSibling("missing-opencode.db");
+        OpenCodeHistoryReader reader = new OpenCodeHistoryReader(storage, missingDb, new Gson());
 
         List<OpenCodeHistoryReader.SessionInfo> listed =
                 reader.listSessionsForProject("D:/develop/my-app");
@@ -93,5 +98,119 @@ public class OpenCodeHistoryReaderTest {
 
         assertTrue(reader.deleteSession(sessionId, "D:/develop/my-app"));
         assertTrue(reader.listSessionsForProject("D:/develop/my-app").isEmpty());
+    }
+
+    @Test
+    public void listsAndLoadsSessionFromSqliteDatabase() throws Exception {
+        Path root = Files.createTempDirectory("oc-history-db");
+        Path storage = root.resolve("storage");
+        Files.createDirectories(storage);
+        Path db = root.resolve("opencode.db");
+
+        String sessionId = "ses_db_hello1";
+        String projectPath = "/Users/me/Desktop/CC GUI 项目/jetbrains-cc-gui";
+        String userMsgId = "msg_db_user1";
+        String asstMsgId = "msg_db_asst1";
+
+        Class.forName("org.sqlite.JDBC");
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + db.toAbsolutePath());
+             Statement st = conn.createStatement()) {
+            st.execute("""
+                    CREATE TABLE project (
+                      id text PRIMARY KEY,
+                      worktree text NOT NULL,
+                      vcs text,
+                      name text,
+                      time_created integer NOT NULL,
+                      time_updated integer NOT NULL,
+                      sandboxes text NOT NULL
+                    )
+                    """);
+            st.execute("""
+                    CREATE TABLE session (
+                      id text PRIMARY KEY,
+                      project_id text NOT NULL,
+                      parent_id text,
+                      slug text NOT NULL,
+                      directory text NOT NULL,
+                      title text NOT NULL,
+                      version text NOT NULL,
+                      time_created integer NOT NULL,
+                      time_updated integer NOT NULL
+                    )
+                    """);
+            st.execute("""
+                    CREATE TABLE message (
+                      id text PRIMARY KEY,
+                      session_id text NOT NULL,
+                      time_created integer NOT NULL,
+                      time_updated integer NOT NULL,
+                      data text NOT NULL
+                    )
+                    """);
+            st.execute("""
+                    CREATE TABLE part (
+                      id text PRIMARY KEY,
+                      message_id text NOT NULL,
+                      session_id text NOT NULL,
+                      time_created integer NOT NULL,
+                      time_updated integer NOT NULL,
+                      data text NOT NULL
+                    )
+                    """);
+            st.execute("INSERT INTO project (id, worktree, vcs, name, time_created, time_updated, sandboxes) "
+                    + "VALUES ('proj1', '" + projectPath + "', 'git', null, 1, 2, '[]')");
+            st.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, "
+                    + "time_created, time_updated) VALUES ('" + sessionId + "', 'proj1', null, 'slug', "
+                    + "'" + projectPath + "', 'SQLite OpenCode chat', '1.4.6', 1000, 2000)");
+            st.execute("INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES "
+                    + "('" + userMsgId + "', '" + sessionId + "', 1001, 1001, "
+                    + "'{\"role\":\"user\",\"time\":{\"created\":1001}}')");
+            st.execute("INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES "
+                    + "('" + asstMsgId + "', '" + sessionId + "', 1002, 1002, "
+                    + "'{\"role\":\"assistant\",\"time\":{\"created\":1002}}')");
+            st.execute("INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES "
+                    + "('prt_u1', '" + userMsgId + "', '" + sessionId + "', 1001, 1001, "
+                    + "'{\"type\":\"text\",\"text\":\"你好\"}')");
+            st.execute("INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES "
+                    + "('prt_a1', '" + asstMsgId + "', '" + sessionId + "', 1002, 1002, "
+                    + "'{\"type\":\"reasoning\",\"text\":\"think\"}')");
+            st.execute("INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES "
+                    + "('prt_a2', '" + asstMsgId + "', '" + sessionId + "', 1003, 1003, "
+                    + "'{\"type\":\"text\",\"text\":\"hello from db\"}')");
+            st.execute("INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES "
+                    + "('prt_a3', '" + asstMsgId + "', '" + sessionId + "', 1004, 1004, "
+                    + "'{\"type\":\"tool\",\"callID\":\"call_db\",\"tool\":\"read\","
+                    + "\"state\":{\"status\":\"completed\",\"input\":{\"filePath\":\"a.txt\"},\"output\":\"ok\"}}')");
+        }
+
+        OpenCodeHistoryReader reader = new OpenCodeHistoryReader(storage, db, new Gson());
+
+        List<OpenCodeHistoryReader.SessionInfo> listed = reader.listSessionsForProject(projectPath);
+        assertEquals(1, listed.size());
+        assertEquals(sessionId, listed.get(0).sessionId);
+        assertEquals("SQLite OpenCode chat", listed.get(0).title);
+        assertEquals(2, listed.get(0).messageCount);
+
+        List<JsonObject> messages = reader.getSessionMessages(sessionId, projectPath);
+        assertFalse(messages.isEmpty());
+        assertEquals("user", messages.get(0).get("type").getAsString());
+        String userText = messages.get(0).getAsJsonObject("message")
+                .getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString();
+        assertEquals("你好", userText);
+
+        boolean hasThinking = messages.stream().anyMatch(m ->
+                m.has("message")
+                        && m.getAsJsonObject("message").has("content")
+                        && m.getAsJsonObject("message").getAsJsonArray("content").toString().contains("thinking"));
+        boolean hasTool = messages.stream().anyMatch(m ->
+                m.has("message")
+                        && m.getAsJsonObject("message").has("content")
+                        && m.getAsJsonObject("message").getAsJsonArray("content").toString().contains("tool_use"));
+        assertTrue(hasThinking);
+        assertTrue(hasTool);
+
+        assertTrue(reader.deleteSession(sessionId, projectPath));
+        assertTrue(reader.listSessionsForProject(projectPath).isEmpty());
     }
 }

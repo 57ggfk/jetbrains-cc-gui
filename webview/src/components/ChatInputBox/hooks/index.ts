@@ -40,3 +40,8 @@ export { useResetAttachmentsOnSessionChange } from './useResetAttachmentsOnSessi
 export { useSpaceKeyListener } from './useSpaceKeyListener.js';
 export { useResizableChatInputBox, computeResize } from './useResizableChatInputBox.js';
 export { useInlineHistoryCompletion } from './useInlineHistoryCompletion.js';
+export {
+  useToolbarSelectorCompact,
+  shouldCollapseToolbarSelectors,
+  TOOLBAR_SELECTOR_MIN_GAP_PX,
+} from './useToolbarSelectorCompact.js';
