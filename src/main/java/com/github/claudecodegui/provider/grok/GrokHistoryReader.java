@@ -1,6 +1,7 @@
 package com.github.claudecodegui.provider.grok;
 
 import com.github.claudecodegui.bridge.NodeDetector;
+import com.github.claudecodegui.provider.common.HistoryPathMatcher;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -22,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -65,6 +65,8 @@ public class GrokHistoryReader {
         public String cwd;
         public long fileSize;
         public String provider = "grok";
+        /** Model id used by this session when known (e.g. grok-4.5). */
+        public String model;
     }
 
     /**
@@ -182,6 +184,12 @@ public class GrokHistoryReader {
                 }
                 created = parseRfc3339Millis(summary, "created_at");
                 updatedFromSummary = parseRfc3339Millis(summary, "updated_at");
+                if (summary.has("current_model_id") && !summary.get("current_model_id").isJsonNull()) {
+                    String modelId = summary.get("current_model_id").getAsString();
+                    if (modelId != null && !modelId.isBlank()) {
+                        info.model = modelId.trim();
+                    }
+                }
                 if (summary.has("info") && summary.get("info").isJsonObject()) {
                     JsonObject sessionInfo = summary.getAsJsonObject("info");
                     if (sessionInfo.has("cwd") && !sessionInfo.get("cwd").isJsonNull()) {
@@ -719,14 +727,7 @@ public class GrokHistoryReader {
     }
 
     static String normalizePath(String path) {
-        if (path == null) {
-            return "";
-        }
-        String p = path.trim().replace('\\', '/');
-        while (p.endsWith("/") && p.length() > 1) {
-            p = p.substring(0, p.length() - 1);
-        }
-        return p;
+        return HistoryPathMatcher.normalize(path);
     }
 
     private static String canonicalizePath(String path) {
@@ -738,22 +739,7 @@ public class GrokHistoryReader {
     }
 
     static boolean pathsMatch(String sessionCwd, String projectPath) {
-        if (sessionCwd == null || projectPath == null) {
-            return false;
-        }
-        String a = normalizePath(sessionCwd).toLowerCase(Locale.ROOT);
-        String b = normalizePath(projectPath).toLowerCase(Locale.ROOT);
-        if (a.equals(b)) {
-            return true;
-        }
-        // macOS /tmp vs /private/tmp
-        String a2 = a.startsWith("/private") ? a.substring("/private".length()) : a;
-        String b2 = b.startsWith("/private") ? b.substring("/private".length()) : b;
-        if (a2.equals(b2)) {
-            return true;
-        }
-        return a.startsWith(b + "/") || b.startsWith(a + "/")
-                || a2.startsWith(b2 + "/") || b2.startsWith(a2 + "/");
+        return HistoryPathMatcher.matches(sessionCwd, projectPath);
     }
 
     private static String truncate(String value, int maxChars) {

@@ -166,7 +166,15 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
   // Strip [1m] suffix for finding the model in the list
   const strippedValue = strip1MContextSuffix(value);
   const normalizedValue = currentProvider === 'claude' ? normalizeClaudeModelId(strippedValue) : strippedValue;
-  const currentModel = models.find(m => m.id === normalizedValue) || models.find(m => m.id === strippedValue) || models[0];
+  // Prefer the user's selection even when the catalog is still loading / only a
+  // static fallback is available. Falling back to models[0] made OpenCode (and
+  // other dynamic providers) visually snap back to the first entry after leaving
+  // history and remounting ChatScreen.
+  const currentModel = models.find(m => m.id === normalizedValue)
+    || models.find(m => m.id === strippedValue)
+    || (strippedValue
+      ? { id: strippedValue, label: strippedValue } as ModelInfo
+      : models[0]);
   const modelMapping = readClaudeModelMapping();
 
   const isSelectedModel = (modelId: string): boolean => {

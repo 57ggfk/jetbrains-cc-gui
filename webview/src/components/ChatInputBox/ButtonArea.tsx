@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
@@ -8,6 +8,7 @@ import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
 import { useCliModels } from '../../hooks/providers/useCliModels';
+import { useToolbarSelectorCompact } from './hooks/useToolbarSelectorCompact';
 
 /**
  * Get custom Codex model list from localStorage
@@ -161,21 +162,13 @@ export const ButtonArea = ({
   const availableModels = useMemo(() => {
     if (currentProvider === 'codex') {
       const customModels = getCustomCodexModels();
-      if (cliCatalogHasEntries) {
-        // Dynamic catalog arrived (config.toml model + model_catalog_json):
-        // show what the codex CLI picker would show, customs appended.
-        return buildCodexModelList(cliModels, customModels);
-      }
-      // No catalog yet (still loading, fetch failed, or official provider):
-      // legacy merge of built-in models and custom models.
-      if (customModels.length === 0) {
-        return CODEX_MODELS;
-      }
-      // Custom models first, built-in models after
-      // Filter out built-in models that duplicate custom models
-      const customIds = new Set(customModels.map(m => m.id));
-      const filteredBuiltIn = CODEX_MODELS.filter(m => !customIds.has(m.id));
-      return [...customModels, ...filteredBuiltIn];
+      // Real catalog entries only (config default / model_catalog_json). When
+      // empty, cliModels is the static CODEX_MODELS fallback from useCliModels —
+      // pass [] so built-ins are applied once via the third argument, not twice.
+      const catalogModels = cliCatalogHasEntries ? cliModels : [];
+      // customs → catalog → built-ins (deduped). Keeps plugin customs and the
+      // full built-in lineup even when a custom provider only returns its default.
+      return buildCodexModelList(catalogModels, customModels, CODEX_MODELS);
     }
     if (currentProvider === 'grok') {
       return GROK_MODELS;
@@ -214,16 +207,27 @@ export const ButtonArea = ({
     const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
       || currentProvider === 'pi' || currentProvider === 'codex';
     if (!isDynamicProvider) return;
-    // Codex: only correct the selection once a real catalog arrived. With the
-    // official-provider fallback list (built-in GPT models) the user's explicit
-    // choice must be kept as-is.
-    if (currentProvider === 'codex' && !cliCatalogHasEntries) return;
+    // Only correct once a *real* catalog arrived. Static fallback lists
+    // (OPENCODE_MODELS = just "opencode-default", CODEX built-ins, …) must not
+    // clobber the user's choice — especially when ChatScreen remounts after
+    // leaving history and briefly shows the fallback before the cache/fetch
+    // lands.
+    if (!cliCatalogHasEntries) return;
+    if (cliModelsLoading) return;
     if (!availableModels.length || !onModelSelect) return;
     const exists = availableModels.some((model) => model.id === selectedModel);
     if (!exists) {
       onModelSelect(cliDefaultModel ?? availableModels[0].id);
     }
-  }, [availableModels, currentProvider, onModelSelect, selectedModel, cliDefaultModel, cliCatalogHasEntries]);
+  }, [
+    availableModels,
+    currentProvider,
+    onModelSelect,
+    selectedModel,
+    cliDefaultModel,
+    cliCatalogHasEntries,
+    cliModelsLoading,
+  ]);
 
   /**
    * Handle submit button click
@@ -284,10 +288,34 @@ export const ButtonArea = ({
     onEnhancePrompt?.();
   }, [onEnhancePrompt]);
 
+  // Collapse selector labels for every CLI when left cluster is about to hit the send cluster (20px).
+  const buttonAreaRef = useRef<HTMLDivElement>(null);
+  const buttonAreaLeftRef = useRef<HTMLDivElement>(null);
+  const buttonAreaRightRef = useRef<HTMLDivElement>(null);
+  const selectorContentKey = [
+    currentProvider,
+    selectedModel,
+    permissionMode,
+    reasoningEffort,
+    codexFastMode,
+    selectedAgent?.id ?? '',
+    cliModelsLoading ? 'loading' : 'ready',
+  ].join('|');
+  const selectorsCompact = useToolbarSelectorCompact(
+    buttonAreaRef,
+    buttonAreaLeftRef,
+    buttonAreaRightRef,
+    selectorContentKey,
+  );
+
   return (
-    <div className="button-area" data-provider={currentProvider}>
+    <div
+      ref={buttonAreaRef}
+      className={`button-area${selectorsCompact ? ' button-area--compact' : ''}`}
+      data-provider={currentProvider}
+    >
       {/* Left side: selectors */}
-      <div className="button-area-left">
+      <div ref={buttonAreaLeftRef} className="button-area-left">
         <ConfigSelect
           alwaysThinkingEnabled={alwaysThinkingEnabled}
           onToggleThinking={onToggleThinking}
@@ -323,7 +351,7 @@ export const ButtonArea = ({
       </div>
 
       {/* Right side: tool buttons */}
-      <div className="button-area-right">
+      <div ref={buttonAreaRightRef} className="button-area-right">
         <div className="button-divider" />
 
         {/* Enhance prompt button */}

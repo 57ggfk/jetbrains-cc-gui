@@ -4,6 +4,7 @@
  */
 
 import { sendMessage as grokSendMessage } from '../services/grok/message-service.js';
+import { listModels as grokListModels } from '../services/grok/models-service.js';
 import {
   getGrokReasoningSupportedModels,
   buildGrokContextUsagePayload,
@@ -45,6 +46,11 @@ export async function handleGrokCommand(command, args, stdinData) {
       break;
     }
 
+    case 'listModels': {
+      grokListModels();
+      break;
+    }
+
     case 'getContextUsage': {
       // One-shot path: synthesize from Java-supplied used/max when present.
       const payload = buildGrokContextUsagePayload({
@@ -83,5 +89,5 @@ export async function handleGrokCommand(command, args, stdinData) {
 }
 
 export function getGrokCommandList() {
-  return ['send', 'getContextUsage', 'getUsage', 'getReasoningSupportedModels'];
+  return ['send', 'listModels', 'getContextUsage', 'getUsage', 'getReasoningSupportedModels'];
 }

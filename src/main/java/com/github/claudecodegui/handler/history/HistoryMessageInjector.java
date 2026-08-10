@@ -65,6 +65,7 @@ public class HistoryMessageInjector {
         sessionLoadGeneration.incrementAndGet();
         String provider = currentProvider;
         String resolvedSessionId = sessionId;
+        String model = null;
 
         try {
             JsonObject payload = new Gson().fromJson(sessionId, JsonObject.class);
@@ -74,6 +75,12 @@ public class HistoryMessageInjector {
                 }
                 if (payload.has("provider") && !payload.get("provider").isJsonNull()) {
                     provider = payload.get("provider").getAsString();
+                }
+                if (payload.has("model") && !payload.get("model").isJsonNull()) {
+                    String m = payload.get("model").getAsString();
+                    if (m != null && !m.trim().isEmpty()) {
+                        model = m.trim();
+                    }
                 }
             }
         } catch (Exception ignored) {
@@ -89,15 +96,16 @@ public class HistoryMessageInjector {
             return;
         }
         LOG.info("[HistoryHandler] Loading history session: " + resolvedSessionId
-                + " from project: " + projectPath + ", provider: " + provider);
+                + " from project: " + projectPath + ", provider: " + provider
+                + (model != null ? ", model: " + model : ""));
 
         if ("codex".equals(provider)) {
             // Codex session: read session info and restore session state
-            loadCodexSession(resolvedSessionId);
+            loadCodexSession(resolvedSessionId, model);
         } else {
-            // Claude session: use existing callback mechanism
+            // Claude / CLI providers: use existing callback mechanism
             if (sessionLoadCallback != null) {
-                sessionLoadCallback.onLoadSession(resolvedSessionId, projectPath, provider);
+                sessionLoadCallback.onLoadSession(resolvedSessionId, projectPath, provider, model);
             } else {
                 LOG.warn("[HistoryHandler] WARNING: No session load callback set");
                 notifyHistoryLoadComplete();
@@ -110,6 +118,10 @@ public class HistoryMessageInjector {
      * Reads session messages directly and injects them into the frontend, while restoring session state.
      */
     void loadCodexSession(String sessionId) {
+        loadCodexSession(sessionId, null);
+    }
+
+    void loadCodexSession(String sessionId, String model) {
         long generation = sessionLoadGeneration.incrementAndGet();
         CompletableFuture.runAsync(() -> {
             LOG.info("[HistoryHandler] ========== 开始加载 Codex 会话 ==========");
@@ -127,6 +139,9 @@ public class HistoryMessageInjector {
                 String cwd = page.cwd;
 
                 context.getSession().setSessionInfo(threadIdToUse, cwd);
+                if (model != null && !model.isBlank()) {
+                    context.getSession().setModel(model.trim());
+                }
                 restoreCodexFrontendMessagesToSessionState(context.getSession().getState(), page.messages);
                 pushRestoredCodexUsage();
                 LOG.info("[HistoryHandler] 恢复 Codex 会话状态: threadId=" + threadIdToUse + " (from sessionId=" + sessionId + "), cwd=" + cwd);
