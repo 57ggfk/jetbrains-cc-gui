@@ -59,7 +59,7 @@ public class CliModelsHandler extends BaseMessageHandler {
             return false;
         }
         String provider = content != null ? content.trim().toLowerCase(Locale.ROOT) : "";
-        if (!"opencode".equals(provider) && !"kimi".equals(provider) && !"pi".equals(provider) && !"codex".equals(provider)) {
+        if (!"opencode".equals(provider) && !"kimi".equals(provider) && !"pi".equals(provider) && !"codex".equals(provider) && !"grok".equals(provider)) {
             pushError(provider, "Unsupported CLI provider for model list: " + provider);
             return true;
         }
