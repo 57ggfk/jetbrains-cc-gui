@@ -28,6 +28,10 @@ public class SettingsHandler extends BaseMessageHandler {
     private final NodePathHandler nodePathHandler;
     private final ClaudeCliPathHandler claudeCliPathHandler;
     private final ProjectConfigHandler projectConfigHandler;
+    // Handle for the theme-change callback registered with ThemeConfigService.
+    // Kept so it can be cleanly unregistered when the owning window is disposed,
+    // preventing notifications to disposed webviews (issue #1586).
+    private ThemeConfigService.RegisteredCallback themeCallbackHandle;
     private final CodexSubscriptionQuotaHandler codexSubscriptionQuotaHandler;
     private final TokenTrackerHandler tokenTrackerHandler;
 
@@ -124,13 +128,27 @@ public class SettingsHandler extends BaseMessageHandler {
 
     /**
      * Register theme change listener.
+     * Uses the multi-callback API so that every open ClaudeChatWindow receives
+     * theme change notifications. The returned handle is stored for clean
+     * unregistration in {@link #dispose()}.
      */
     private void registerThemeChangeListener() {
-        ThemeConfigService.registerThemeChangeListener(themeConfig -> {
+        themeCallbackHandle = ThemeConfigService.registerThemeChangeListener(themeConfig -> {
             ApplicationManager.getApplication().invokeLater(() -> {
                 callJavaScript("window.onIdeThemeChanged", escapeJs(themeConfig.toString()));
             });
-        });
+        }, true);
+    }
+
+    /**
+     * Unregister the theme change callback to prevent notifications to a disposed webview.
+     * Should be called when the owning ClaudeChatWindow is disposed.
+     */
+    public void dispose() {
+        if (themeCallbackHandle != null) {
+            ThemeConfigService.unregisterThemeChangeListener(themeCallbackHandle);
+            themeCallbackHandle = null;
+        }
     }
 
     @Override

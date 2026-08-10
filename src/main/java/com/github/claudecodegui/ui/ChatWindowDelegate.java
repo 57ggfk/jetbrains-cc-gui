@@ -130,6 +130,8 @@ public class ChatWindowDelegate {
     private ScheduledFuture<?> statusResetTask;
     private volatile String pendingQuickFixPrompt = null;
     private volatile MessageCallback pendingQuickFixCallback = null;
+    // Reference to the SettingsHandler for clean theme-callback unregistration on dispose.
+    private com.github.claudecodegui.handler.SettingsHandler settingsHandler;
 
     public ChatWindowDelegate(DelegateHost host) {
         this.host = host;
@@ -343,7 +345,8 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(new CodexPetHandler(handlerContext));
         messageDispatcher.registerHandler(new SkillHandler(handlerContext));
         messageDispatcher.registerHandler(new FileHandler(handlerContext));
-        messageDispatcher.registerHandler(new SettingsHandler(handlerContext));
+        this.settingsHandler = new SettingsHandler(handlerContext);
+        messageDispatcher.registerHandler(this.settingsHandler);
         messageDispatcher.registerHandler(new SessionHandler(handlerContext));
         messageDispatcher.registerHandler(new ContextHandler(handlerContext));
         messageDispatcher.registerHandler(new FileExportHandler(handlerContext));
@@ -751,6 +754,13 @@ public class ChatWindowDelegate {
             statusResetTask.cancel(false);
             statusResetTask = null;
             LOG.debug("[TabStatus] Cancelled pending status reset task");
+        }
+        // Unregister the theme-change callback to prevent notifications to the disposed webview.
+        // This fixes the "Cannot call JS function window.onIdeThemeChanged: disposed=true" warning
+        // and ensures stale sessions don't interfere with theme updates for remaining windows.
+        if (settingsHandler != null) {
+            settingsHandler.dispose();
+            settingsHandler = null;
         }
     }
 }
