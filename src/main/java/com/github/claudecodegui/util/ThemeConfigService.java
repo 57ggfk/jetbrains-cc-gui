@@ -33,15 +33,20 @@ public class ThemeConfigService {
     public static final Color LIGHT_BG_COLOR = Color.WHITE;             // #ffffff
     public static final String DARK_BG_HEX = "#1e1e1e";
     public static final String LIGHT_BG_HEX = "#ffffff";
-    private static ThemeChangeCallback themeChangeCallback = null; // Deprecated: kept for backward compatibility
     private static Boolean lastKnownIsDark = null; // Cache the last known theme state for deduplication
-    private static boolean listenerRegistered = false;
+    // Written from window-registration threads, read from the LafManager/EDT thread.
+    private static volatile boolean listenerRegistered = false;
 
     // Multi-callback support: each ClaudeChatWindow registers its own callback so that
     // theme changes are delivered to every open session, not just the last one registered.
     // CopyOnWriteArraySet ensures safe iteration on the LafManager thread without explicit locking.
     private static final CopyOnWriteArraySet<RegisteredCallback> themeChangeCallbacks = new CopyOnWriteArraySet<>();
     private static final AtomicLong callbackIdSeq = new AtomicLong(0);
+
+    // Slot for callbacks registered via the legacy no-handle overload. Each legacy call
+    // replaces the previous slot (preserving the original "update on project reopen"
+    // semantics) so repeated registrations never accumulate duplicates in the set.
+    private static volatile RegisteredCallback legacySlot = null;
 
     /**
      * Opaque handle returned by {@link #registerThemeChangeListener(ThemeChangeCallback, boolean)}
@@ -68,16 +73,29 @@ public class ThemeConfigService {
     }
 
     /**
-     * Register a theme change listener (backward-compatible single-callback overload).
+     * Register a theme change listener (backward-compatible no-handle overload).
      *
-     * <p>This overload replaces the legacy single-callback field. New callers should prefer
+     * <p>Each call <em>replaces</em> the previous no-handle registration, preserving the
+     * original single-callback semantics (e.g. a project reopen re-registers without
+     * accumulating duplicates). New callers should prefer
      * {@link #registerThemeChangeListener(ThemeChangeCallback, boolean)} which returns a
      * handle that can be used for clean unregistration on dispose.
      *
      * @param callback the callback to invoke on theme change
      */
     public static void registerThemeChangeListener(ThemeChangeCallback callback) {
-        registerThemeChangeListener(callback, false);
+        ensureListenerRegistered();
+
+        RegisteredCallback slot = new RegisteredCallback(callbackIdSeq.incrementAndGet(), callback);
+        RegisteredCallback prev = legacySlot;
+        legacySlot = slot;
+        if (prev != null) {
+            themeChangeCallbacks.remove(prev);
+        }
+        if (callback != null) {
+            themeChangeCallbacks.add(slot);
+        }
+        LOG.info("[ThemeConfig] Legacy (no-handle) theme change callback updated");
     }
 
     /**
@@ -94,20 +112,21 @@ public class ThemeConfigService {
      *
      * @param callback the callback to invoke on theme change
      * @param returnHandle if {@code true}, returns a {@link RegisteredCallback} handle for
-     *                     later unregistration; if {@code false}, returns {@code null}
+     *                     later unregistration; if {@code false}, behaves like the legacy
+     *                     no-handle overload and returns {@code null}
      * @return a handle for unregistration, or {@code null} if {@code returnHandle} is false
      */
     public static RegisteredCallback registerThemeChangeListener(ThemeChangeCallback callback, boolean returnHandle) {
-        // Always update the legacy single-callback field for backward compatibility
-        // with any code path that still reads it directly.
-        themeChangeCallback = callback;
-        LOG.info("[ThemeConfig] Theme change callback updated");
+        if (!returnHandle) {
+            registerThemeChangeListener(callback);
+            return null;
+        }
 
         // Register the listener only once (Application level)
         ensureListenerRegistered();
 
         RegisteredCallback handle = null;
-        if (returnHandle && callback != null) {
+        if (callback != null) {
             handle = new RegisteredCallback(callbackIdSeq.incrementAndGet(), callback);
             themeChangeCallbacks.add(handle);
             LOG.info("[ThemeConfig] Multi-callback registered (id=" + handle.getId()
@@ -134,10 +153,10 @@ public class ThemeConfigService {
         if (removed) {
             LOG.info("[ThemeConfig] Multi-callback unregistered (id=" + handle.getId()
                     + ", remaining=" + themeChangeCallbacks.size() + ")");
-        }
-        // Clear the legacy single-callback if it matches the one being removed
-        if (removed && themeChangeCallback == handle.getCallback()) {
-            themeChangeCallback = null;
+            // Clear the legacy slot if the removed handle is the current legacy registration
+            if (handle == legacySlot) {
+                legacySlot = null;
+            }
         }
     }
 
@@ -181,9 +200,7 @@ public class ThemeConfigService {
      * Only sends a notification when the theme actually changes, avoiding duplicate notifications and unnecessary UI updates.
      */
     private static void notifyThemeChange() {
-        // Collect all active callbacks (multi-callback set + legacy single callback)
-        boolean hasCallbacks = !themeChangeCallbacks.isEmpty() || themeChangeCallback != null;
-        if (!hasCallbacks) {
+        if (themeChangeCallbacks.isEmpty()) {
             LOG.warn("[ThemeConfig] No theme callbacks registered, cannot notify");
             return;
         }
@@ -203,31 +220,12 @@ public class ThemeConfigService {
             LOG.info("[ThemeConfig] Theme changed to: " + (currentIsDark ? "DARK" : "LIGHT")
                     + ", notifying " + themeChangeCallbacks.size() + " webview(s)");
 
-            // Notify all registered multi-callbacks (one per open ClaudeChatWindow)
+            // Notify all registered callbacks (one per open ClaudeChatWindow)
             for (RegisteredCallback rc : themeChangeCallbacks) {
                 try {
                     rc.getCallback().onThemeChanged(config);
                 } catch (Exception e) {
                     LOG.warn("[ThemeConfig] Failed to notify callback id=" + rc.getId() + ": " + e.getMessage(), e);
-                }
-            }
-
-            // Also notify the legacy single-callback if it is not already in the multi-callback set.
-            // This preserves backward compatibility for any code path that used the old API.
-            if (themeChangeCallback != null) {
-                boolean alreadyNotified = false;
-                for (RegisteredCallback rc : themeChangeCallbacks) {
-                    if (rc.getCallback() == themeChangeCallback) {
-                        alreadyNotified = true;
-                        break;
-                    }
-                }
-                if (!alreadyNotified) {
-                    try {
-                        themeChangeCallback.onThemeChanged(config);
-                    } catch (Exception e) {
-                        LOG.warn("[ThemeConfig] Failed to notify legacy callback: " + e.getMessage(), e);
-                    }
                 }
             }
         } catch (Exception e) {
