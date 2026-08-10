@@ -9,6 +9,9 @@ import com.github.claudecodegui.cache.SessionIndexManager;
 import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
 import com.github.claudecodegui.provider.grok.GrokHistoryReader;
+import com.github.claudecodegui.provider.kimi.KimiHistoryReader;
+import com.github.claudecodegui.provider.opencode.OpenCodeHistoryReader;
+import com.github.claudecodegui.provider.pi.PiHistoryReader;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -69,10 +72,21 @@ class HistoryLoadService {
                     GrokHistoryReader grokReader = new GrokHistoryReader();
                     historyJson = grokReader.getSessionsForProjectAsJson(projectPath);
                     LOG.info("[HistoryHandler] GrokHistoryReader 返回的 JSON 长度: " + historyJson.length());
-                } else if ("kimi".equals(provider) || "opencode".equals(provider) || "pi".equals(provider)) {
-                    // History disk readers are deferred; live multi-turn uses sessionId resume.
-                    LOG.info("[HistoryHandler] " + provider + " history list not implemented yet; returning empty");
-                    historyJson = "{\"success\":true,\"sessions\":[],\"provider\":\"" + provider + "\"}";
+                } else if ("pi".equals(provider)) {
+                    LOG.info("[HistoryHandler] 使用 PiHistoryReader 读取 PI 会话 (项目: " + projectPath + ")");
+                    PiHistoryReader piReader = new PiHistoryReader();
+                    historyJson = piReader.getSessionsForProjectAsJson(projectPath);
+                    LOG.info("[HistoryHandler] PiHistoryReader 返回的 JSON 长度: " + historyJson.length());
+                } else if ("opencode".equals(provider)) {
+                    LOG.info("[HistoryHandler] 使用 OpenCodeHistoryReader 读取 OpenCode 会话 (项目: " + projectPath + ")");
+                    OpenCodeHistoryReader openCodeReader = new OpenCodeHistoryReader();
+                    historyJson = openCodeReader.getSessionsForProjectAsJson(projectPath);
+                    LOG.info("[HistoryHandler] OpenCodeHistoryReader 返回的 JSON 长度: " + historyJson.length());
+                } else if ("kimi".equals(provider)) {
+                    LOG.info("[HistoryHandler] 使用 KimiHistoryReader 读取 Kimi 会话 (项目: " + projectPath + ")");
+                    KimiHistoryReader kimiReader = new KimiHistoryReader();
+                    historyJson = kimiReader.getSessionsForProjectAsJson(projectPath);
+                    LOG.info("[HistoryHandler] KimiHistoryReader 返回的 JSON 长度: " + historyJson.length());
                 } else {
                     // Default: use ClaudeHistoryReader to read Claude sessions
                     LOG.info("[HistoryHandler] 使用 ClaudeHistoryReader 读取 Claude 会话");
@@ -153,8 +167,9 @@ class HistoryLoadService {
             } else if ("grok".equals(provider)) {
                 // Grok history is read live from disk; no dedicated index cache yet.
                 LOG.info("[HistoryHandler] Grok deep search: reloading from ~/.grok/sessions");
-            } else if ("kimi".equals(provider) || "opencode".equals(provider) || "pi".equals(provider)) {
-                LOG.info("[HistoryHandler] " + provider + " deep search: no disk index yet");
+            } else if ("pi".equals(provider) || "opencode".equals(provider) || "kimi".equals(provider)) {
+                // Disk readers scan live filesystem; no dedicated index cache.
+                LOG.info("[HistoryHandler] " + provider + " deep search: reloading from disk");
             } else if (projectPath != null) {
                 SessionIndexCache.getInstance().clearProject(projectPath);
                 SessionIndexManager.getInstance().clearProjectIndex("claude", projectPath);

@@ -1,7 +1,10 @@
 package com.github.claudecodegui.provider.opencode;
 
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import com.google.gson.JsonObject;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -30,5 +33,15 @@ public class OpenCodeCliBridge extends MarkerCliBridge {
     @Override
     protected void configureExtraEnv(Map<String, String> env) {
         // Reserved for OPENCODE_HOME / OPENCODE_CONFIG_CONTENT injection.
+    }
+
+    @Override
+    public List<JsonObject> getSessionMessages(String sessionId, String cwd) {
+        try {
+            return new OpenCodeHistoryReader().getSessionMessages(sessionId, cwd);
+        } catch (Exception e) {
+            LOG.warn("[OpenCode] Failed to load session messages: " + e.getMessage());
+            return Collections.emptyList();
+        }
     }
 }

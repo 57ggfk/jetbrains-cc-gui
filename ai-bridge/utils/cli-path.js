@@ -6,12 +6,22 @@
  * 2. PATH lookup (`which` / `where`)
  * 3. Common home install candidates
  * 4. Bare binary name fallback
+ *
+ * Windows note: npm global installs create three shims (`pi`, `pi.cmd`, `pi.ps1`).
+ * `where pi` often lists the extensionless bash wrapper first. Node's
+ * `spawn()` cannot CreateProcess that file (ENOENT). Prefer `.cmd` / `.exe`
+ * and shell-spawn `.cmd`/`.bat` (see `isWindowsCmdShim`).
  */
 
 import { existsSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
-import { execSync } from 'child_process';
+import { join, isAbsolute } from 'path';
+import { execFileSync, execSync } from 'child_process';
+
+/** Extensions Node can CreateProcess on Windows (with shell for .cmd/.bat). */
+const WINDOWS_SPAWNABLE_EXT = /\.(cmd|bat|exe)$/i;
+/** Prefer real PE binaries, then cmd shims, over extensionless npm wrappers. */
+const WINDOWS_SPAWNABLE_PRIORITY = ['.exe', '.cmd', '.bat'];
 
 /**
  * Windows npm global installs only ship a `.cmd` / `.bat` shim (no `.exe`),
@@ -21,6 +31,61 @@ import { execSync } from 'child_process';
  */
 export function isWindowsCmdShim(bin) {
   return process.platform === 'win32' && /\.(cmd|bat)$/i.test(String(bin || ''));
+}
+
+/**
+ * Pick the best match from `where` output lines on Windows.
+ * Prefer `.exe` / `.cmd` / `.bat` over extensionless npm bash shims.
+ *
+ * @param {string[]|null|undefined} matches
+ * @returns {string|null}
+ */
+export function selectWindowsWhereMatch(matches) {
+  const lines = (Array.isArray(matches) ? matches : [])
+    .map((line) => String(line || '').trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+
+  for (const ext of WINDOWS_SPAWNABLE_PRIORITY) {
+    const hit = lines.find((line) => line.toLowerCase().endsWith(ext));
+    if (hit) return hit;
+  }
+  return lines[0];
+}
+
+/**
+ * If `bin` is an absolute/relative path without a spawnable Windows extension
+ * and a sibling `.exe`/`.cmd`/`.bat` exists, return that sibling.
+ *
+ * Bare names (`pi`) are left unchanged so PATH+PATHEXT still apply at spawn.
+ *
+ * @param {string} bin
+ * @param {(path: string) => boolean} [existsFn]
+ * @param {boolean} [forceWindows] - test hook; defaults to process.platform === 'win32'
+ * @returns {string}
+ */
+export function resolveWindowsSpawnableBin(
+  bin,
+  existsFn = pathExists,
+  forceWindows = process.platform === 'win32',
+) {
+  if (!forceWindows || typeof bin !== 'string') return bin;
+  const trimmed = bin.trim();
+  if (!trimmed) return bin;
+  if (WINDOWS_SPAWNABLE_EXT.test(trimmed)) return trimmed;
+
+  // Bare command names: let PATHEXT / shell resolve; do not invent a path.
+  const looksLikePath = isAbsolute(trimmed)
+    || trimmed.includes('/')
+    || trimmed.includes('\\')
+    || /^[A-Za-z]:/.test(trimmed);
+  if (!looksLikePath) return trimmed;
+
+  for (const ext of WINDOWS_SPAWNABLE_PRIORITY) {
+    const candidate = `${trimmed}${ext}`;
+    if (existsFn(candidate)) return candidate;
+  }
+  return trimmed;
 }
 
 function firstNonEmpty(...values) {
@@ -43,8 +108,32 @@ function pathExists(candidate) {
 
 function whichOnPath(binaryName) {
   try {
-    const command = process.platform === 'win32' ? `where ${binaryName}` : `which ${binaryName}`;
-    const output = execSync(command, {
+    if (process.platform === 'win32') {
+      // Prefer execFile so the binary name is not re-parsed by a shell.
+      // `where` lists every PATHEXT match; the extensionless npm shim is often first
+      // and cannot be spawned — selectWindowsWhereMatch prefers .cmd/.exe.
+      let output;
+      try {
+        output = execFileSync('where.exe', [binaryName], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          env: process.env,
+          windowsHide: true,
+        });
+      } catch {
+        // Fallback for systems where where.exe is not on PATH of the IDE process.
+        output = execSync(`where ${binaryName}`, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          env: process.env,
+          windowsHide: true,
+        });
+      }
+      const lines = String(output || '').split(/\r?\n/);
+      return selectWindowsWhereMatch(lines);
+    }
+
+    const output = execFileSync('which', [binaryName], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       env: process.env,
@@ -76,12 +165,12 @@ export function resolveCliPath({ binaryName, envKeys = [], homeCandidates = [] }
 
   const envOverride = firstNonEmpty(...envKeys.map((key) => process.env[key]));
   if (envOverride) {
-    return envOverride;
+    return resolveWindowsSpawnableBin(envOverride);
   }
 
-  // `where <name>` (no extension) honors PATHEXT, so it finds `.cmd` shims.
+  // `where <name>` (no extension) honors PATHEXT; we then prefer .cmd/.exe.
   const fromPath = whichOnPath(binaryName);
-  if (fromPath) return fromPath;
+  if (fromPath) return resolveWindowsSpawnableBin(fromPath);
 
   const home = homedir();
   for (const template of homeCandidates) {
@@ -90,7 +179,7 @@ export function resolveCliPath({ binaryName, envKeys = [], homeCandidates = [] }
         .replace('{home}', home)
         .replace('{bin}', exeName)
         .replace('{name}', binaryName);
-      if (pathExists(resolved)) return resolved;
+      if (pathExists(resolved)) return resolveWindowsSpawnableBin(resolved);
     }
   }
 

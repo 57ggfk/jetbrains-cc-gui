@@ -1,7 +1,10 @@
 package com.github.claudecodegui.provider.kimi;
 
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import com.google.gson.JsonObject;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -29,5 +32,15 @@ public class KimiCliBridge extends MarkerCliBridge {
     @Override
     protected void configureExtraEnv(Map<String, String> env) {
         // Reserved for future Kimi-specific env (e.g. KIMI_CODE_HOME).
+    }
+
+    @Override
+    public List<JsonObject> getSessionMessages(String sessionId, String cwd) {
+        try {
+            return new KimiHistoryReader().getSessionMessages(sessionId, cwd);
+        } catch (Exception e) {
+            LOG.warn("[Kimi] Failed to load session messages: " + e.getMessage());
+            return Collections.emptyList();
+        }
     }
 }

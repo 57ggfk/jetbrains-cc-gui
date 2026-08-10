@@ -232,6 +232,10 @@ public final class CliStatusDetector {
 
     /**
      * When the candidate is a bare name, try to resolve an absolute path via which/where.
+     *
+     * <p>On Windows, {@code where} often lists the extensionless npm bash shim first
+     * (e.g. {@code ...\npm\pi}) before the spawnable {@code .cmd}/{@code .exe}. Prefer
+     * spawnable extensions so the displayed path matches what the Node bridge can run.
      */
     private static String resolveWhichLike(String candidate) {
         if (candidate == null || candidate.isBlank()) {
@@ -239,7 +243,7 @@ public final class CliStatusDetector {
         }
         File asFile = new File(candidate);
         if (asFile.isAbsolute() && asFile.isFile()) {
-            return asFile.getAbsolutePath();
+            return preferWindowsSpawnable(asFile.getAbsolutePath());
         }
         try {
             List<String> command = PlatformUtils.isWindows()
@@ -247,19 +251,71 @@ public final class CliStatusDetector {
                     : List.of("which", candidate);
             ProcessResult result = run(command);
             if (result.exitCode == 0 && result.stdout != null) {
-                String first = result.stdout.lines()
+                List<String> lines = result.stdout.lines()
                         .map(String::trim)
                         .filter(line -> !line.isEmpty())
-                        .findFirst()
-                        .orElse(null);
-                if (first != null) {
-                    return first;
+                        .toList();
+                String best = selectWindowsWhereMatch(lines);
+                if (best != null) {
+                    return preferWindowsSpawnable(best);
                 }
             }
         } catch (Exception e) {
             LOG.debug("[CliStatusDetector] which/where failed for " + candidate + ": " + e.getMessage());
         }
-        return candidate;
+        return preferWindowsSpawnable(candidate);
+    }
+
+    /**
+     * Prefer {@code .exe}/{@code .cmd}/{@code .bat} entries from {@code where} output.
+     * Non-Windows: first line.
+     */
+    static String selectWindowsWhereMatch(List<String> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return null;
+        }
+        if (PlatformUtils.isWindows()) {
+            for (String ext : new String[]{".exe", ".cmd", ".bat"}) {
+                for (String line : lines) {
+                    if (line != null && line.length() > ext.length()
+                            && line.regionMatches(true, line.length() - ext.length(), ext, 0, ext.length())) {
+                        return line;
+                    }
+                }
+            }
+        }
+        return lines.get(0);
+    }
+
+    /**
+     * If path has no spawnable Windows extension but a sibling {@code .exe}/{@code .cmd}/{@code .bat}
+     * exists, return that sibling. Bare names and non-Windows are unchanged.
+     */
+    static String preferWindowsSpawnable(String path) {
+        if (!PlatformUtils.isWindows() || path == null || path.isBlank()) {
+            return path;
+        }
+        String trimmed = path.trim();
+        String lower = trimmed.toLowerCase();
+        if (lower.endsWith(".exe") || lower.endsWith(".cmd") || lower.endsWith(".bat")) {
+            return trimmed;
+        }
+        // Bare names rely on PATH+PATHEXT at probe time.
+        File file = new File(trimmed);
+        boolean looksLikePath = file.isAbsolute()
+                || trimmed.indexOf('/') >= 0
+                || trimmed.indexOf('\\') >= 0
+                || (trimmed.length() >= 2 && trimmed.charAt(1) == ':');
+        if (!looksLikePath) {
+            return trimmed;
+        }
+        for (String ext : new String[]{".exe", ".cmd", ".bat"}) {
+            File sibling = new File(trimmed + ext);
+            if (sibling.isFile()) {
+                return sibling.getAbsolutePath();
+            }
+        }
+        return trimmed;
     }
 
     private static ProcessResult run(List<String> command) {
