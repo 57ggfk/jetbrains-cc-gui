@@ -26,6 +26,7 @@ import {
   CONTEXT_COMMANDS,
 } from './hooks/useMessageSender';
 import { applyDiffTheme, getStoredDiffTheme } from './utils/diffTheme';
+import { collectTaskEventsFromMessages } from './utils/taskNotificationMessage';
 import type { Attachment, ChatInputBoxHandle } from './components/ChatInputBox/types';
 import { ToastContainer } from './components/Toast';
 import { ChatHeader } from './components/ChatHeader';
@@ -255,6 +256,27 @@ const App = () => {
     if (isFirstMountRef.current) { isFirstMountRef.current = false; return; }
     if (currentView === 'chat') { forceRefreshPrompts(); }
   }, [currentView]);
+
+  // Recover task events from task-notification user messages. Recent Claude Code
+  // delivers a background agent's terminal report as a plain user message (XML
+  // in content) instead of an SDK task_notification event, so history replay —
+  // and any live session that never fired the SDK path — would otherwise leave
+  // the subagent card stuck on the launch ack text. Derived entries only fill
+  // gaps: a real SDK event already in the map is kept as-is.
+  useEffect(() => {
+    const derived = collectTaskEventsFromMessages(messages);
+    if (Object.keys(derived).length === 0) return;
+    setTaskEvents((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [id, event] of Object.entries(derived)) {
+        if (next[id]) continue;
+        next[id] = event;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [messages, setTaskEvents]);
 
   // ── Session management ──
   const {

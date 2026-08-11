@@ -65,9 +65,11 @@ describe('useSettingsWindowCallbacks', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    // Force setTimeout path so fake timers control deferred batches.
-    delete (window as Window & { requestIdleCallback?: unknown }).requestIdleCallback;
-    delete (window as Window & { cancelIdleCallback?: unknown }).cancelIdleCallback;
+    // Force setTimeout path so fake timers control deferred batches. Asserting
+    // to a plain optional-field type keeps delete legal: intersecting with
+    // Window re-introduces lib.dom's required requestIdleCallback signature.
+    delete (window as { requestIdleCallback?: unknown }).requestIdleCallback;
+    delete (window as { cancelIdleCallback?: unknown }).cancelIdleCallback;
     window.sendToJava = vi.fn();
     window.applyUiFontConfig = vi.fn();
     window.applyCodeFontConfig = vi.fn();
