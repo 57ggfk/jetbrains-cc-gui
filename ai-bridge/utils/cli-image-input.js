@@ -8,7 +8,7 @@
  * - PI / fallback: materialise + Read-tool path injection
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -147,7 +147,9 @@ export async function materializeImageAttachments(attachments, options = {}) {
   }
 
   const tempDir = path.join(os.tmpdir(), TEMP_IMAGE_SUBDIR);
-  await mkdir(tempDir, { recursive: true });
+  // Restrict permissions: chat screenshots must not be readable by other
+  // local users on shared machines (mode only applies on creation).
+  await mkdir(tempDir, { recursive: true, mode: 0o700 });
 
   const paths = [];
   for (const att of attachments) {
@@ -206,7 +208,7 @@ export async function materializeImageAttachments(attachments, options = {}) {
 
     const filePath = path.join(tempDir, safeName);
     try {
-      await writeFile(filePath, buffer);
+      await writeFile(filePath, buffer, { mode: 0o600 });
       paths.push(filePath);
     } catch (err) {
       console.error('[cli-image] failed to write temp image:', err?.message || err);
@@ -214,6 +216,28 @@ export async function materializeImageAttachments(attachments, options = {}) {
   }
 
   return paths;
+}
+
+/**
+ * Delete temp files previously created by materializeImageAttachments.
+ * Only unlinks files directly inside our temp dir; passthrough user paths
+ * (att.path) and anything outside the temp dir are never touched.
+ *
+ * @param {string[]} paths
+ * @returns {Promise<void>}
+ */
+export async function cleanupMaterializedImagePaths(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) return;
+  const tempDir = path.join(os.tmpdir(), TEMP_IMAGE_SUBDIR);
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p) continue;
+    if (path.dirname(path.resolve(p)) !== path.resolve(tempDir)) continue;
+    try {
+      await unlink(p);
+    } catch {
+      // Already removed or never written — best effort cleanup.
+    }
+  }
 }
 
 /**

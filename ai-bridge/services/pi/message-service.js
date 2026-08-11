@@ -35,6 +35,7 @@ import {
 } from '../../utils/marker-protocol.js';
 import {
   buildReadPathPromptWithImages,
+  cleanupMaterializedImagePaths,
   materializeImageAttachments,
 } from '../../utils/cli-image-input.js';
 
@@ -131,8 +132,9 @@ export async function sendMessage(
   // PI headless has no dedicated multimodal flag; inject absolute paths and
   // ask the agent to Read the images (best-effort, same as non-vision Claude path).
   let promptText = message || '';
+  let imagePaths = [];
   try {
-    const imagePaths = await materializeImageAttachments(attachments);
+    imagePaths = await materializeImageAttachments(attachments);
     if (imagePaths.length > 0) {
       promptText = buildReadPathPromptWithImages(promptText, imagePaths);
       logDebug('image attachments', imagePaths.length, imagePaths);
@@ -156,6 +158,7 @@ export async function sendMessage(
 
   const workCwd = cwd && cwd !== 'undefined' && cwd !== 'null' ? cwd : process.cwd();
 
+  try {
   await runCliStreaming({
     bin,
     args,
@@ -216,4 +219,7 @@ export async function sendMessage(
       }
     },
   });
+  } finally {
+    await cleanupMaterializedImagePaths(imagePaths);
+  }
 }

@@ -30,6 +30,19 @@ export function removeQuote(id: string): void {
   registry.delete(id);
 }
 
+/**
+ * Drop registry entries whose tokens are no longer present in the input
+ * (deleted chip, cleared input, message sent). Keeps the module-level map
+ * from growing unbounded over a long session.
+ */
+export function pruneQuoteRegistry(activeIds: ReadonlySet<string>): void {
+  for (const id of registry.keys()) {
+    if (!activeIds.has(id)) {
+      registry.delete(id);
+    }
+  }
+}
+
 export function makeQuoteToken(id: string): string {
   return `${TOKEN_START}${id}${TOKEN_END}`;
 }

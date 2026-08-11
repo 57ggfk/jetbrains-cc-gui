@@ -5,6 +5,13 @@
  * can run outside the chat marker protocol (no [MESSAGE_START]/SESSION_ID]/SEND_ERROR]).
  * Optional progressive tokens go through `onDelta` only — callers emit their own
  * `[CONTENT_DELTA]` markers for Java process runners.
+ *
+ * SECURITY NOTE: prompts here embed third-party controlled text (git diffs,
+ * pasted content). Grok runs with permissionMode 'deny' (all tool requests
+ * auto-rejected). Kimi / OpenCode / PI expose no headless tool-disable flag;
+ * they rely on each CLI's non-interactive defaults plus a prompt-level
+ * "Do not run tools" instruction. If these CLIs add a read-only/no-tools
+ * flag, wire it here.
  */
 
 import { homedir } from 'os';
@@ -53,7 +60,13 @@ function isDefaultModelToken(model) {
 
 function resolveModelFlag(model) {
   if (isDefaultModelToken(model)) return null;
-  return String(model).trim();
+  const value = String(model).trim();
+  // A leading dash would be parsed as a new flag instead of the --model value.
+  if (value.startsWith('-')) {
+    console.error(`[CliAsk] dropping suspicious model id: ${value}`);
+    return null;
+  }
+  return value;
 }
 
 function extractAcpText(content) {
@@ -238,9 +251,11 @@ async function askGrok(prompt, { model, cwd, onDelta } = {}) {
     apiKey: resolvedAuth.apiKey,
     baseUrl: resolvedAuth.baseUrl,
     authMethod: resolvedAuth.authMethod,
-    // Text-only features: auto-approve any residual tool prompts so the turn
-    // never blocks on a permission dialog that cannot be rendered.
-    permissionMode: 'bypassPermissions',
+    // Text-only, session-less features: auto-DENY all tool requests. There is
+    // no UI to render a permission dialog, and the prompt embeds third-party
+    // controlled text (git diffs / pasted content) that must not be able to
+    // drive silent tool execution.
+    permissionMode: 'deny',
     env,
     onEvent: (type, payload) => {
       if (type !== 'notification') return;

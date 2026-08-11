@@ -2121,13 +2121,13 @@ public class CodemossSettingsService {
     }
 
     private JsonObject buildAiFeatureAvailability() {
-        // Probe all headless CLIs once via the TTL-cached detectAll() path.
-        // Per-tool detect() is uncached and can spawn processes for up to 5s each —
-        // doing that for every provider (and twice for commit + enhancer) freezes
-        // the JCEF UI thread when Settings opens.
+        // Stale-while-revalidate: reuse the last probe result and refresh it in
+        // the background. Per-tool detect() can spawn processes for up to 5s
+        // each — re-probing synchronously after TTL expiry freezes the JCEF UI
+        // thread when Settings opens or an enhance is triggered.
         Map<String, CliToolStatus> cliStatuses;
         try {
-            cliStatuses = CliStatusDetector.detectAll();
+            cliStatuses = CliStatusDetector.detectAllStaleWhileRevalidate();
         } catch (Exception e) {
             LOG.warn("[CodemossSettings] Failed to batch-detect CLI tools: " + e.getMessage());
             cliStatuses = java.util.Collections.emptyMap();

@@ -670,6 +670,7 @@ export async function runAcpTurn({
     // Agent may also call session/request_permission first; double-gate is OK.
     authorizeCreate: async (info) => {
       if (isAutoApproveMode(effectiveMode)) return true;
+      if (isDenyAllMode(effectiveMode)) return false;
       try {
         return await requestPermissionFromJava('run_terminal_command', {
           command: info.commandLine || info.command,
@@ -903,6 +904,16 @@ function isAcceptEditsMode(permissionMode) {
   return m === 'acceptedits' || m === 'accept_edits' || m === 'accept-edits';
 }
 
+/**
+ * Session-less one-shot asks (commit message / prompt enhancer) cannot render
+ * a permission dialog. 'deny' auto-rejects every tool request instead of
+ * auto-approving, so injected prompt text cannot drive tool execution.
+ */
+export function isDenyAllMode(permissionMode) {
+  const m = String(permissionMode || '').trim().toLowerCase();
+  return m === 'deny' || m === 'denyall' || m === 'deny-all' || m === 'never';
+}
+
 function isExecutionLike(toolName, kind, input) {
   if (kind === 'execute') return true;
   if (/bash|shell|terminal|execute|command|run_terminal/i.test(String(toolName || ''))) return true;
@@ -921,6 +932,23 @@ export async function resolveAcpPermissionDecision(
 ) {
   const info = extractPermissionToolInfo(params || {});
   const { toolName, input, kind, options } = info;
+
+  if (isDenyAllMode(permissionMode)) {
+    const rejectId = pickOptionId(
+      options,
+      ['reject-once', 'reject_once', 'reject', 'deny', 'cancel', 'cancelled'],
+      null
+    );
+    return {
+      allowed: false,
+      optionId: rejectId,
+      toolName,
+      source: 'deny-all',
+      response: rejectId
+        ? { outcome: { outcome: 'selected', optionId: rejectId } }
+        : { outcome: { outcome: 'cancelled' } },
+    };
+  }
 
   if (autoApprove || isAutoApproveMode(permissionMode)) {
     const optionId = pickOptionId(

@@ -260,6 +260,17 @@ export function useCompletionDropdown<T>({
         };
       }
 
+      // Path-navigation queries ("src/comp") can never match a plain filename
+      // label or a (relative) description — match on the trailing segment only,
+      // mirroring the backend parseQuery split.
+      const lastSlash = q.lastIndexOf('/');
+      if (lastSlash >= 0 && lastSlash === q.length - 1) {
+        // Just entered a directory ("@src/"): keep previous items visible
+        // until the server responds instead of flashing an empty list.
+        return { ...prev, triggerQuery };
+      }
+      const matchTerm = lastSlash >= 0 ? q.slice(lastSlash + 1) : q;
+
       const filteredRaw: T[] = [];
       const filteredItems: DropdownItemData[] = [];
       for (const raw of source) {
@@ -268,7 +279,7 @@ export function useCompletionDropdown<T>({
         const desc = (item.description || '').toLowerCase();
         // Prefer filename label. Absolute description paths must not match —
         // project roots like "jetbrains-cc-gui" would match nearly every letter.
-        if (label.includes(q) || fuzzySubsequenceMatchLocal(label, q)) {
+        if (label.includes(matchTerm) || fuzzySubsequenceMatchLocal(label, matchTerm)) {
           filteredRaw.push(raw);
           filteredItems.push(item);
           continue;
@@ -276,7 +287,7 @@ export function useCompletionDropdown<T>({
         if (
           desc &&
           !isAbsoluteLikePathLocal(desc) &&
-          (desc.includes(q) || fuzzySubsequenceMatchLocal(desc, q))
+          (desc.includes(matchTerm) || fuzzySubsequenceMatchLocal(desc, matchTerm))
         ) {
           filteredRaw.push(raw);
           filteredItems.push(item);

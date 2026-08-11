@@ -50,14 +50,43 @@ export function parseModelsCacheJson(jsonText) {
   return { models, seen };
 }
 
+/**
+ * Extract the body of a TOML section, line-based so a top-level `[` inside a
+ * section body (e.g. an unindented multi-line array) cannot truncate it early.
+ * Returns null when the section is absent.
+ */
+function extractTomlSection(src, sectionName) {
+  const lines = String(src).split('\n');
+  let inSection = false;
+  let found = false;
+  const body = [];
+  for (const line of lines) {
+    const header = line.match(/^\s*\[([^\]]+)\]/);
+    if (header) {
+      if (inSection) break;
+      inSection = header[1].trim() === sectionName;
+      found = found || inSection;
+      continue;
+    }
+    if (inSection) body.push(line);
+  }
+  return found ? body.join('\n') : null;
+}
+
 export function parseGrokProfilesFromToml(tomlText, seenSet = new Set()) {
   const models = [];
   let defaultModel = null;
   const src = String(tomlText || '');
 
-  // Grok keeps `default` inside the `[models]` section (not at TOML top level),
-  // so this intentionally matches anywhere in the file, first occurrence wins.
-  const defaultMatch = src.match(/^\s*default\s*=\s*"([^"]+)"/m);
+  // Grok keeps `default` inside the `[models]` section. Restrict the match to
+  // that section (falling back to the top-level region before the first
+  // header) so a `default = "..."` key inside a [model.*] profile or an
+  // unrelated section is not misread as the global default.
+  const modelsBody = extractTomlSection(src, 'models');
+  const defaultScope = modelsBody != null
+    ? modelsBody
+    : src.split(/^\s*\[/m)[0];
+  const defaultMatch = defaultScope.match(/^\s*default\s*=\s*"([^"]+)"/m);
   if (defaultMatch) {
     defaultModel = defaultMatch[1].trim();
   }

@@ -24,6 +24,7 @@ import {
 } from '../../utils/marker-protocol.js';
 import {
   GROK_IMAGE_ONLY_FALLBACK_TEXT,
+  cleanupMaterializedImagePaths,
   materializeImageAttachments,
 } from '../../utils/cli-image-input.js';
 
@@ -247,7 +248,18 @@ function resolveModelFlag(model) {
   return trimmed;
 }
 
-function buildOpenCodeArgs({ message, sessionId, model, imagePaths = [] }) {
+/**
+ * Build `opencode run` argv.
+ *
+ * IMPORTANT: prompt must come BEFORE `-f/--file`. OpenCode's yargs defines
+ * `--file` as an array option, so trailing positionals after `-f <path>` are
+ * greedily consumed as extra file paths → `File not found: <prompt>`.
+ * Avoid `run -- <msg>` (broken on some OpenCode versions).
+ *
+ * @param {{ message?: string, sessionId?: string, model?: string, imagePaths?: string[] }} opts
+ * @returns {string[]}
+ */
+export function buildOpenCodeArgs({ message, sessionId, model, imagePaths = [] }) {
   const args = ['run', '--format', 'json'];
   const modelFlag = resolveModelFlag(model);
   if (modelFlag) {
@@ -256,14 +268,14 @@ function buildOpenCodeArgs({ message, sessionId, model, imagePaths = [] }) {
   if (isNonEmptySessionId(sessionId)) {
     args.push('--session', sessionId.trim());
   }
-  // Multimodal: `opencode run -f <path>` (aligned with desktop-cc-gui).
+  // Prompt before file flags so yargs does not treat it as another --file value.
+  args.push(safePromptArg(message));
+  // Multimodal: `opencode run <prompt> -f <path>`
   for (const imagePath of imagePaths) {
     if (imagePath) {
       args.push('-f', imagePath);
     }
   }
-  // Keep prompt positional (opencode run -- <msg> is broken on some versions).
-  args.push(safePromptArg(message));
   return args;
 }
 
@@ -308,7 +320,7 @@ export async function sendMessage(
   logDebug(
     'spawn',
     bin,
-    args.slice(0, -1).join(' '),
+    `format=json model=${model || '-'} session=${resolvedSessionId || '-'}`,
     `promptLen=${String(promptText || '').length}`,
     `images=${imagePaths.length}`
   );
@@ -320,6 +332,7 @@ export async function sendMessage(
   const workCwd = cwd && cwd !== 'undefined' && cwd !== 'null' ? cwd : process.cwd();
   const seenToolStarts = new Set();
 
+  try {
   await runCliStreaming({
     bin,
     args,
@@ -357,4 +370,7 @@ export async function sendMessage(
       }
     },
   });
+  } finally {
+    await cleanupMaterializedImagePaths(imagePaths);
+  }
 }

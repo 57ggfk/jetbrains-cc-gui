@@ -203,7 +203,10 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                 if (outcome.success && outcome.text != null && !outcome.text.isEmpty()) {
                     LOG.info("[PromptEnhancer] Enhancement successful"
                             + (outcome.partial ? " (partial)" : ""));
-                    sendEnhanceResult(true, outcome.text, null, true, usageMeta);
+                    // Surface partial-cause (e.g. timeout) so the user knows the
+                    // result was truncated instead of silently accepting it.
+                    sendEnhanceResult(true, outcome.text,
+                            outcome.partial ? outcome.error : null, true, usageMeta);
                 } else if (outcome.text != null && !outcome.text.isEmpty()) {
                     // Failed but we already streamed partial text — keep it usable.
                     LOG.warn("[PromptEnhancer] Enhancement incomplete: " + outcome.error);
@@ -592,6 +595,9 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             final Object streamLock = new Object();
             final AtomicReference<String> latestPreview = new AtomicReference<>("");
             final AtomicBoolean progressScheduled = new AtomicBoolean(false);
+            // Set once the process run ends (success/timeout/failure); late reader
+            // output after drain timeout must not overwrite the final result.
+            final AtomicBoolean finished = new AtomicBoolean(false);
             final JsonObject usageMeta = buildUsageMeta(promptEnhancerConfig, chatProvider, chatModel);
 
             try {
@@ -602,7 +608,9 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                         timeoutSeconds,
                         READER_DRAIN_SECONDS,
                         line -> {
-                            allOutput.append(line).append("\n");
+                            synchronized (streamLock) {
+                                allOutput.append(line).append("\n");
+                            }
                             LOG.info("[PromptEnhancer] Node.js: " + line);
                             if (line.startsWith("[CONTENT_DELTA]")) {
                                 String payload = line.substring("[CONTENT_DELTA]".length()).trim();
@@ -612,40 +620,55 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                                         streamed.append(delta);
                                         latestPreview.set(streamed.toString());
                                     }
-                                    scheduleEnhanceProgress(latestPreview, progressScheduled, usageMeta);
+                                    scheduleEnhanceProgress(latestPreview, progressScheduled, finished, usageMeta);
                                 }
                             } else if (line.startsWith("[ENHANCED_ERROR]")) {
                                 String err = line.substring("[ENHANCED_ERROR]".length()).trim();
                                 if (!err.isEmpty()) {
-                                    errorMessage.append(err);
+                                    synchronized (streamLock) {
+                                        errorMessage.append(err);
+                                    }
                                 }
                             } else if (line.startsWith("[ENHANCED]")) {
                                 String enhancedText = line.substring("[ENHANCED]".length()).trim();
                                 enhancedText = enhancedText.replace("{{NEWLINE}}", "\n");
-                                response.append(enhancedText);
+                                synchronized (streamLock) {
+                                    response.append(enhancedText);
+                                }
                             }
                         }
                 );
                 LOG.info("[PromptEnhancer] Node.js process exit code: " + exitCode);
 
-                String finalText = response.length() > 0
-                        ? response.toString()
-                        : streamed.toString();
-                if (errorMessage.length() > 0) {
+                finished.set(true);
+                // Reads must hold streamLock: on drain timeout the reader thread
+                // may still be alive and appending to these builders.
+                final String finalText;
+                final String errorText;
+                final String outputSnapshot;
+                synchronized (streamLock) {
+                    finalText = response.length() > 0
+                            ? response.toString()
+                            : streamed.toString();
+                    errorText = errorMessage.toString();
+                    outputSnapshot = allOutput.toString();
+                }
+                if (errorText.length() > 0) {
                     if (finalText != null && !finalText.isEmpty()) {
-                        return new EnhanceOutcome(false, true, finalText, errorMessage.toString());
+                        return new EnhanceOutcome(false, true, finalText, errorText);
                     }
-                    return new EnhanceOutcome(false, false, null, errorMessage.toString());
+                    return new EnhanceOutcome(false, false, null, errorText);
                 }
                 if (finalText == null || finalText.isEmpty()) {
-                    if (allOutput.length() > 0) {
-                        LOG.warn("[PromptEnhancer] [ENHANCED] marker not found, full output:\n" + allOutput);
+                    if (!outputSnapshot.isEmpty()) {
+                        LOG.warn("[PromptEnhancer] [ENHANCED] marker not found, full output:\n" + outputSnapshot);
                     }
                     return new EnhanceOutcome(false, false, null, "Enhancement failed: empty result returned");
                 }
                 return new EnhanceOutcome(true, false, finalText, null);
             } catch (TimeoutException te) {
                 LOG.warn("[PromptEnhancer] " + te.getMessage());
+                finished.set(true);
                 String partial;
                 synchronized (streamLock) {
                     partial = streamed.toString();
@@ -655,6 +678,8 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                             "Prompt enhancement timed out; showing partial result");
                 }
                 return new EnhanceOutcome(false, false, null, te.getMessage());
+            } finally {
+                finished.set(true);
             }
 
         } catch (Exception e) {
@@ -679,17 +704,26 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
 
     /**
      * Coalesce EDT progress updates so rapid CONTENT_DELTA lines do not flood JCEF.
+     * Updates are dropped once {@code finished} is set so a late delta from a
+     * zombie reader cannot revert the dialog to the loading state.
      */
     private void scheduleEnhanceProgress(
             AtomicReference<String> latestPreview,
             AtomicBoolean progressScheduled,
+            AtomicBoolean finished,
             JsonObject usageMeta
     ) {
+        if (finished.get()) {
+            return;
+        }
         if (!progressScheduled.compareAndSet(false, true)) {
             return;
         }
         ApplicationManager.getApplication().invokeLater(() -> {
             progressScheduled.set(false);
+            if (finished.get()) {
+                return;
+            }
             String preview = latestPreview.get();
             if (preview != null && !preview.isEmpty()) {
                 sendEnhanceResult(true, preview, null, false, usageMeta);

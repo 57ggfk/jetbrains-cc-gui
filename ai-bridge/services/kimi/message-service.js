@@ -31,6 +31,7 @@ import {
 } from '../../utils/marker-protocol.js';
 import {
   buildKimiPromptWithImages,
+  cleanupMaterializedImagePaths,
   materializeImageAttachments,
 } from '../../utils/cli-image-input.js';
 
@@ -189,8 +190,9 @@ export async function sendMessage(
   // Headless Kimi has no multimodal -p payload; inject absolute paths +
   // ReadMediaFile instructions (same approach as desktop-cc-gui).
   let promptText = message || '';
+  let imagePaths = [];
   try {
-    const imagePaths = await materializeImageAttachments(attachments);
+    imagePaths = await materializeImageAttachments(attachments);
     if (imagePaths.length > 0) {
       promptText = buildKimiPromptWithImages(promptText, imagePaths);
       logDebug('image attachments', imagePaths.length, imagePaths);
@@ -219,6 +221,7 @@ export async function sendMessage(
   // skip calls already emitted (stable key: id + args, since id may be absent).
   const seenToolCallKeys = new Set();
 
+  try {
   await runCliStreaming({
     bin,
     args,
@@ -262,4 +265,7 @@ export async function sendMessage(
       }
     },
   });
+  } finally {
+    await cleanupMaterializedImagePaths(imagePaths);
+  }
 }

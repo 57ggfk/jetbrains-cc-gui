@@ -22,9 +22,7 @@ function file(partial: Partial<FileItem> & { name: string; path: string }): File
 describe('fileReferenceProvider matching', () => {
   beforeEach(() => {
     resetFileReferenceState();
-    // @ts-expect-error test cleanup
     delete window.onFileListResult;
-    // @ts-expect-error test cleanup
     delete window.sendToJava;
   });
 

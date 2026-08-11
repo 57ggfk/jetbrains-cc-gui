@@ -9,6 +9,7 @@ import {
   quotePreview,
   createQuoteChipElement,
   expandQuoteTokens,
+  pruneQuoteRegistry,
 } from './quoteRegistry';
 
 describe('quoteRegistry token round-trip', () => {
@@ -35,6 +36,28 @@ describe('quoteRegistry token round-trip', () => {
     const first = makeQuoteToken(registerQuote('aaa'));
     const second = makeQuoteToken(registerQuote('bbb'));
     expect(expandQuoteTokens(`${first}${second}`)).toBe('> aaa\n> bbb\n');
+  });
+});
+
+describe('pruneQuoteRegistry', () => {
+  it('drops entries whose ids are no longer active and keeps the rest', () => {
+    const keep = registerQuote('still here');
+    const stale = registerQuote('deleted chip');
+
+    pruneQuoteRegistry(new Set([keep]));
+
+    expect(getQuote(keep)).toBeDefined();
+    expect(getQuote(stale)).toBeUndefined();
+  });
+
+  it('prunes everything when the input was cleared', () => {
+    const a = registerQuote('a');
+    const b = registerQuote('b');
+
+    pruneQuoteRegistry(new Set());
+
+    expect(getQuote(a)).toBeUndefined();
+    expect(getQuote(b)).toBeUndefined();
   });
 });
 

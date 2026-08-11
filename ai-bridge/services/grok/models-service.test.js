@@ -92,6 +92,32 @@ base_url = "https://example.com/v1"
   assert.deepEqual(models[0], { id: 'grok', label: 'Grok 4.5', description: 'grok-4.5' });
 });
 
+test('parseGrokProfilesFromToml ignores default keys inside model profiles', () => {
+  const toml = `
+[model."grok-custom"]
+model = "grok-4.5"
+default = "not-the-global-default"
+
+[models]
+default = "grok-real"
+`;
+
+  const { defaultModel } = parseGrokProfilesFromToml(toml);
+  assert.equal(defaultModel, 'grok-real');
+});
+
+test('parseGrokProfilesFromToml accepts a top-level default without [models]', () => {
+  const toml = `
+default = "grok-top"
+
+[model.grok]
+model = "grok-4.5"
+`;
+
+  const { defaultModel } = parseGrokProfilesFromToml(toml);
+  assert.equal(defaultModel, 'grok-top');
+});
+
 test('resolveGrokPickerModels prefers config profiles over models_cache dump', () => {
   const profiles = [{ id: 'grok', label: 'Grok 4.5', description: 'grok-4.5' }];
   const cache = [

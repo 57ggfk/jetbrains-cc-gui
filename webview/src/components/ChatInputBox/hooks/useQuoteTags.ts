@@ -3,6 +3,7 @@ import {
   createQuoteChipElement,
   getQuote,
   hasQuoteToken,
+  pruneQuoteRegistry,
   quoteTokenRegex,
   removeQuote,
 } from '../utils/quoteRegistry.js';
@@ -59,19 +60,36 @@ export function useQuoteTags({ editableRef }: UseQuoteTagsOptions): UseQuoteTags
     const el = editableRef.current;
     if (!el) return;
 
-    // Collect text nodes that still carry a raw token, skipping already-rendered tags.
+    // Collect every quote id still present — raw tokens in text nodes and
+    // already-rendered chips — then drop registry entries that are gone
+    // (chip deleted, input cleared, message sent) so the map cannot leak.
+    const activeIds = new Set<string>();
     const tokenTextNodes: Text[] = [];
     const walk = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        if (hasQuoteToken(node.textContent || '')) tokenTextNodes.push(node as Text);
+        const content = node.textContent || '';
+        if (hasQuoteToken(content)) {
+          tokenTextNodes.push(node as Text);
+          const scan = quoteTokenRegex();
+          let m: RegExpExecArray | null;
+          while ((m = scan.exec(content)) !== null) {
+            activeIds.add(m[1]);
+          }
+        }
       } else if (node.nodeType === Node.ELEMENT_NODE) {
         const element = node as HTMLElement;
-        if (!element.classList.contains('quote-tag') && !element.classList.contains('file-tag')) {
+        if (element.classList.contains('quote-tag')) {
+          const id = element.getAttribute('data-quote-id');
+          if (id) activeIds.add(id);
+          return;
+        }
+        if (!element.classList.contains('file-tag')) {
           node.childNodes.forEach(walk);
         }
       }
     };
     el.childNodes.forEach(walk);
+    pruneQuoteRegistry(activeIds);
     if (tokenTextNodes.length === 0) return;
 
     // Chip virtual length equals token length, so the saved offset stays valid.
