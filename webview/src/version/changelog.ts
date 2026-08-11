@@ -13,6 +13,76 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    version: '0.5.1',
+    date: '2026-08-11',
+    content: {
+      en: `✨ Features
+- Add **session history for PI / OpenCode / Kimi**: list, open, and delete on-disk CLI sessions the same way Claude / Codex / Grok already do, with provider-specific readers (PI JSONL, OpenCode storage, Kimi \`state.json\` + \`wire.jsonl\`, including legacy Kimi paths) and reconstructed chat (text, thinking, tool calls / results) (by @zhukunpenglinyutong)
+- Add **OpenCode 1.x SQLite history**: prefer \`opencode.db\` for list / load / delete while still merging the legacy JSON storage tree so unmigrated installs stay visible (by @zhukunpenglinyutong)
+- Add **history model / agent restore and multi-provider export**: reopening a history row restores the session model (and agent when known); export routes through Claude / Codex / Grok / OpenCode / Kimi / Pi readers and records the row provider (by @zhukunpenglinyutong)
+- Add **Grok dynamic model discovery via \`listModels\`**: the Grok model picker loads the live CLI catalog instead of a static built-in list (by @toxeh)
+- Add **conversation quote-into-input**: quote selected assistant / user text into the chat bar as removable inline chips via a message button, context menu, or \`Ctrl/Cmd+Shift+Q\`, then expand chips back to Markdown blockquotes on send (by @Merzley)
+- Expand **Prompt Enhancer and Commit AI to Grok / Kimi / OpenCode / Pi**: session-less one-shot \`cli-ask\` runs the same CLI set as chat; Auto mode prefers the current chat provider, and settings / model panels cover all six engines (by @zhukunpenglinyutong)
+- Add **CLI image attachments** for Grok / Kimi / OpenCode / Pi chat sends (materialized files, ACP image blocks, path injection / \`-f\` flags as needed), including a Grok image-only fallback text block (by @zhukunpenglinyutong)
+- Add the **\`/mcp\` built-in slash command** to Claude suggestion list so MCP server status and remote OAuth entry work from the plugin (by @hebulin, closes #1521)
+- Surface **prompt-enhancer usage meta** (mode · CLI · model) while enhancement runs, with a shortcut into Prompt Enhancer settings (by @zhukunpenglinyutong)
+- Add **model pin / provider grouping** in the model selector: pin favorites per provider, group large vendor-prefixed catalogs, lower the search threshold, and keep the search row sticky (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Stabilize **CLI model UI across navigation**: cache CLI model catalogs when leaving chat for history / settings, keep showing the selected model id while catalogs load, and use proximity-based toolbar compact mode for all CLI providers (by @zhukunpenglinyutong)
+- Soften the **toolbar selector compact threshold** from 20px to 10px so model / mode / provider labels stay expanded longer before collapsing to icon-only (by @zhukunpenglinyutong)
+- Prefer the **chat-selected model in prompt-enhancer Auto mode** when the provider matches, and extract nested OpenCode 1.x CLI error payloads so failures show the real message (by @zhukunpenglinyutong)
+- Offload **Commit AI generation off the EDT**: snapshot selected Changes on the UI thread, then run git4idea diff / repo lookup / AI setup on a pooled thread (by @zhukunpenglinyutong)
+- Harden **session-less CLI asks and model parsing**: Grok one-shot asks use deny-all permissions (no tools from third-party prompt text), drop model ids that look like CLI flags, expand Grok sentinel normalization (\`default\` / \`auto\` / … → \`grok-4.5\`), scope TOML default model lookup to \`[models]\`, clean up temp image paths after Kimi / OpenCode sends, and place OpenCode prompts before \`-f\` (by @zhukunpenglinyutong, @toxeh)
+- Share a **HistoryPathMatcher** across CLI history readers (\`/tmp\` vs \`/private/tmp\`, parent / child cwd, case-insensitive Windows paths) so sessions under subfolders are listed reliably (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **daemon idle probes after system resume**: generation-scoped lifecycle, wall-time suspend detection, and heartbeat-version-bound probes prevent coordinated restart storms and late death decisions against replacement processes (by @jianhong-li, refs #1601)
+- Fix **IDE theme repaint for every open session**: ThemeConfigService keeps a set of registered callbacks so all open chat windows repaint instead of only the last one (by @hebulin, closes #1586)
+- Fix **completion sound / success toast on manual Stop** for Claude and Codex — interrupted turns no longer play the finished-task cue (by @hebulin, closes #1597)
+- Fix **Claude async subagent report delivery**: recover \`<task-notification>\` user messages as task events (live + history), keep launch-ack agents running until a terminal event, and keep StatusPanel scoped to the full conversation while any async agent is alive (by @gadfly3173)
+- Fix **\`@\` file search ranking and dropdown flicker**: IDE-style fuzzy scoring (name / relative path only), requestId correlation, optimistic local re-filter, and a dropdown that keeps prior items while loading (by @zhukunpenglinyutong)
+- Fix **Codex model picker dropping built-ins**: always merge plugin custom models + dynamic catalog + built-in \`CODEX_MODELS\` so Sol / Terra / Luna / 5.x stay selectable when a custom provider returns only a single default (by @zhukunpenglinyutong)
+- Fix **Grok default / sentinel model ids** normalizing to \`grok-4.5\` (not remapping to a bare \`grok\`), including saved-state migration for \`default\` / \`(default)\` / case variants (by @toxeh, @zhukunpenglinyutong)
+- Fix **Windows CLI binary resolution** for extensionless npm shims: prefer \`.exe\` / \`.cmd\` / \`.bat\` so PI / OpenCode / Kimi no longer fail with false CLI-not-found / \`ENOENT\` (by @zhukunpenglinyutong)
+- Fix **assistant markdown horizontal overflow** in JCEF: add \`word-break: break-word\` so long URLs / identifiers wrap inside the message container (by @hebulin, closes #1508)
+- Fix **streaming connection status** to use the provider dynamic display name (by @toxeh)
+- Fix **changelog dialog inline emphasis**: render bold, italic, bold-italic, and inline code instead of showing raw \`**\` markers (by @gadfly3173)`,
+      zh: `✨ 新功能
+- 新增 **PI / OpenCode / Kimi 会话历史**：与 Claude / Codex / Grok 一样可列表、打开、删除本地 CLI 会话；按 provider 读取磁盘格式（PI JSONL、OpenCode storage、Kimi \`state.json\` + \`wire.jsonl\`，含旧版 Kimi 路径），并重建文本 / 思考 / 工具调用与结果（by @zhukunpenglinyutong）
+- 新增 **OpenCode 1.x SQLite 历史**：优先读取 \`opencode.db\` 做列表 / 加载 / 删除，同时合并旧版 JSON storage，未迁移安装仍可见（by @zhukunpenglinyutong）
+- 新增 **历史恢复模型 / Agent 与多 provider 导出**：重新打开历史行会恢复该会话使用的模型（以及已知的 agent）；导出走 Claude / Codex / Grok / OpenCode / Kimi / Pi 各自 reader，并写入该行的 provider（by @zhukunpenglinyutong）
+- 新增 **Grok 动态模型发现（\`listModels\`）**：Grok 模型选择器加载 CLI 实时目录，而不再只依赖静态内置列表（by @toxeh）
+- 新增 **对话引用到输入框**：可通过消息按钮、右键菜单或 \`Ctrl/Cmd+Shift+Q\` 将选中文本以可移除的引用 chip 插入聊天栏，发送时再展开为 Markdown 引用块（by @Merzley）
+- 扩展 **Prompt Enhancer 与 Commit AI 至 Grok / Kimi / OpenCode / Pi**：通过无会话的 \`cli-ask\` 使用与聊天相同的 CLI 集合；Auto 模式优先当前聊天 provider，设置与模型面板覆盖全部六个引擎（by @zhukunpenglinyutong）
+- 新增 **CLI 图片附件** 支持 Grok / Kimi / OpenCode / Pi 发送（落盘文件、ACP 图片块、路径注入 / \`-f\` 等），Grok 纯图片消息会补兜底文本块（by @zhukunpenglinyutong）
+- 新增 Claude 内置斜线命令 **\`/mcp\`**，可在插件中查看 MCP 服务器状态并进入远程 OAuth 入口（by @hebulin，关闭 #1521）
+- 展示 **Prompt 增强运行元信息**（模式 · CLI · 模型），增强过程中可见，并提供跳转 Prompt Enhancer 设置的快捷入口（by @zhukunpenglinyutong）
+- 模型选择器支持 **置顶收藏与按 provider 分组**：按 provider 固定收藏、对大体量 vendor 前缀目录分组、降低搜索触发阈值，并保持搜索行 sticky（by @zhukunpenglinyutong）
+
+🔧 优化
+- 稳定 **跨页面 CLI 模型 UI**：从聊天切到历史 / 设置再返回时缓存模型目录；目录加载中仍显示当前选中模型 id；所有 CLI provider 统一为基于间距的工具栏紧凑模式（by @zhukunpenglinyutong）
+- 将 **工具栏选择器紧凑阈值** 从 20px 放宽到 10px，模型 / 模式 / provider 标签在更窄宽度下仍尽量显示文字（by @zhukunpenglinyutong）
+- Prompt Enhancer Auto 模式在 provider 匹配时 **优先聊天所选模型**，并解析 OpenCode 1.x 嵌套错误字段，失败时展示真实错误信息（by @zhukunpenglinyutong）
+- **Commit AI 生成移出 EDT**：在 UI 线程快照选中 Changes，再在后台线程执行 git4idea diff / 仓库查找 / AI 调用（by @zhukunpenglinyutong）
+- 加固 **无会话 CLI 请求与模型解析**：Grok 一次性请求使用 deny-all（第三方 prompt 文本不可驱动工具）、丢弃形如 CLI flag 的 model id、扩展 Grok sentinel 归一化（\`default\` / \`auto\` / … → \`grok-4.5\`）、TOML 默认模型仅在 \`[models]\` 范围查找、Kimi / OpenCode 发送后清理临时图片路径，并将 OpenCode prompt 放在 \`-f\` 之前（by @zhukunpenglinyutong、@toxeh）
+- CLI 历史 reader 共用 **HistoryPathMatcher**（\`/tmp\` vs \`/private/tmp\`、父子 cwd、Windows 大小写路径），子目录下的会话也能稳定列出（by @zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **系统休眠唤醒后的 daemon 空闲探测**：按 generation 隔离生命周期，用墙钟检测 suspend，并用 heartbeat 版本绑定探测结果，避免协同重启风暴与误杀替代进程（by @jianhong-li，关联 #1601）
+- 修复 **IDE 主题切换只刷新最后一个会话**：ThemeConfigService 改为维护回调集合，所有打开的聊天窗同步重绘（by @hebulin，关闭 #1586）
+- 修复 Claude / Codex **手动 Stop 仍播放完成音 / 成功 toast**，中断轮次不再当作任务完成（by @hebulin，关闭 #1597）
+- 修复 **Claude 异步子代理报告投递**：从 \`<task-notification>\` 用户消息恢复 task 事件（实时 + 历史），启动 ack 的 agent 保持运行直到终态事件，且存在异步 agent 时 StatusPanel 始终覆盖整段会话（by @gadfly3173）
+- 修复 **\`@\` 文件搜索排序与下拉闪烁**：IDE 风格模糊打分（仅文件名 / 相对路径）、requestId 关联、按键乐观本地过滤，以及加载时保留旧结果避免闪空（by @zhukunpenglinyutong）
+- 修复 **Codex 模型选择器丢掉内置模型**：始终合并插件自定义模型 + 动态 catalog + 内置 \`CODEX_MODELS\`，自定义 provider 只返回单一默认时仍可选 Sol / Terra / Luna / 5.x（by @zhukunpenglinyutong）
+- 修复 **Grok 默认 / sentinel 模型 id** 归一化为 \`grok-4.5\`（不再映射成裸 \`grok\`），并迁移 \`default\` / \`(default)\` / 大小写变体的已存状态（by @toxeh、@zhukunpenglinyutong）
+- 修复 **Windows 上无扩展名 npm shim 的 CLI 解析**：优先 \`.exe\` / \`.cmd\` / \`.bat\`，避免 PI / OpenCode / Kimi 误报 CLI not found / \`ENOENT\`（by @zhukunpenglinyutong）
+- 修复 JCEF 中 **助手 Markdown 横向溢出**：补充 \`word-break: break-word\`，长 URL / 标识符可在消息容器内换行（by @hebulin，关闭 #1508）
+- 修复 **流式连接状态** 使用 provider 的动态 displayName（by @toxeh）
+- 修复 **更新日志对话框行内强调**：正确渲染粗体 / 斜体 / 粗斜体与行内代码，不再原样显示 \`**\`（by @gadfly3173）`,
+    },
+  },
+  {
     version: '0.5',
     date: '2026-08-09',
     content: {
