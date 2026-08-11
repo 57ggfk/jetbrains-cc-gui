@@ -58,6 +58,29 @@ describe('useFileTags', () => {
     expect(editable.querySelectorAll('.file-tag').length).toBe(0);
   });
 
+  it('does not close completions or rewrite DOM for in-progress @query', () => {
+    const editable = createEditable();
+    editable.textContent = '@b';
+    const textNode = editable.firstChild;
+    const onCloseCompletions = vi.fn();
+
+    const { result } = renderHook(() =>
+      useFileTags({
+        editableRef: { current: editable },
+        getTextContent: () => editable.textContent ?? '',
+        onCloseCompletions,
+      })
+    );
+
+    result.current.renderFileTags();
+
+    // Regression: an in-progress completion query ("@b") must not close the
+    // open dropdown nor touch the DOM (the "flash then disappear" bug).
+    expect(onCloseCompletions).not.toHaveBeenCalled();
+    expect(editable.firstChild).toBe(textNode);
+    expect(editable.querySelectorAll('.file-tag').length).toBe(0);
+  });
+
   it('renders file tags for paths with spaces', () => {
     const editable = createEditable();
     editable.textContent = '@my file.ts ';

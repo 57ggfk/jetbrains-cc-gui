@@ -20,6 +20,7 @@ import { ResizeHandles } from './ResizeHandles.js';
 import {
   useTextContent,
   useFileTags,
+  useQuoteTags,
   useTooltip,
   useKeyboardNavigation,
   useIMEComposition,
@@ -43,6 +44,7 @@ import { debounce } from './utils/debounce.js';
 import { perfTimer } from '../../utils/debug.js';
 import { DEBOUNCE_TIMING } from '../../constants/performance.js';
 import { SessionContext } from '../../contexts/SessionContext.js';
+import { useUIState } from '../../contexts/UIStateContext.js';
 import { ContextMenu } from '../ContextMenu';
 import { useContextMenu, copySelection, pasteAtCursor, insertNewline } from '../../hooks/useContextMenu.js';
 import './styles.css';
@@ -116,6 +118,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     ref: React.ForwardedRef<ChatInputBoxHandle>
   ) => {
     const { t } = useTranslation();
+    const { setSettingsInitialTab, setCurrentView } = useUIState();
 
     const { showOpenSourceBanner, handleDismissOpenSourceBanner } = useOpenSourceBannerState();
     const {
@@ -177,6 +180,15 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       onCloseCompletions: closeAllCompletions,
     });
 
+    // Quote tags hook (inline quote chips)
+    const { renderQuoteTags } = useQuoteTags({ editableRef });
+
+    // Combined tag rendering: file tags first, then quote chips.
+    const renderTags = useCallback(() => {
+      renderFileTags();
+      renderQuoteTags();
+    }, [renderFileTags, renderQuoteTags]);
+
     // Tooltip hook
     const { tooltip, handleMouseOver, handleMouseLeave } = useTooltip();
 
@@ -214,8 +226,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
 
     // Create debounced version of renderFileTags
     const debouncedRenderFileTags = useMemo(
-      () => debounce(renderFileTags, DEBOUNCE_TIMING.FILE_TAG_RENDERING_MS),
-      [renderFileTags]
+      () => debounce(renderTags, DEBOUNCE_TIMING.FILE_TAG_RENDERING_MS),
+      [renderTags]
     );
 
     const {
@@ -365,8 +377,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     }, [rawHandleCompositionEnd]);
 
     useEffect(() => {
-      setRenderFileTags(renderFileTags);
-    }, [renderFileTags, setRenderFileTags]);
+      setRenderFileTags(renderTags);
+    }, [renderTags, setRenderFileTags]);
 
     const { record: recordInputHistory, handleKeyDown: handleHistoryKeyDown } = useInputHistory({
       editableRef,
@@ -427,6 +439,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       showEnhancerDialog,
       originalPrompt,
       enhancedPrompt,
+      usageInfo,
       handleEnhancePrompt,
       handleUseEnhancedPrompt,
       handleKeepOriginalPrompt,
@@ -436,7 +449,15 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       getTextContent,
       setHasContent,
       onInput,
+      currentProvider,
+      selectedModel,
     });
+
+    const handleOpenPromptEnhancerSettings = useCallback(() => {
+      handleCloseEnhancerDialog();
+      setSettingsInitialTab('promptEnhancer');
+      setCurrentView('settings');
+    }, [handleCloseEnhancerDialog, setSettingsInitialTab, setCurrentView]);
 
     const {
       focusInput,
@@ -528,7 +549,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       pathMappingRef,
       getTextContent,
       adjustHeight,
-      renderFileTags,
+      renderFileTags: renderTags,
       setHasContent,
       setInternalAttachments,
       onInput,
@@ -565,7 +586,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       pathMappingRef,
       getTextContent,
       adjustHeight,
-      renderFileTags,
+      renderFileTags: renderTags,
+      renderQuoteTags,
       setHasContent,
       onInput,
       closeAllCompletions,
@@ -743,9 +765,11 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
             isLoading: isEnhancing,
             originalPrompt,
             enhancedPrompt,
+            usageInfo,
             onUseEnhanced: handleUseEnhancedPrompt,
             onKeepOriginal: handleKeepOriginalPrompt,
             onClose: handleCloseEnhancerDialog,
+            onOpenSettings: handleOpenPromptEnhancerSettings,
           }}
           t={t}
         />

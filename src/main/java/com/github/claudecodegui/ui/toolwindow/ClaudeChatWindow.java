@@ -2596,6 +2596,12 @@ public class ClaudeChatWindow {
         if (session == null) {
             return;
         }
+        // Suppress the task-completion notification (sound + toast) when the user
+        // manually stopped the turn. Only natural completions should produce a sound.
+        if (session.isManuallyInterrupted()) {
+            LOG.debug("Stream ended after manual interrupt - suppressing completion sound");
+            return;
+        }
         if ("claude".equals(session.getProvider()) && session.getError() == null) {
             com.github.claudecodegui.notifications.ClaudeNotifier.showSuccess(
                 project,
