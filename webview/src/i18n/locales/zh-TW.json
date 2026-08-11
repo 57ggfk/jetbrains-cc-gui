@@ -1082,7 +1082,13 @@
   "markdown": {
     "copyCode": "複製程式碼",
     "copyMessage": "複製訊息",
-    "copySuccess": "複製成功"
+    "copySuccess": "複製成功",
+    "quoteMessage": "引用訊息",
+    "quoteSuccess": "已引用！"
+  },
+  "contextMenu": {
+    "copy": "複製",
+    "quote": "引用"
   },
   "usage": {
     "checkingLabel": "正在偵測 tokentracker-cli…",

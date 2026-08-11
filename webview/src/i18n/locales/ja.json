@@ -1082,7 +1082,13 @@
   "markdown": {
     "copyCode": "コードをコピー",
     "copyMessage": "メッセージをコピー",
-    "copySuccess": "コピーされました!"
+    "copySuccess": "コピーされました!",
+    "quoteMessage": "メッセージを引用",
+    "quoteSuccess": "引用しました!"
+  },
+  "contextMenu": {
+    "copy": "コピー",
+    "quote": "引用"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli を確認しています…",

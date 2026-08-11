@@ -1171,7 +1171,13 @@
   "markdown": {
     "copyCode": "코드 복사",
     "copyMessage": "메시지 복사",
-    "copySuccess": "복사됨!"
+    "copySuccess": "복사됨!",
+    "quoteMessage": "메시지 인용",
+    "quoteSuccess": "인용됨!"
+  },
+  "contextMenu": {
+    "copy": "복사",
+    "quote": "인용"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli 확인 중…",
