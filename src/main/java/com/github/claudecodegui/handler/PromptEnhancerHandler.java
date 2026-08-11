@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -37,12 +38,16 @@ import java.util.concurrent.atomic.AtomicReference;
 public class PromptEnhancerHandler extends BaseMessageHandler {
 
     private static final Logger LOG = Logger.getInstance(PromptEnhancerHandler.class);
-    private final Gson gson = new Gson();
+    private static final Gson GSON = new Gson();
+    private final Gson gson = GSON;
     private final EnvironmentConfigurator envConfigurator = new EnvironmentConfigurator();
 
-    // Hard timeout for the enhancement Node.js process. Without this, a network-stalled
-    // SDK call would block the calling thread forever and leak the child process.
-    private static final long ENHANCE_TIMEOUT_SECONDS = 60;
+    // Hard timeout bounds for the enhancement Node.js process. Without a timeout, a
+    // network-stalled SDK call would block forever and leak the child process.
+    // Short prompts stay snappy; long plain-language requirements get more headroom.
+    private static final long ENHANCE_TIMEOUT_BASE_SECONDS = 45;
+    private static final long ENHANCE_TIMEOUT_MAX_SECONDS = 120;
+    private static final int ENHANCE_TIMEOUT_CHARS_PER_EXTRA_SECOND = 400;
     // Grace window after the process exits, for the async reader thread to drain stdout.
     private static final long READER_DRAIN_SECONDS = 5;
 
@@ -134,7 +139,7 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                 String legacyModel = payload.has("model") ? payload.get("model").getAsString() : null;
 
                 if (originalPrompt.isEmpty()) {
-                    sendEnhanceResult(false, "", "Prompt is empty");
+                    sendEnhanceResult(false, "", "Prompt is empty", true);
                     return;
                 }
 
@@ -176,23 +181,57 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                     LOG.info("[PromptEnhancer] Failed to collect editor context");
                 }
 
-                // Call AI service for enhancement (passing context information)
-                JsonObject promptEnhancerConfig = context.getSettingsService().getPromptEnhancerConfig();
-                String enhancedPrompt = callAIForEnhancement(originalPrompt, legacyModel, contextObj, promptEnhancerConfig);
+                // Auto mode follows the current chat provider when that CLI is available.
+                JsonObject promptEnhancerConfig = context.getSettingsService()
+                        .getPromptEnhancerConfig(context.getCurrentProvider());
+                EnhanceOutcome outcome = callAIForEnhancement(originalPrompt, legacyModel, contextObj, promptEnhancerConfig);
 
-                if (enhancedPrompt != null && !enhancedPrompt.isEmpty()) {
-                    LOG.info("[PromptEnhancer] Enhancement successful");
-                    sendEnhanceResult(true, enhancedPrompt, null);
+                if (outcome.success && outcome.text != null && !outcome.text.isEmpty()) {
+                    LOG.info("[PromptEnhancer] Enhancement successful"
+                            + (outcome.partial ? " (partial)" : ""));
+                    sendEnhanceResult(true, outcome.text, null, true);
+                } else if (outcome.text != null && !outcome.text.isEmpty()) {
+                    // Failed but we already streamed partial text — keep it usable.
+                    LOG.warn("[PromptEnhancer] Enhancement incomplete: " + outcome.error);
+                    sendEnhanceResult(true, outcome.text, outcome.error, true);
                 } else {
-                    LOG.warn("[PromptEnhancer] Enhancement failed: empty result returned");
-                    sendEnhanceResult(false, "", "Enhancement failed: empty result returned");
+                    LOG.warn("[PromptEnhancer] Enhancement failed: "
+                            + (outcome.error != null ? outcome.error : "empty result returned"));
+                    sendEnhanceResult(false, "",
+                            outcome.error != null ? outcome.error : "Enhancement failed: empty result returned",
+                            true);
                 }
 
             } catch (Exception e) {
                 LOG.error("[PromptEnhancer] Prompt enhancement failed: " + e.getMessage(), e);
-                sendEnhanceResult(false, "", "Enhancement failed: " + e.getMessage());
+                sendEnhanceResult(false, "", "Enhancement failed: " + e.getMessage(), true);
             }
         });
+    }
+
+    /**
+     * Dynamic wall-clock timeout: base + 1s per N chars of the user prompt, capped.
+     * Exposed package-private for unit tests.
+     */
+    static long computeEnhanceTimeoutSeconds(int promptLength) {
+        long extra = Math.max(0, promptLength) / (long) ENHANCE_TIMEOUT_CHARS_PER_EXTRA_SECOND;
+        return Math.min(ENHANCE_TIMEOUT_MAX_SECONDS, Math.max(ENHANCE_TIMEOUT_BASE_SECONDS,
+                ENHANCE_TIMEOUT_BASE_SECONDS + extra));
+    }
+
+    /** Result of a single enhance process run. */
+    static final class EnhanceOutcome {
+        final boolean success;
+        final boolean partial;
+        final String text;
+        final String error;
+
+        EnhanceOutcome(boolean success, boolean partial, String text, String error) {
+            this.success = success;
+            this.partial = partial;
+            this.text = text;
+            this.error = error;
+        }
     }
 
     /**
@@ -377,7 +416,7 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
      * @param contextObj context information (optional)
      * @param promptEnhancerConfig resolved prompt enhancer configuration
      */
-    private String callAIForEnhancement(
+    private EnhanceOutcome callAIForEnhancement(
             String originalPrompt,
             String legacyModel,
             JsonObject contextObj,
@@ -392,14 +431,14 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             String nodeExecutable = context.getClaudeSDKBridge().getNodeExecutable();
             if (nodeExecutable == null) {
                 LOG.error("[PromptEnhancer] Node.js is not configured");
-                return null;
+                return new EnhanceOutcome(false, false, null, "Node.js is not configured");
             }
             LOG.info("[PromptEnhancer] Node.js path: " + nodeExecutable);
 
             File bridgeDir = context.getClaudeSDKBridge().getSdkTestDir();
             if (bridgeDir == null || !bridgeDir.exists()) {
                 LOG.error("[PromptEnhancer] AI Bridge directory does not exist");
-                return null;
+                return new EnhanceOutcome(false, false, null, "AI Bridge directory does not exist");
             }
             LOG.info("[PromptEnhancer] AI Bridge directory: " + bridgeDir.getAbsolutePath());
 
@@ -411,6 +450,9 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
 
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(bridgeDir);
+            // Merge stderr into stdout so the async reader drains both and the
+            // child cannot block on a full stderr pipe. Protocol markers are
+            // prefix-matched, so log lines are ignored safely.
             pb.redirectErrorStream(true);
 
             // Set environment variables
@@ -430,26 +472,50 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                 stdinInput.add("promptEnhancerConfig", promptEnhancerConfig);
             }
 
+            long timeoutSeconds = computeEnhanceTimeoutSeconds(
+                    originalPrompt != null ? originalPrompt.length() : 0);
+            LOG.info("[PromptEnhancer] Timeout: " + timeoutSeconds + "s");
+
             // Delegate to the runner so that:
             //  1. The process is registered with ProcessManager (cleanup on shutdown).
-            //  2. A hard 60s timeout actually kills hung Node processes.
+            //  2. A hard timeout actually kills hung Node processes.
             //  3. The process is unregistered + force-killed in finally on every exit path.
-            // The original code lacked all three, leaking child processes forever when
-            // the SDK call hung on a stalled network connection.
+            // Streaming: [CONTENT_DELTA] lines are pushed to the webview as they arrive.
             ProcessManager processManager = context.getClaudeSDKBridge().getProcessManager();
             StringBuilder response = new StringBuilder();
+            StringBuilder streamed = new StringBuilder();
+            StringBuilder errorMessage = new StringBuilder();
             StringBuilder allOutput = new StringBuilder();
+            final Object streamLock = new Object();
+            final AtomicReference<String> latestPreview = new AtomicReference<>("");
+            final AtomicBoolean progressScheduled = new AtomicBoolean(false);
+
             try {
                 int exitCode = PromptEnhancerProcessRunner.runWithProcessManager(
                         pb,
                         processManager,
                         gson.toJson(stdinInput),
-                        ENHANCE_TIMEOUT_SECONDS,
+                        timeoutSeconds,
                         READER_DRAIN_SECONDS,
                         line -> {
                             allOutput.append(line).append("\n");
                             LOG.info("[PromptEnhancer] Node.js: " + line);
-                            if (line.startsWith("[ENHANCED]")) {
+                            if (line.startsWith("[CONTENT_DELTA]")) {
+                                String payload = line.substring("[CONTENT_DELTA]".length()).trim();
+                                String delta = parseJsonStringPayload(payload);
+                                if (delta != null && !delta.isEmpty()) {
+                                    synchronized (streamLock) {
+                                        streamed.append(delta);
+                                        latestPreview.set(streamed.toString());
+                                    }
+                                    scheduleEnhanceProgress(latestPreview, progressScheduled);
+                                }
+                            } else if (line.startsWith("[ENHANCED_ERROR]")) {
+                                String err = line.substring("[ENHANCED_ERROR]".length()).trim();
+                                if (!err.isEmpty()) {
+                                    errorMessage.append(err);
+                                }
+                            } else if (line.startsWith("[ENHANCED]")) {
                                 String enhancedText = line.substring("[ENHANCED]".length()).trim();
                                 enhancedText = enhancedText.replace("{{NEWLINE}}", "\n");
                                 response.append(enhancedText);
@@ -457,30 +523,85 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                         }
                 );
                 LOG.info("[PromptEnhancer] Node.js process exit code: " + exitCode);
+
+                String finalText = response.length() > 0
+                        ? response.toString()
+                        : streamed.toString();
+                if (errorMessage.length() > 0) {
+                    if (finalText != null && !finalText.isEmpty()) {
+                        return new EnhanceOutcome(false, true, finalText, errorMessage.toString());
+                    }
+                    return new EnhanceOutcome(false, false, null, errorMessage.toString());
+                }
+                if (finalText == null || finalText.isEmpty()) {
+                    if (allOutput.length() > 0) {
+                        LOG.warn("[PromptEnhancer] [ENHANCED] marker not found, full output:\n" + allOutput);
+                    }
+                    return new EnhanceOutcome(false, false, null, "Enhancement failed: empty result returned");
+                }
+                return new EnhanceOutcome(true, false, finalText, null);
             } catch (TimeoutException te) {
                 LOG.warn("[PromptEnhancer] " + te.getMessage());
-                return null;
+                String partial;
+                synchronized (streamLock) {
+                    partial = streamed.toString();
+                }
+                if (partial != null && !partial.isEmpty()) {
+                    return new EnhanceOutcome(true, true, partial,
+                            "Prompt enhancement timed out; showing partial result");
+                }
+                return new EnhanceOutcome(false, false, null, te.getMessage());
             }
-
-            if (response.length() == 0 && allOutput.length() > 0) {
-                LOG.warn("[PromptEnhancer] [ENHANCED] marker not found, full output:\n" + allOutput);
-            }
-
-            return response.toString();
 
         } catch (Exception e) {
             LOG.error("[PromptEnhancer] AI service call failed: " + e.getMessage(), e);
-            return null;
+            return new EnhanceOutcome(false, false, null, e.getMessage());
         }
     }
 
     /**
-     * Send the enhancement result to the frontend.
+     * Parse a stdout delta payload that is a JSON-encoded string (e.g. {@code "Hello"}).
      */
-    private void sendEnhanceResult(boolean success, String enhancedPrompt, String error) {
+    static String parseJsonStringPayload(String payload) {
+        if (payload == null || payload.isEmpty()) {
+            return null;
+        }
+        try {
+            return GSON.fromJson(payload, String.class);
+        } catch (Throwable t) {
+            return payload;
+        }
+    }
+
+    /**
+     * Coalesce EDT progress updates so rapid CONTENT_DELTA lines do not flood JCEF.
+     */
+    private void scheduleEnhanceProgress(
+            AtomicReference<String> latestPreview,
+            AtomicBoolean progressScheduled
+    ) {
+        if (!progressScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        ApplicationManager.getApplication().invokeLater(() -> {
+            progressScheduled.set(false);
+            String preview = latestPreview.get();
+            if (preview != null && !preview.isEmpty()) {
+                sendEnhanceResult(true, preview, null, false);
+            }
+        });
+    }
+
+    /**
+     * Send the enhancement result (or streaming progress) to the frontend.
+     *
+     * @param done when false, the UI keeps the loading state and shows partial text
+     */
+    private void sendEnhanceResult(boolean success, String enhancedPrompt, String error, boolean done) {
         JsonObject result = new JsonObject();
         result.addProperty("success", success);
-        result.addProperty("enhancedPrompt", enhancedPrompt);
+        result.addProperty("enhancedPrompt", enhancedPrompt != null ? enhancedPrompt : "");
+        result.addProperty("done", done);
         if (error != null) {
             result.addProperty("error", error);
         }

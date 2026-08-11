@@ -214,6 +214,19 @@
   animation: spin 1s linear infinite;
 }
 
+.prompt-streaming-cursor {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--button-primary);
+  vertical-align: middle;
+}
+
+.prompt-streaming-cursor .codicon-loading {
+  font-size: 12px;
+  animation: spin 1s linear infinite;
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

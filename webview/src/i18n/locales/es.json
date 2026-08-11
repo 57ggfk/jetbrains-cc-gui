@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Modo de selección",
+        "modeAuto": "Auto",
+        "modeManual": "Manual",
+        "autoSummary": "Sigue el CLI del chat actual · actualmente {{provider}}",
+        "autoUnavailable": "No hay CLI disponible. Cambia a Manual para elegir uno."
       },
       "diffExpanded": {
         "label": "Expandir diferencias por defecto",
@@ -422,7 +431,12 @@
         "providerUnavailable": "No disponible",
         "currentProviderAuto": "Actualmente usando selección automática: {{provider}}",
         "currentProviderManual": "Actualmente usando el proveedor seleccionado manualmente: {{provider}}",
-        "currentProviderUnavailable": "El proveedor seleccionado no está disponible actualmente: {{provider}}"
+        "currentProviderUnavailable": "El proveedor seleccionado no está disponible actualmente: {{provider}}",
+        "modeLabel": "Modo de selección",
+        "modeAuto": "Auto",
+        "modeManual": "Manual",
+        "autoSummary": "Sigue el CLI del chat actual · actualmente {{provider}}",
+        "autoUnavailable": "No hay CLI disponible. Cambia a Manual para elegir uno."
       },
       "prompt": {
         "label": "Additional Prompt",
@@ -1615,9 +1629,6 @@
     },
     "opencode": {
       "label": "OpenCode"
-    },
-    "pi": {
-      "label": "PI CLI"
     },
     "pi": {
       "label": "PI CLI"

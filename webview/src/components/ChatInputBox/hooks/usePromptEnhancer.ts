@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 declare global {
   interface Window {
@@ -21,7 +21,7 @@ interface UsePromptEnhancerReturn {
   showEnhancerDialog: boolean;
   /** Original prompt text */
   originalPrompt: string;
-  /** Enhanced prompt text */
+  /** Enhanced prompt text (may stream in while isEnhancing) */
   enhancedPrompt: string;
   /** Trigger prompt enhancement */
   handleEnhancePrompt: () => void;
@@ -33,11 +33,46 @@ interface UsePromptEnhancerReturn {
   handleCloseEnhancerDialog: () => void;
 }
 
+export interface EnhancedPromptPayload {
+  success?: boolean;
+  enhancedPrompt?: string;
+  error?: string;
+  /** false while streaming partial text; true (or omitted) when finished */
+  done?: boolean;
+}
+
+/**
+ * Apply a backend enhance payload to UI state.
+ * Extracted for unit testing without mounting the full hook.
+ */
+export function applyEnhancedPromptPayload(
+  data: EnhancedPromptPayload,
+  setters: {
+    setEnhancedPrompt: (text: string) => void;
+    setIsEnhancing: (value: boolean) => void;
+  }
+): void {
+  const done = data.done !== false;
+  if (data.success && data.enhancedPrompt) {
+    setters.setEnhancedPrompt(data.enhancedPrompt);
+  } else if (done) {
+    setters.setEnhancedPrompt(data.error || data.enhancedPrompt || 'Enhancement failed');
+  } else if (data.enhancedPrompt) {
+    // Streaming progress without success flag — still show text
+    setters.setEnhancedPrompt(data.enhancedPrompt);
+  }
+
+  if (done) {
+    setters.setIsEnhancing(false);
+  }
+}
+
 /**
  * usePromptEnhancer - Handle prompt enhancement feature
  *
  * Allows users to enhance their prompts using AI.
  * Communicates with Java backend via window.sendToJava.
+ * Supports progressive streaming updates (done: false) while generating.
  */
 export function usePromptEnhancer({
   editableRef,
@@ -49,6 +84,10 @@ export function usePromptEnhancer({
   const [showEnhancerDialog, setShowEnhancerDialog] = useState(false);
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [enhancedPrompt, setEnhancedPrompt] = useState('');
+  /** Bumped on close / new request to ignore late backend updates. */
+  const requestIdRef = useRef(0);
+  /** Generation id for the currently open enhance request. */
+  const activeRequestIdRef = useRef(0);
 
   /**
    * Handle enhance prompt action
@@ -59,13 +98,15 @@ export function usePromptEnhancer({
       return;
     }
 
+    requestIdRef.current += 1;
+    activeRequestIdRef.current = requestIdRef.current;
     // Set original prompt and open dialog
     setOriginalPrompt(content);
     setEnhancedPrompt('');
     setShowEnhancerDialog(true);
     setIsEnhancing(true);
 
-    // Call backend for prompt enhancement, pass current selected model
+    // Call backend for prompt enhancement
     if (window.sendToJava) {
       window.sendToJava(
         `enhance_prompt:${JSON.stringify({ prompt: content })}`
@@ -83,6 +124,7 @@ export function usePromptEnhancer({
       setHasContent(true);
       onInput?.(enhancedPrompt);
     }
+    requestIdRef.current += 1;
     setShowEnhancerDialog(false);
     setIsEnhancing(false);
   }, [enhancedPrompt, editableRef, setHasContent, onInput]);
@@ -91,6 +133,7 @@ export function usePromptEnhancer({
    * Handle keep original prompt
    */
   const handleKeepOriginalPrompt = useCallback(() => {
+    requestIdRef.current += 1;
     setShowEnhancerDialog(false);
     setIsEnhancing(false);
   }, []);
@@ -99,25 +142,25 @@ export function usePromptEnhancer({
    * Close enhancer dialog
    */
   const handleCloseEnhancerDialog = useCallback(() => {
+    requestIdRef.current += 1;
     setShowEnhancerDialog(false);
     setIsEnhancing(false);
   }, []);
 
-  // Register enhanced prompt result callback
+  // Register enhanced prompt result callback (supports streaming deltas)
   useEffect(() => {
-    // Receive enhanced prompt
     window.updateEnhancedPrompt = (result: string) => {
+      // Drop updates that belong to a closed / superseded request
+      if (requestIdRef.current !== activeRequestIdRef.current) {
+        return;
+      }
       try {
-        const data = JSON.parse(result);
-        if (data.success && data.enhancedPrompt) {
-          setEnhancedPrompt(data.enhancedPrompt);
-        } else {
-          setEnhancedPrompt(data.error || 'Enhancement failed');
-        }
+        const data = JSON.parse(result) as EnhancedPromptPayload;
+        applyEnhancedPromptPayload(data, { setEnhancedPrompt, setIsEnhancing });
       } catch {
         setEnhancedPrompt(result);
+        setIsEnhancing(false);
       }
-      setIsEnhancing(false);
     };
 
     return () => {

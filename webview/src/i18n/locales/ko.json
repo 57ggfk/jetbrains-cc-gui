@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "선택 방식",
+        "modeAuto": "자동",
+        "modeManual": "수동",
+        "autoSummary": "현재 채팅 CLI를 따름 · 현재 {{provider}}",
+        "autoUnavailable": "사용 가능한 CLI가 없습니다. 수동으로 전환해 선택하세요."
       },
       "diffExpanded": {
         "label": "Diff 기본 펼침",
@@ -433,7 +442,12 @@
         "providerUnavailable": "사용 불가",
         "currentProviderAuto": "현재 자동 선택 사용 중: {{provider}}",
         "currentProviderManual": "현재 수동 선택된 제공자 사용 중: {{provider}}",
-        "currentProviderUnavailable": "선택된 제공자를 현재 사용할 수 없습니다: {{provider}}"
+        "currentProviderUnavailable": "선택된 제공자를 현재 사용할 수 없습니다: {{provider}}",
+        "modeLabel": "선택 방식",
+        "modeAuto": "자동",
+        "modeManual": "수동",
+        "autoSummary": "현재 채팅 CLI를 따름 · 현재 {{provider}}",
+        "autoUnavailable": "사용 가능한 CLI가 없습니다. 수동으로 전환해 선택하세요."
       },
       "prompt": {
         "label": "추가 프롬프트",

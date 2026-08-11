@@ -30,11 +30,11 @@ export const PromptEnhancerDialog = ({
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       onClose();
-    } else if (e.key === 'Enter' && !isLoading && enhancedPrompt) {
+    } else if (e.key === 'Enter' && enhancedPrompt) {
       e.preventDefault();
       onUseEnhanced();
     }
-  }, [onClose, onUseEnhanced, isLoading, enhancedPrompt]);
+  }, [onClose, onUseEnhanced, enhancedPrompt]);
 
   useEffect(() => {
     if (isOpen) {
@@ -88,13 +88,20 @@ export const PromptEnhancerDialog = ({
               <span>{t('promptEnhancer.enhancedPrompt')}</span>
             </div>
             <div className="prompt-text enhanced-prompt">
-              {isLoading ? (
+              {isLoading && !enhancedPrompt ? (
                 <div className="prompt-loading">
                   <span className="codicon codicon-loading codicon-modifier-spin" />
                   <span>{t('promptEnhancer.enhancing')}</span>
                 </div>
               ) : (
-                enhancedPrompt || t('promptEnhancer.enhancing')
+                <>
+                  {enhancedPrompt || t('promptEnhancer.enhancing')}
+                  {isLoading && enhancedPrompt ? (
+                    <span className="prompt-streaming-cursor" aria-hidden="true">
+                      <span className="codicon codicon-loading codicon-modifier-spin" />
+                    </span>
+                  ) : null}
+                </>
               )}
             </div>
           </div>
@@ -113,7 +120,7 @@ export const PromptEnhancerDialog = ({
           <button
             className="prompt-enhancer-btn primary"
             onClick={onUseEnhanced}
-            disabled={isLoading || !enhancedPrompt}
+            disabled={!enhancedPrompt}
           >
             <span className="codicon codicon-check" />
             {t('promptEnhancer.useEnhanced')}

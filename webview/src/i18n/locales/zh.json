@@ -404,11 +404,20 @@
         "providerUnavailable": "当前不可用",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "当前使用自动选择：{{provider}}",
         "currentProviderManual": "当前使用手动选择的 provider：{{provider}}",
-        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}"
+        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}",
+        "modeLabel": "使用方式",
+        "modeAuto": "自动",
+        "modeManual": "手动",
+        "autoSummary": "自动跟随当前聊天 CLI · 现在解析为 {{provider}}",
+        "autoUnavailable": "当前没有可用的 CLI，请切换到手动并选择。"
       },
       "diffExpanded": {
         "label": "默认展开差异",
@@ -688,7 +697,12 @@
         "providerUnavailable": "当前不可用",
         "currentProviderAuto": "当前使用自动选择：{{provider}}",
         "currentProviderManual": "当前使用手动选择的 provider：{{provider}}",
-        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}"
+        "currentProviderUnavailable": "当前所选 provider 不可用：{{provider}}",
+        "modeLabel": "使用方式",
+        "modeAuto": "自动",
+        "modeManual": "手动",
+        "autoSummary": "自动跟随当前聊天 CLI · 现在解析为 {{provider}}",
+        "autoUnavailable": "当前没有可用的 CLI，请切换到手动并选择。"
       },
       "prompt": {
         "label": "附加提示词",

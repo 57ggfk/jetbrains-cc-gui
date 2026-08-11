@@ -51,6 +51,25 @@ public class SessionSendServiceTest {
     }
 
     @Test
+    public void resolveEffectivePermissionModePreservesBypassForGrokFullAuto() {
+        // Regression: UI "全自动" (bypassPermissions) must survive resolution so
+        // MarkerCliBridge can pass it into Grok ACP auto-approve — otherwise every
+        // edit/tool still pops the permission dialog under default mode.
+        assertEquals(
+                "bypassPermissions",
+                SessionSendService.resolveEffectivePermissionMode("grok", "bypassPermissions", "default")
+        );
+        assertEquals(
+                "bypassPermissions",
+                SessionSendService.resolveEffectivePermissionMode("grok", null, "bypassPermissions")
+        );
+        assertEquals(
+                "acceptEdits",
+                SessionSendService.resolveEffectivePermissionMode("grok", "acceptEdits", null)
+        );
+    }
+
+    @Test
     public void normalizeCliModelForProviderMapsSentinelsAndGrokLegacyIds() {
         assertNull(SessionSendService.normalizeCliModelForProvider("kimi", "auto"));
         assertNull(SessionSendService.normalizeCliModelForProvider("opencode", "opencode-default"));

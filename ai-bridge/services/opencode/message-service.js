@@ -22,6 +22,10 @@ import {
   isNonEmptySessionId,
   safePromptArg,
 } from '../../utils/marker-protocol.js';
+import {
+  GROK_IMAGE_ONLY_FALLBACK_TEXT,
+  materializeImageAttachments,
+} from '../../utils/cli-image-input.js';
 
 function logDebug(...args) {
   console.error('[DEBUG][OpenCode]', ...args);
@@ -239,7 +243,7 @@ function resolveModelFlag(model) {
   return trimmed;
 }
 
-function buildOpenCodeArgs({ message, sessionId, model }) {
+function buildOpenCodeArgs({ message, sessionId, model, imagePaths = [] }) {
   const args = ['run', '--format', 'json'];
   const modelFlag = resolveModelFlag(model);
   if (modelFlag) {
@@ -247,6 +251,12 @@ function buildOpenCodeArgs({ message, sessionId, model }) {
   }
   if (isNonEmptySessionId(sessionId)) {
     args.push('--session', sessionId.trim());
+  }
+  // Multimodal: `opencode run -f <path>` (aligned with desktop-cc-gui).
+  for (const imagePath of imagePaths) {
+    if (imagePath) {
+      args.push('-f', imagePath);
+    }
   }
   // Keep prompt positional (opencode run -- <msg> is broken on some versions).
   args.push(safePromptArg(message));
@@ -259,24 +269,45 @@ function buildOpenCodeArgs({ message, sessionId, model }) {
  * @param {string} cwd
  * @param {string} model
  * @param {string} [_reasoningEffort]
+ * @param {Array} [attachments] image attachments (fileName/mediaType/data)
  */
 export async function sendMessage(
   message,
   sessionId = '',
   cwd = '',
   model = '',
-  _reasoningEffort = ''
+  _reasoningEffort = '',
+  attachments = []
 ) {
   beginStream();
 
+  let imagePaths = [];
+  try {
+    imagePaths = await materializeImageAttachments(attachments);
+  } catch (err) {
+    console.error('[OpenCode] failed to materialize image attachments:', err?.message || err);
+  }
+
+  // OpenCode requires a non-empty prompt even for image-only turns.
+  let promptText = message || '';
+  if (!String(promptText).trim() && imagePaths.length > 0) {
+    promptText = GROK_IMAGE_ONLY_FALLBACK_TEXT;
+  }
+
   const bin = resolveOpenCodeCliPath();
-  const args = buildOpenCodeArgs({ message, sessionId, model });
+  const args = buildOpenCodeArgs({ message: promptText, sessionId, model, imagePaths });
   let resolvedSessionId = isNonEmptySessionId(sessionId) ? sessionId.trim() : null;
   if (resolvedSessionId) {
     emitSessionId(resolvedSessionId);
   }
 
-  logDebug('spawn', bin, args.slice(0, -1).join(' '), `promptLen=${String(message || '').length}`);
+  logDebug(
+    'spawn',
+    bin,
+    args.slice(0, -1).join(' '),
+    `promptLen=${String(promptText || '').length}`,
+    `images=${imagePaths.length}`
+  );
 
   const env = { ...process.env };
   const home = process.env.HOME || process.env.USERPROFILE || homedir();

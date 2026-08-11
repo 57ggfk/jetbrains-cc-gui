@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "選択モード",
+        "modeAuto": "自動",
+        "modeManual": "手動",
+        "autoSummary": "現在のチャット CLI に追従 · 現在は {{provider}}",
+        "autoUnavailable": "利用可能な CLI がありません。手動に切り替えて選択してください。"
       },
       "diffExpanded": {
         "label": "差分をデフォルトで展開",
@@ -422,7 +431,12 @@
         "providerUnavailable": "利用不可",
         "currentProviderAuto": "現在自動選択を使用中：{{provider}}",
         "currentProviderManual": "現在手動選択したプロバイダーを使用中：{{provider}}",
-        "currentProviderUnavailable": "選択したプロバイダーは現在利用できません：{{provider}}"
+        "currentProviderUnavailable": "選択したプロバイダーは現在利用できません：{{provider}}",
+        "modeLabel": "選択モード",
+        "modeAuto": "自動",
+        "modeManual": "手動",
+        "autoSummary": "現在のチャット CLI に追従 · 現在は {{provider}}",
+        "autoUnavailable": "利用可能な CLI がありません。手動に切り替えて選択してください。"
       },
       "prompt": {
         "label": "Additional Prompt",

@@ -233,11 +233,20 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Mode de sélection",
+        "modeAuto": "Auto",
+        "modeManual": "Manuel",
+        "autoSummary": "Suit le CLI du chat actuel · actuellement {{provider}}",
+        "autoUnavailable": "Aucun CLI disponible. Passez en Manuel pour en choisir un."
       },
       "diffExpanded": {
         "label": "Développer les différences par défaut",
@@ -422,7 +431,12 @@
         "providerUnavailable": "Non disponible",
         "currentProviderAuto": "Utilise actuellement la sélection automatique : {{provider}}",
         "currentProviderManual": "Utilise actuellement le fournisseur sélectionné manuellement : {{provider}}",
-        "currentProviderUnavailable": "Le fournisseur sélectionné n'est actuellement pas disponible : {{provider}}"
+        "currentProviderUnavailable": "Le fournisseur sélectionné n'est actuellement pas disponible : {{provider}}",
+        "modeLabel": "Mode de sélection",
+        "modeAuto": "Auto",
+        "modeManual": "Manuel",
+        "autoSummary": "Suit le CLI du chat actuel · actuellement {{provider}}",
+        "autoUnavailable": "Aucun CLI disponible. Passez en Manuel pour en choisir un."
       },
       "prompt": {
         "label": "Additional Prompt",
