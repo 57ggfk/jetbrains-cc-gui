@@ -26,6 +26,8 @@ describe('normalizeAiFeatureConfig', () => {
       provider: 'grok',
       effectiveProvider: 'grok',
       resolutionSource: 'manual',
+      // Partial payload from the backend: only three providers configured,
+      // the rest must be filled from defaults by normalize.
       models: { claude: 'claude-opus-4-8', codex: 'gpt-5.4', grok: 'grok' },
       availability: { claude: true, codex: false, grok: true },
     });

@@ -39,6 +39,20 @@ export type CommitAiProvider = AiFeatureProvider;
 export type CommitAiResolutionSource = AiFeatureResolutionSource;
 export type CommitAiConfig = AiFeatureConfig;
 
+/**
+ * Backend/partial payload shape accepted by normalizeAiFeatureConfig: models
+ * and availability may carry only a subset of providers — the normalize step
+ * fills the rest from defaults. The full AiFeatureConfig shape (all six
+ * providers required) is what consumers receive after normalization.
+ */
+export interface AiFeatureConfigInput {
+  provider?: AiFeatureProvider | null;
+  effectiveProvider?: AiFeatureProvider | null;
+  resolutionSource?: AiFeatureResolutionSource;
+  models?: Partial<AiFeatureModels> | null;
+  availability?: Partial<AiFeatureAvailability> | null;
+}
+
 function emptyAvailability(value = false): AiFeatureAvailability {
   return {
     claude: value,
@@ -105,7 +119,7 @@ function normalizeAvailability(
  * complete controlled-component state (never missing availability/models).
  */
 export function normalizeAiFeatureConfig(
-  raw: Partial<AiFeatureConfig> | null | undefined,
+  raw: AiFeatureConfigInput | null | undefined,
   defaults: AiFeatureConfig = DEFAULT_COMMIT_AI_CONFIG,
 ): AiFeatureConfig {
   if (raw == null) {
