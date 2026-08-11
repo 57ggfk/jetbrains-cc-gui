@@ -419,10 +419,9 @@ public class SessionSendService {
             return null;
         }
         if ("grok".equals(provider)) {
-            // Legacy UI stored upstream API id "grok-4.5"; CLI needs profile name "grok".
-            if ("grok-4.5".equals(lower) || "grok-4".equals(lower) || "grok-4.5-build".equals(lower)) {
-                LOG.info("[Grok] Remapping upstream model id '" + trimmed + "' to config profile 'grok'");
-                return "grok";
+            if ("grok".equals(lower) || "default".equals(lower) || "(default)".equals(lower)) {
+                LOG.info("[Grok] Normalizing sentinel model id '" + trimmed + "' to default model 'grok-4.5'");
+                return "grok-4.5";
             }
         }
         return trimmed;
