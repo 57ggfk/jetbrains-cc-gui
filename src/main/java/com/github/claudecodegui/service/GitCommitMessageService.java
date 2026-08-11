@@ -9,6 +9,8 @@ import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow;
 import com.github.claudecodegui.ui.toolwindow.ClaudeSDKToolWindow;
 import com.google.gson.JsonObject;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.changes.Change;
@@ -53,6 +55,12 @@ public class GitCommitMessageService {
     /**
      * Generate a commit message for the selected changes.
      *
+     * <p>Heavy work (git4idea {@code git diff}, repository lookup, AI call setup)
+     * must not run on the EDT. IntelliJ asserts against synchronous process waits
+     * and repository updates on the UI thread. When invoked from the EDT this
+     * method re-dispatches to a pooled thread; otherwise it runs inline (unit
+     * tests and already-background callers stay synchronous).
+     *
      * @param changes  the selected file changes
      * @param callback the callback (onSuccess / onError / onProgress)
      */
@@ -60,8 +68,24 @@ public class GitCommitMessageService {
             @NotNull Collection<Change> changes,
             @NotNull CommitMessageCallback callback
     ) {
+        if (shouldOffloadToBackground()) {
+            ApplicationManager.getApplication().executeOnPooledThread(
+                    () -> generateCommitMessageOnCallerThread(changes, callback));
+            return;
+        }
+        generateCommitMessageOnCallerThread(changes, callback);
+    }
+
+    /**
+     * Same as {@link #generateCommitMessage} but always runs on the calling thread.
+     * Prefer the public entry point unless you already own a background thread.
+     */
+    private void generateCommitMessageOnCallerThread(
+            @NotNull Collection<Change> changes,
+            @NotNull CommitMessageCallback callback
+    ) {
         try {
-            // 1. Real git diff.
+            // 1. Real git diff (git4idea process + repo lookup — not EDT-safe).
             String diff = generateGitDiff(changes);
             if (diff.isEmpty()) {
                 callback.onError(ClaudeCodeGuiBundle.message("commit.noChangesFound"));
@@ -81,6 +105,20 @@ public class GitCommitMessageService {
             LOG.error("Failed to generate commit message", e);
             String message = e.getMessage();
             callback.onError(message != null ? message : e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * True when the current thread is the EDT and a real Application is available
+     * so we can re-dispatch. Headless/unit-test environments without an
+     * Application keep the synchronous path for deterministic assertions.
+     */
+    private static boolean shouldOffloadToBackground() {
+        try {
+            Application app = ApplicationManager.getApplication();
+            return app != null && app.isDispatchThread();
+        } catch (Throwable t) {
+            return false;
         }
     }
 
