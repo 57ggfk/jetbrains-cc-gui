@@ -107,7 +107,7 @@ describe('usePromptEnhancer', () => {
     window.sendToJava = vi.fn();
   });
 
-  it('sends only prompt payload when requesting enhancement', () => {
+  it('sends prompt plus chat provider/model for auto model follow', () => {
     const editableRef = { current: document.createElement('div') };
     const setHasContent = vi.fn();
     const onInput = vi.fn();
@@ -117,6 +117,8 @@ describe('usePromptEnhancer', () => {
       getTextContent: () => 'Please refactor this module',
       setHasContent,
       onInput,
+      currentProvider: 'opencode',
+      selectedModel: 'opencode/deepseek-v4-flash-free',
     }));
 
     act(() => {
@@ -124,9 +126,29 @@ describe('usePromptEnhancer', () => {
     });
 
     expect(window.sendToJava).toHaveBeenCalledWith(
-      'enhance_prompt:{"prompt":"Please refactor this module"}'
+      'enhance_prompt:{"prompt":"Please refactor this module","chatProvider":"opencode","chatModel":"opencode/deepseek-v4-flash-free"}'
     );
     expect(result.current.usageInfo).toBeNull();
+  });
+
+  it('omits chat fields when provider/model are empty', () => {
+    const editableRef = { current: document.createElement('div') };
+
+    const { result } = renderHook(() => usePromptEnhancer({
+      editableRef,
+      getTextContent: () => 'hello',
+      setHasContent: vi.fn(),
+      currentProvider: '  ',
+      selectedModel: '',
+    }));
+
+    act(() => {
+      result.current.handleEnhancePrompt();
+    });
+
+    expect(window.sendToJava).toHaveBeenCalledWith(
+      'enhance_prompt:{"prompt":"hello"}'
+    );
   });
 
   it('streams partial text then finalizes on done', () => {

@@ -137,6 +137,9 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                 JsonObject payload = gson.fromJson(content, JsonObject.class);
                 String originalPrompt = payload.has("prompt") ? payload.get("prompt").getAsString() : "";
                 String legacyModel = payload.has("model") ? payload.get("model").getAsString() : null;
+                // Current chat selection — used in auto mode so enhancer follows the chat model.
+                String chatProvider = readOptionalString(payload, "chatProvider");
+                String chatModel = readOptionalString(payload, "chatModel");
 
                 if (originalPrompt.isEmpty()) {
                     sendEnhanceResult(false, "", "Prompt is empty", true, null);
@@ -146,6 +149,10 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                 LOG.info("[PromptEnhancer] Starting prompt enhancement: " + originalPrompt.substring(0, Math.min(50, originalPrompt.length())) + "...");
                 if (legacyModel != null) {
                     LOG.info("[PromptEnhancer] Received legacy model from frontend: " + legacyModel);
+                }
+                if (chatProvider != null || chatModel != null) {
+                    LOG.info("[PromptEnhancer] Chat selection: provider="
+                            + chatProvider + ", model=" + chatModel);
                 }
 
                 // Automatically collect context information from the editor
@@ -186,10 +193,12 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                         .getPromptEnhancerConfig(context.getCurrentProvider());
                 // Push usage meta immediately so the dialog can show mode/CLI/model
                 // while the enhancement is still running.
-                JsonObject usageMeta = buildUsageMeta(promptEnhancerConfig);
+                JsonObject usageMeta = buildUsageMeta(promptEnhancerConfig, chatProvider, chatModel);
                 sendEnhanceResult(true, "", null, false, usageMeta);
 
-                EnhanceOutcome outcome = callAIForEnhancement(originalPrompt, legacyModel, contextObj, promptEnhancerConfig);
+                EnhanceOutcome outcome = callAIForEnhancement(
+                        originalPrompt, legacyModel, contextObj, promptEnhancerConfig,
+                        chatProvider, chatModel);
 
                 if (outcome.success && outcome.text != null && !outcome.text.isEmpty()) {
                     LOG.info("[PromptEnhancer] Enhancement successful"
@@ -414,6 +423,18 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
      *         (any field may be omitted / null when unresolved)
      */
     static JsonObject buildUsageMeta(JsonObject promptEnhancerConfig) {
+        return buildUsageMeta(promptEnhancerConfig, null, null);
+    }
+
+    /**
+     * Same as {@link #buildUsageMeta(JsonObject)} but, in auto mode, prefers the
+     * chat-input model when {@code chatProvider} matches the resolved enhancer provider.
+     */
+    static JsonObject buildUsageMeta(
+            JsonObject promptEnhancerConfig,
+            String chatProvider,
+            String chatModel
+    ) {
         JsonObject meta = new JsonObject();
         if (promptEnhancerConfig == null) {
             meta.addProperty("resolutionSource", "unavailable");
@@ -436,18 +457,51 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             meta.addProperty("provider", provider);
         }
 
+        String model = null;
         if (provider != null
                 && promptEnhancerConfig.has("models")
                 && promptEnhancerConfig.get("models").isJsonObject()) {
             JsonObject models = promptEnhancerConfig.getAsJsonObject("models");
             if (models.has(provider) && !models.get(provider).isJsonNull()) {
-                String model = models.get(provider).getAsString();
-                if (model != null && !model.isEmpty()) {
-                    meta.addProperty("model", model);
+                String configured = models.get(provider).getAsString();
+                if (configured != null && !configured.isEmpty()) {
+                    model = configured;
                 }
             }
         }
+
+        // Auto mode: follow the model currently selected in the chat input when
+        // the enhancer resolved to the same provider as the chat session.
+        if ("auto".equals(resolutionSource)
+                && provider != null
+                && chatProvider != null
+                && !chatProvider.isBlank()
+                && chatModel != null
+                && !chatModel.isBlank()
+                && provider.trim().equalsIgnoreCase(chatProvider.trim())) {
+            model = chatModel.trim();
+        }
+
+        if (model != null && !model.isEmpty()) {
+            meta.addProperty("model", model);
+        }
         return meta;
+    }
+
+    private static String readOptionalString(JsonObject payload, String key) {
+        if (payload == null || !payload.has(key) || payload.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            String value = payload.get(key).getAsString();
+            if (value == null) {
+                return null;
+            }
+            String trimmed = value.trim();
+            return trimmed.isEmpty() ? null : trimmed;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -461,7 +515,9 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             String originalPrompt,
             String legacyModel,
             JsonObject contextObj,
-            JsonObject promptEnhancerConfig
+            JsonObject promptEnhancerConfig,
+            String chatProvider,
+            String chatModel
     ) {
         LOG.info("[PromptEnhancer] Starting AI service call for prompt enhancement");
         LOG.info("[PromptEnhancer] Original prompt: " + originalPrompt);
@@ -506,6 +562,12 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             if (legacyModel != null && !legacyModel.isEmpty()) {
                 stdinInput.addProperty("legacyModel", legacyModel);
             }
+            if (chatProvider != null && !chatProvider.isEmpty()) {
+                stdinInput.addProperty("chatProvider", chatProvider);
+            }
+            if (chatModel != null && !chatModel.isEmpty()) {
+                stdinInput.addProperty("chatModel", chatModel);
+            }
             if (contextObj != null) {
                 stdinInput.add("context", contextObj);
             }
@@ -530,7 +592,7 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             final Object streamLock = new Object();
             final AtomicReference<String> latestPreview = new AtomicReference<>("");
             final AtomicBoolean progressScheduled = new AtomicBoolean(false);
-            final JsonObject usageMeta = buildUsageMeta(promptEnhancerConfig);
+            final JsonObject usageMeta = buildUsageMeta(promptEnhancerConfig, chatProvider, chatModel);
 
             try {
                 int exitCode = PromptEnhancerProcessRunner.runWithProcessManager(

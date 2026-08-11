@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   resolvePromptEnhancerRuntimeConfig,
+  resolveAutoChatModel,
   buildFullPrompt,
   extractAppendedDelta,
   canUseAnthropicAskPath,
@@ -102,6 +103,91 @@ test('resolvePromptEnhancerRuntimeConfig throws a strict error when manual provi
     }),
     /Claude Code.*unavailable/i
   );
+});
+
+test('resolveAutoChatModel uses chat model in auto mode when provider matches', () => {
+  assert.equal(
+    resolveAutoChatModel({
+      provider: 'opencode',
+      configuredModel: 'opencode-default',
+      resolutionSource: 'auto',
+      chatProvider: 'opencode',
+      chatModel: 'opencode/deepseek-v4-flash-free',
+    }),
+    'opencode/deepseek-v4-flash-free'
+  );
+});
+
+test('resolveAutoChatModel keeps configured model in manual mode', () => {
+  assert.equal(
+    resolveAutoChatModel({
+      provider: 'opencode',
+      configuredModel: 'opencode-default',
+      resolutionSource: 'manual',
+      chatProvider: 'opencode',
+      chatModel: 'opencode/deepseek-v4-flash-free',
+    }),
+    'opencode-default'
+  );
+});
+
+test('resolveAutoChatModel ignores chat model when provider differs', () => {
+  assert.equal(
+    resolveAutoChatModel({
+      provider: 'claude',
+      configuredModel: 'claude-sonnet-4-6',
+      resolutionSource: 'auto',
+      chatProvider: 'opencode',
+      chatModel: 'opencode/deepseek-v4-flash-free',
+    }),
+    'claude-sonnet-4-6'
+  );
+});
+
+test('resolvePromptEnhancerRuntimeConfig auto follows chat model for OpenCode', () => {
+  const resolved = resolvePromptEnhancerRuntimeConfig({
+    promptEnhancerConfig: {
+      provider: null,
+      effectiveProvider: 'opencode',
+      resolutionSource: 'auto',
+      models: {
+        claude: 'claude-sonnet-4-6',
+        codex: 'gpt-5.5',
+        opencode: 'opencode-default',
+      },
+      availability: {
+        claude: true,
+        codex: true,
+        opencode: true,
+      },
+    },
+    chatProvider: 'opencode',
+    chatModel: 'opencode/deepseek-v4-flash-free',
+  });
+
+  assert.equal(resolved.provider, 'opencode');
+  assert.equal(resolved.model, 'opencode/deepseek-v4-flash-free');
+  assert.equal(resolved.resolutionSource, 'auto');
+});
+
+test('resolvePromptEnhancerRuntimeConfig manual does not follow chat model', () => {
+  const resolved = resolvePromptEnhancerRuntimeConfig({
+    promptEnhancerConfig: {
+      provider: 'opencode',
+      effectiveProvider: 'opencode',
+      resolutionSource: 'manual',
+      models: {
+        opencode: 'opencode-default',
+      },
+      availability: {
+        opencode: true,
+      },
+    },
+    chatProvider: 'opencode',
+    chatModel: 'opencode/deepseek-v4-flash-free',
+  });
+
+  assert.equal(resolved.model, 'opencode-default');
 });
 
 // ---------- canUseAnthropicAskPath / computeMaxTokens ----------

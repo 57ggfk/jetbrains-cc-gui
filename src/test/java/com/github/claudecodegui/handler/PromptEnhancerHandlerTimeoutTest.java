@@ -69,4 +69,48 @@ public class PromptEnhancerHandlerTimeoutTest {
         assertFalse(meta.has("provider"));
         assertTrue(meta.has("resolutionSource"));
     }
+
+    @Test
+    public void buildUsageMeta_autoModeFollowsChatModelWhenProviderMatches() {
+        JsonObject config = new JsonObject();
+        config.addProperty("effectiveProvider", "opencode");
+        config.addProperty("resolutionSource", "auto");
+        JsonObject models = new JsonObject();
+        models.addProperty("opencode", "opencode-default");
+        config.add("models", models);
+
+        JsonObject meta = PromptEnhancerHandler.buildUsageMeta(
+                config, "opencode", "opencode/deepseek-v4-flash-free");
+        assertEquals("opencode", meta.get("provider").getAsString());
+        assertEquals("opencode/deepseek-v4-flash-free", meta.get("model").getAsString());
+        assertEquals("auto", meta.get("resolutionSource").getAsString());
+    }
+
+    @Test
+    public void buildUsageMeta_manualModeKeepsConfiguredModel() {
+        JsonObject config = new JsonObject();
+        config.addProperty("effectiveProvider", "opencode");
+        config.addProperty("resolutionSource", "manual");
+        JsonObject models = new JsonObject();
+        models.addProperty("opencode", "opencode-default");
+        config.add("models", models);
+
+        JsonObject meta = PromptEnhancerHandler.buildUsageMeta(
+                config, "opencode", "opencode/deepseek-v4-flash-free");
+        assertEquals("opencode-default", meta.get("model").getAsString());
+    }
+
+    @Test
+    public void buildUsageMeta_autoModeIgnoresChatModelWhenProviderDiffers() {
+        JsonObject config = new JsonObject();
+        config.addProperty("effectiveProvider", "claude");
+        config.addProperty("resolutionSource", "auto");
+        JsonObject models = new JsonObject();
+        models.addProperty("claude", "claude-sonnet-4-6");
+        config.add("models", models);
+
+        JsonObject meta = PromptEnhancerHandler.buildUsageMeta(
+                config, "opencode", "opencode/deepseek-v4-flash-free");
+        assertEquals("claude-sonnet-4-6", meta.get("model").getAsString());
+    }
 }

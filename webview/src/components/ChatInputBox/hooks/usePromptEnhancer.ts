@@ -12,6 +12,10 @@ interface UsePromptEnhancerOptions {
   getTextContent: () => string;
   setHasContent: (hasContent: boolean) => void;
   onInput?: (content: string) => void;
+  /** Current chat CLI provider — used in auto mode so enhancer follows chat model */
+  currentProvider?: string;
+  /** Current chat model id — used in auto mode so enhancer follows chat model */
+  selectedModel?: string;
 }
 
 /** Runtime usage shown in the enhance dialog (mode / CLI / model). */
@@ -121,6 +125,8 @@ export function usePromptEnhancer({
   getTextContent,
   setHasContent,
   onInput,
+  currentProvider,
+  selectedModel,
 }: UsePromptEnhancerOptions): UsePromptEnhancerReturn {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [showEnhancerDialog, setShowEnhancerDialog] = useState(false);
@@ -150,13 +156,21 @@ export function usePromptEnhancer({
     setShowEnhancerDialog(true);
     setIsEnhancing(true);
 
-    // Call backend for prompt enhancement
+    // Call backend for prompt enhancement.
+    // chatProvider/chatModel let auto mode follow the model selected in chat.
     if (window.sendToJava) {
-      window.sendToJava(
-        `enhance_prompt:${JSON.stringify({ prompt: content })}`
-      );
+      const payload: {
+        prompt: string;
+        chatProvider?: string;
+        chatModel?: string;
+      } = { prompt: content };
+      const provider = currentProvider?.trim();
+      const model = selectedModel?.trim();
+      if (provider) payload.chatProvider = provider;
+      if (model) payload.chatModel = model;
+      window.sendToJava(`enhance_prompt:${JSON.stringify(payload)}`);
     }
-  }, [getTextContent]);
+  }, [getTextContent, currentProvider, selectedModel]);
 
   /**
    * Handle use enhanced prompt

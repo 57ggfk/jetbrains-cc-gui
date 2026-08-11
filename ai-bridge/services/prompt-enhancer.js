@@ -280,7 +280,47 @@ function normalizePromptEnhancerConfig(config) {
   };
 }
 
-export function resolvePromptEnhancerRuntimeConfig({ promptEnhancerConfig, legacyModel } = {}) {
+/**
+ * In auto mode, prefer the model currently selected in the chat input when the
+ * resolved enhancer provider matches the chat provider. Manual mode keeps the
+ * remembered per-provider enhancer model.
+ *
+ * @param {object} options
+ * @param {string} options.provider - resolved effective provider
+ * @param {string} options.configuredModel - models[provider] from settings
+ * @param {string} [options.resolutionSource]
+ * @param {string} [options.chatProvider]
+ * @param {string} [options.chatModel]
+ * @returns {string}
+ */
+export function resolveAutoChatModel({
+  provider,
+  configuredModel,
+  resolutionSource,
+  chatProvider,
+  chatModel,
+} = {}) {
+  const isAuto = resolutionSource === 'auto';
+  if (!isAuto || !provider) {
+    return configuredModel;
+  }
+  const chatProv = typeof chatProvider === 'string' ? chatProvider.trim().toLowerCase() : '';
+  const chatMod = typeof chatModel === 'string' ? chatModel.trim() : '';
+  if (!chatProv || !chatMod) {
+    return configuredModel;
+  }
+  if (chatProv !== String(provider).trim().toLowerCase()) {
+    return configuredModel;
+  }
+  return chatMod;
+}
+
+export function resolvePromptEnhancerRuntimeConfig({
+  promptEnhancerConfig,
+  legacyModel,
+  chatProvider,
+  chatModel,
+} = {}) {
   if (!promptEnhancerConfig) {
     return {
       provider: 'claude',
@@ -296,9 +336,16 @@ export function resolvePromptEnhancerRuntimeConfig({ promptEnhancerConfig, legac
   // Prefer Java-resolved effectiveProvider (includes CLI providers when available).
   if (isAiFeatureProvider(config.effectiveProvider)) {
     const provider = config.effectiveProvider;
+    const configuredModel = config.models[provider] || DEFAULT_PROMPT_ENHANCER_CONFIG.models[provider];
     return {
       provider,
-      model: config.models[provider] || DEFAULT_PROMPT_ENHANCER_CONFIG.models[provider],
+      model: resolveAutoChatModel({
+        provider,
+        configuredModel,
+        resolutionSource: config.resolutionSource,
+        chatProvider,
+        chatModel,
+      }),
       resolutionSource: config.resolutionSource,
     };
   }
@@ -662,7 +709,15 @@ async function enhancePrompt(originalPrompt, systemPrompt, runtimeConfig, contex
 }
 
 export async function runPromptEnhancerRequest(data) {
-  const { prompt, systemPrompt, legacyModel, context, promptEnhancerConfig } = data;
+  const {
+    prompt,
+    systemPrompt,
+    legacyModel,
+    context,
+    promptEnhancerConfig,
+    chatProvider,
+    chatModel,
+  } = data;
 
   if (!prompt) {
     return '';
@@ -671,6 +726,8 @@ export async function runPromptEnhancerRequest(data) {
   const runtimeConfig = resolvePromptEnhancerRuntimeConfig({
     promptEnhancerConfig,
     legacyModel,
+    chatProvider,
+    chatModel,
   });
   console.log(`[PromptEnhancer] Resolved provider: ${runtimeConfig.provider}, model: ${runtimeConfig.model}, source: ${runtimeConfig.resolutionSource}`);
 

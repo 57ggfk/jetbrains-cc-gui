@@ -6,6 +6,7 @@ import {
   isCliAskProvider,
   mergeAssistantTextSnapshot,
   askCliProvider,
+  extractCliEventErrorMessage,
 } from './cli-ask.js';
 
 test('CLI_ASK_PROVIDERS lists headless CLI providers', () => {
@@ -40,4 +41,40 @@ test('askCliProvider rejects unsupported providers', async () => {
 test('askCliProvider returns empty string for empty prompt without spawning', async () => {
   const result = await askCliProvider({ provider: 'grok', prompt: '   ' });
   assert.equal(result, '');
+});
+
+test('extractCliEventErrorMessage reads OpenCode nested error.data.message', () => {
+  const message = extractCliEventErrorMessage({
+    type: 'error',
+    error: {
+      name: 'UnknownError',
+      data: { message: 'Model not found: xaio/XAIO-C-4-5-Sonnet.' },
+    },
+  });
+  assert.equal(message, 'Model not found: xaio/XAIO-C-4-5-Sonnet.');
+});
+
+test('extractCliEventErrorMessage prefers error.message over nested data', () => {
+  const message = extractCliEventErrorMessage({
+    type: 'error',
+    error: {
+      message: 'Top-level error',
+      data: { message: 'Nested error' },
+    },
+  });
+  assert.equal(message, 'Top-level error');
+});
+
+test('extractCliEventErrorMessage falls back to error.name', () => {
+  const message = extractCliEventErrorMessage({
+    type: 'error',
+    error: { name: 'ProviderModelNotFoundError' },
+  });
+  assert.equal(message, 'ProviderModelNotFoundError');
+});
+
+test('extractCliEventErrorMessage returns null for empty events', () => {
+  assert.equal(extractCliEventErrorMessage(null), null);
+  assert.equal(extractCliEventErrorMessage({}), null);
+  assert.equal(extractCliEventErrorMessage({ type: 'error', error: {} }), null);
 });

@@ -96,11 +96,15 @@ function extractTextDelta(event) {
 }
 
 function extractErrorMessage(event) {
+  // OpenCode 1.x: { type: 'error', error: { name, data: { message } } }
   return firstNonEmptyStr([
     event?.error?.message,
+    event?.error?.data?.message,
+    typeof event?.error?.data === 'string' ? event.error.data : null,
     typeof event?.error === 'string' ? event.error : null,
     event?.message,
     event?.data?.message,
+    typeof event?.error?.name === 'string' ? event.error.name : null,
   ]);
 }
 

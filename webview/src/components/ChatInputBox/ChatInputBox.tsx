@@ -439,6 +439,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       getTextContent,
       setHasContent,
       onInput,
+      currentProvider,
+      selectedModel,
     });
 
     const handleOpenPromptEnhancerSettings = useCallback(() => {

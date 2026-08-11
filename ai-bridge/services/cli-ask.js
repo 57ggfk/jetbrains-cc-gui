@@ -106,6 +106,24 @@ function firstNonEmptyStr(candidates) {
   return null;
 }
 
+/**
+ * Extract a human-readable error from CLI JSON events.
+ * OpenCode 1.x uses nested `{ error: { name, data: { message } } }`.
+ * Exported for unit tests.
+ */
+export function extractCliEventErrorMessage(event) {
+  if (!event || typeof event !== 'object') return null;
+  return firstNonEmptyStr([
+    event?.error?.message,
+    event?.error?.data?.message,
+    typeof event?.error?.data === 'string' ? event.error.data : null,
+    typeof event?.error === 'string' ? event.error : null,
+    event?.message,
+    event?.data?.message,
+    typeof event?.error?.name === 'string' ? event.error.name : null,
+  ]);
+}
+
 function extractOpenCodeTextDelta(event) {
   const direct = firstNonEmptyStr([
     event?.text,
@@ -321,11 +339,7 @@ async function askOpenCode(prompt, { model, cwd, onDelta } = {}) {
         const type = typeof event.type === 'string' ? event.type : '';
         const lower = type.toLowerCase();
         if (lower === 'error' || lower.endsWith('.error')) {
-          const message = firstNonEmptyStr([
-            event?.error?.message,
-            typeof event?.error === 'string' ? event.error : null,
-            event?.message,
-          ]);
+          const message = extractCliEventErrorMessage(event);
           if (message) structuredError = message;
           return '';
         }
