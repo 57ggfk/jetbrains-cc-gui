@@ -255,6 +255,10 @@ export function useFileTags({
     // Build new HTML content using array + join (O(n) vs O(n²) string concatenation)
     const htmlParts: string[] = [];
     let lastIndex = 0;
+    // Track whether any match will actually become a tag. In-progress completion
+    // queries (e.g. "@b") produce fallback matches but are NOT file references —
+    // closing completions / rewriting innerHTML for them kills the open dropdown.
+    let hasRenderableTag = false;
 
     limitedMatches.forEach((match) => {
       const fullMatch = match.fullMatch;
@@ -292,6 +296,8 @@ export function useFileTags({
         lastIndex = matchIndex + fullMatch.length;
         return;
       }
+
+      hasRenderableTag = true;
 
       // Get display filename (with line number, for display)
       const displayFileName = filePath.split(/[/\\]/).pop() || filePath;
@@ -364,6 +370,14 @@ export function useFileTags({
     // Join all parts into final HTML
     const newHTML = htmlParts.join('');
     timer.mark('build-html');
+
+    // Nothing will actually be converted to a tag (e.g. an in-progress @query
+    // like "@b" while the completion dropdown is open). Leave the DOM and the
+    // dropdown untouched — closing completions here is the "flash then gone" bug.
+    if (!hasRenderableTag) {
+      timer.end();
+      return;
+    }
 
     // Save virtual cursor position before DOM replacement
     const savedVirtualOffset = getVirtualCursorPosition(editableRef.current);
