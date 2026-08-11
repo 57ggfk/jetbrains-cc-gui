@@ -238,7 +238,7 @@ export const ButtonArea = ({
     onEnhancePrompt?.();
   }, [onEnhancePrompt]);
 
-  // Collapse selector labels for every CLI when left cluster is about to hit the send cluster (20px).
+  // Collapse selector labels for every CLI when left cluster is about to hit the send cluster (10px).
   const buttonAreaRef = useRef<HTMLDivElement>(null);
   const buttonAreaLeftRef = useRef<HTMLDivElement>(null);
   const buttonAreaRightRef = useRef<HTMLDivElement>(null);

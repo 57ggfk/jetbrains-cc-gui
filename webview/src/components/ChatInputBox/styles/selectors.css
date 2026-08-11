@@ -73,7 +73,7 @@
 
 /*
  * Proximity compact mode (all CLI providers).
- * Applied by useToolbarSelectorCompact when left selectors would get within 20px
+ * Applied by useToolbarSelectorCompact when left selectors would get within 10px
  * of the send cluster. `data-measuring` forces expanded layout during measure so
  * we can compare full label widths without a collapse/expand loop.
  */
