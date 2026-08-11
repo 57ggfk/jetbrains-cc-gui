@@ -43,6 +43,7 @@ import { debounce } from './utils/debounce.js';
 import { perfTimer } from '../../utils/debug.js';
 import { DEBOUNCE_TIMING } from '../../constants/performance.js';
 import { SessionContext } from '../../contexts/SessionContext.js';
+import { useUIState } from '../../contexts/UIStateContext.js';
 import { ContextMenu } from '../ContextMenu';
 import { useContextMenu, copySelection, pasteAtCursor, insertNewline } from '../../hooks/useContextMenu.js';
 import './styles.css';
@@ -116,6 +117,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     ref: React.ForwardedRef<ChatInputBoxHandle>
   ) => {
     const { t } = useTranslation();
+    const { setSettingsInitialTab, setCurrentView } = useUIState();
 
     const { showOpenSourceBanner, handleDismissOpenSourceBanner } = useOpenSourceBannerState();
     const {
@@ -427,6 +429,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       showEnhancerDialog,
       originalPrompt,
       enhancedPrompt,
+      usageInfo,
       handleEnhancePrompt,
       handleUseEnhancedPrompt,
       handleKeepOriginalPrompt,
@@ -437,6 +440,12 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       setHasContent,
       onInput,
     });
+
+    const handleOpenPromptEnhancerSettings = useCallback(() => {
+      handleCloseEnhancerDialog();
+      setSettingsInitialTab('promptEnhancer');
+      setCurrentView('settings');
+    }, [handleCloseEnhancerDialog, setSettingsInitialTab, setCurrentView]);
 
     const {
       focusInput,
@@ -743,9 +752,11 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
             isLoading: isEnhancing,
             originalPrompt,
             enhancedPrompt,
+            usageInfo,
             onUseEnhanced: handleUseEnhancedPrompt,
             onKeepOriginal: handleKeepOriginalPrompt,
             onClose: handleCloseEnhancerDialog,
+            onOpenSettings: handleOpenPromptEnhancerSettings,
           }}
           t={t}
         />

@@ -54,6 +54,52 @@ describe('applyEnhancedPromptPayload', () => {
     expect(setEnhancedPrompt).toHaveBeenCalledWith('SDK missing');
     expect(setIsEnhancing).toHaveBeenCalledWith(false);
   });
+
+  it('applies usage meta without requiring enhanced text', () => {
+    const setEnhancedPrompt = vi.fn();
+    const setIsEnhancing = vi.fn();
+    const setUsageInfo = vi.fn();
+
+    applyEnhancedPromptPayload(
+      {
+        success: true,
+        enhancedPrompt: '',
+        done: false,
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        resolutionSource: 'auto',
+      },
+      { setEnhancedPrompt, setIsEnhancing, setUsageInfo }
+    );
+
+    expect(setEnhancedPrompt).not.toHaveBeenCalled();
+    expect(setIsEnhancing).not.toHaveBeenCalled();
+    expect(setUsageInfo).toHaveBeenCalledWith({
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      resolutionSource: 'auto',
+    });
+  });
+
+  it('maps invalid resolutionSource to null', () => {
+    const setUsageInfo = vi.fn();
+    applyEnhancedPromptPayload(
+      {
+        success: true,
+        enhancedPrompt: 'ok',
+        done: true,
+        provider: 'codex',
+        model: 'gpt-5.5',
+        resolutionSource: 'weird',
+      },
+      { setEnhancedPrompt: vi.fn(), setIsEnhancing: vi.fn(), setUsageInfo }
+    );
+    expect(setUsageInfo).toHaveBeenCalledWith({
+      provider: 'codex',
+      model: 'gpt-5.5',
+      resolutionSource: null,
+    });
+  });
 });
 
 describe('usePromptEnhancer', () => {
@@ -80,6 +126,7 @@ describe('usePromptEnhancer', () => {
     expect(window.sendToJava).toHaveBeenCalledWith(
       'enhance_prompt:{"prompt":"Please refactor this module"}'
     );
+    expect(result.current.usageInfo).toBeNull();
   });
 
   it('streams partial text then finalizes on done', () => {
@@ -115,5 +162,37 @@ describe('usePromptEnhancer', () => {
     });
     expect(result.current.enhancedPrompt).toBe('Hello world');
     expect(result.current.isEnhancing).toBe(false);
+  });
+
+  it('captures usage meta while still enhancing', () => {
+    const editableRef = { current: document.createElement('div') };
+
+    const { result } = renderHook(() => usePromptEnhancer({
+      editableRef,
+      getTextContent: () => 'hello',
+      setHasContent: vi.fn(),
+    }));
+
+    act(() => {
+      result.current.handleEnhancePrompt();
+    });
+
+    act(() => {
+      window.updateEnhancedPrompt?.(JSON.stringify({
+        success: true,
+        enhancedPrompt: '',
+        done: false,
+        provider: 'grok',
+        model: 'grok',
+        resolutionSource: 'manual',
+      }));
+    });
+
+    expect(result.current.isEnhancing).toBe(true);
+    expect(result.current.usageInfo).toEqual({
+      provider: 'grok',
+      model: 'grok',
+      resolutionSource: 'manual',
+    });
   });
 });

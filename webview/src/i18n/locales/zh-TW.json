@@ -1509,6 +1509,9 @@
     "searchPlaceholder": "搜尋模型",
     "noModelsFound": "找不到模型",
     "hiddenModelCount": "+ 還有 {{count}} 個模型。輸入以搜尋。",
+    "pinned": "置頂",
+    "pin": "置頂",
+    "unpin": "取消置頂",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1656,7 +1659,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "模式",
+    "modeAuto": "自動",
+    "modeManual": "手動",
+    "modeUnavailable": "不可用",
+    "providerLabel": "CLI",
+    "providerUnresolved": "未解析 CLI",
+    "modelLabel": "模型",
+    "modelUnresolved": "預設模型",
+    "openSettings": "設定",
+    "openSettingsTooltip": "開啟增強提示詞設定",
+    "resolvingUsage": "正在解析執行設定…"
   },
   "fileContext": {
     "placeholder": "檔案上下文",

@@ -1504,6 +1504,9 @@
     "searchPlaceholder": "Buscar modelos",
     "noModelsFound": "No se encontraron modelos",
     "hiddenModelCount": "+ {{count}} modelos más. Escribe para buscar.",
+    "pinned": "Fijados",
+    "pin": "Fijar",
+    "unpin": "Quitar fijado",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1646,7 +1649,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "Modo",
+    "modeAuto": "Auto",
+    "modeManual": "Manual",
+    "modeUnavailable": "No disponible",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI no resuelto",
+    "modelLabel": "Modelo",
+    "modelUnresolved": "Modelo predeterminado",
+    "openSettings": "Configurar",
+    "openSettingsTooltip": "Abrir configuración del mejorador de prompts",
+    "resolvingUsage": "Resolviendo configuración…"
   },
   "fileContext": {
     "placeholder": "Contexto de archivo",

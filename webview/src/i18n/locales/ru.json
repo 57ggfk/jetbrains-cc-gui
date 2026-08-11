@@ -1530,6 +1530,9 @@
     "searchPlaceholder": "Поиск моделей",
     "noModelsFound": "Модели не найдены",
     "hiddenModelCount": "+ {{count}} дополнительных моделей. Введите текст для поиска.",
+    "pinned": "Закреплённые",
+    "pin": "Закрепить",
+    "unpin": "Открепить",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1666,7 +1669,18 @@
     "keepOriginal": "Оставить исходный",
     "enhanceFailed": "Не удалось улучшить",
     "emptyPrompt": "Сначала введите промпт",
-    "copyEnhanced": "Копировать улучшенный"
+    "copyEnhanced": "Копировать улучшенный",
+    "modeLabel": "Режим",
+    "modeAuto": "Авто",
+    "modeManual": "Вручную",
+    "modeUnavailable": "Недоступно",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI не определён",
+    "modelLabel": "Модель",
+    "modelUnresolved": "Модель по умолчанию",
+    "openSettings": "Настроить",
+    "openSettingsTooltip": "Открыть настройки улучшения промпта",
+    "resolvingUsage": "Определение конфигурации…"
   },
   "fileContext": {
     "placeholder": "Файловый контекст",

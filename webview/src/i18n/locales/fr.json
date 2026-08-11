@@ -1504,6 +1504,9 @@
     "searchPlaceholder": "Rechercher des modèles",
     "noModelsFound": "Aucun modèle trouvé",
     "hiddenModelCount": "+ {{count}} modèles supplémentaires. Tapez pour rechercher.",
+    "pinned": "Épinglés",
+    "pin": "Épingler",
+    "unpin": "Désépingler",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1640,7 +1643,18 @@
     "keepOriginal": "Keep Original",
     "enhanceFailed": "Failed to enhance prompt",
     "emptyPrompt": "Please enter a prompt first",
-    "copyEnhanced": "Copy Enhanced"
+    "copyEnhanced": "Copy Enhanced",
+    "modeLabel": "Mode",
+    "modeAuto": "Auto",
+    "modeManual": "Manuel",
+    "modeUnavailable": "Indisponible",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI non résolu",
+    "modelLabel": "Modèle",
+    "modelUnresolved": "Modèle par défaut",
+    "openSettings": "Configurer",
+    "openSettingsTooltip": "Ouvrir les paramètres d'amélioration de prompt",
+    "resolvingUsage": "Résolution de la configuration…"
   },
   "fileContext": {
     "placeholder": "Contexte de fichier",

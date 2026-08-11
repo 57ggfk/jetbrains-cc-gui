@@ -1599,6 +1599,9 @@
     "searchPlaceholder": "모델 검색",
     "noModelsFound": "모델을 찾을 수 없습니다",
     "hiddenModelCount": "+ {{count}}개 모델 더 있음. 입력하여 검색하세요.",
+    "pinned": "고정",
+    "pin": "고정",
+    "unpin": "고정 해제",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
@@ -1741,7 +1744,18 @@
     "keepOriginal": "원본 유지",
     "enhanceFailed": "프롬프트 강화 실패",
     "emptyPrompt": "먼저 프롬프트를 입력해주세요",
-    "copyEnhanced": "강화된 프롬프트 복사"
+    "copyEnhanced": "강화된 프롬프트 복사",
+    "modeLabel": "모드",
+    "modeAuto": "자동",
+    "modeManual": "수동",
+    "modeUnavailable": "사용 불가",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI 미확인",
+    "modelLabel": "모델",
+    "modelUnresolved": "기본 모델",
+    "openSettings": "설정",
+    "openSettingsTooltip": "프롬프트 강화 설정 열기",
+    "resolvingUsage": "실행 설정 확인 중…"
   },
   "fileContext": {
     "placeholder": "파일 컨텍스트",

@@ -139,7 +139,7 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                 String legacyModel = payload.has("model") ? payload.get("model").getAsString() : null;
 
                 if (originalPrompt.isEmpty()) {
-                    sendEnhanceResult(false, "", "Prompt is empty", true);
+                    sendEnhanceResult(false, "", "Prompt is empty", true, null);
                     return;
                 }
 
@@ -184,27 +184,32 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                 // Auto mode follows the current chat provider when that CLI is available.
                 JsonObject promptEnhancerConfig = context.getSettingsService()
                         .getPromptEnhancerConfig(context.getCurrentProvider());
+                // Push usage meta immediately so the dialog can show mode/CLI/model
+                // while the enhancement is still running.
+                JsonObject usageMeta = buildUsageMeta(promptEnhancerConfig);
+                sendEnhanceResult(true, "", null, false, usageMeta);
+
                 EnhanceOutcome outcome = callAIForEnhancement(originalPrompt, legacyModel, contextObj, promptEnhancerConfig);
 
                 if (outcome.success && outcome.text != null && !outcome.text.isEmpty()) {
                     LOG.info("[PromptEnhancer] Enhancement successful"
                             + (outcome.partial ? " (partial)" : ""));
-                    sendEnhanceResult(true, outcome.text, null, true);
+                    sendEnhanceResult(true, outcome.text, null, true, usageMeta);
                 } else if (outcome.text != null && !outcome.text.isEmpty()) {
                     // Failed but we already streamed partial text — keep it usable.
                     LOG.warn("[PromptEnhancer] Enhancement incomplete: " + outcome.error);
-                    sendEnhanceResult(true, outcome.text, outcome.error, true);
+                    sendEnhanceResult(true, outcome.text, outcome.error, true, usageMeta);
                 } else {
                     LOG.warn("[PromptEnhancer] Enhancement failed: "
                             + (outcome.error != null ? outcome.error : "empty result returned"));
                     sendEnhanceResult(false, "",
                             outcome.error != null ? outcome.error : "Enhancement failed: empty result returned",
-                            true);
+                            true, usageMeta);
                 }
 
             } catch (Exception e) {
                 LOG.error("[PromptEnhancer] Prompt enhancement failed: " + e.getMessage(), e);
-                sendEnhanceResult(false, "", "Enhancement failed: " + e.getMessage(), true);
+                sendEnhanceResult(false, "", "Enhancement failed: " + e.getMessage(), true, null);
             }
         });
     }
@@ -388,25 +393,61 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
      * availability/resolution metadata).
      */
     private static String describePromptEnhancerConfig(JsonObject promptEnhancerConfig) {
-        if (promptEnhancerConfig == null) {
+        JsonObject meta = buildUsageMeta(promptEnhancerConfig);
+        if (meta == null) {
             return "none";
         }
+        String provider = meta.has("provider") && !meta.get("provider").isJsonNull()
+                ? meta.get("provider").getAsString()
+                : "unresolved";
+        String model = meta.has("model") && !meta.get("model").isJsonNull()
+                ? meta.get("model").getAsString()
+                : "default";
+        return provider + ", model: " + model;
+    }
+
+    /**
+     * Extract the mode / CLI / model actually used for this enhance request so the
+     * webview dialog can display them. Package-private for unit tests.
+     *
+     * @return a JsonObject with {@code provider}, {@code model}, {@code resolutionSource}
+     *         (any field may be omitted / null when unresolved)
+     */
+    static JsonObject buildUsageMeta(JsonObject promptEnhancerConfig) {
+        JsonObject meta = new JsonObject();
+        if (promptEnhancerConfig == null) {
+            meta.addProperty("resolutionSource", "unavailable");
+            return meta;
+        }
+
+        String resolutionSource = "auto";
+        if (promptEnhancerConfig.has("resolutionSource")
+                && !promptEnhancerConfig.get("resolutionSource").isJsonNull()) {
+            resolutionSource = promptEnhancerConfig.get("resolutionSource").getAsString();
+        }
+        meta.addProperty("resolutionSource", resolutionSource);
+
         String provider = null;
         if (promptEnhancerConfig.has("effectiveProvider")
                 && !promptEnhancerConfig.get("effectiveProvider").isJsonNull()) {
             provider = promptEnhancerConfig.get("effectiveProvider").getAsString();
         }
-        String model = null;
+        if (provider != null && !provider.isEmpty()) {
+            meta.addProperty("provider", provider);
+        }
+
         if (provider != null
                 && promptEnhancerConfig.has("models")
                 && promptEnhancerConfig.get("models").isJsonObject()) {
             JsonObject models = promptEnhancerConfig.getAsJsonObject("models");
             if (models.has(provider) && !models.get(provider).isJsonNull()) {
-                model = models.get(provider).getAsString();
+                String model = models.get(provider).getAsString();
+                if (model != null && !model.isEmpty()) {
+                    meta.addProperty("model", model);
+                }
             }
         }
-        return (provider != null ? provider : "unresolved")
-                + ", model: " + (model != null ? model : "default");
+        return meta;
     }
 
     /**
@@ -489,6 +530,7 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             final Object streamLock = new Object();
             final AtomicReference<String> latestPreview = new AtomicReference<>("");
             final AtomicBoolean progressScheduled = new AtomicBoolean(false);
+            final JsonObject usageMeta = buildUsageMeta(promptEnhancerConfig);
 
             try {
                 int exitCode = PromptEnhancerProcessRunner.runWithProcessManager(
@@ -508,7 +550,7 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
                                         streamed.append(delta);
                                         latestPreview.set(streamed.toString());
                                     }
-                                    scheduleEnhanceProgress(latestPreview, progressScheduled);
+                                    scheduleEnhanceProgress(latestPreview, progressScheduled, usageMeta);
                                 }
                             } else if (line.startsWith("[ENHANCED_ERROR]")) {
                                 String err = line.substring("[ENHANCED_ERROR]".length()).trim();
@@ -578,7 +620,8 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
      */
     private void scheduleEnhanceProgress(
             AtomicReference<String> latestPreview,
-            AtomicBoolean progressScheduled
+            AtomicBoolean progressScheduled,
+            JsonObject usageMeta
     ) {
         if (!progressScheduled.compareAndSet(false, true)) {
             return;
@@ -587,7 +630,7 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
             progressScheduled.set(false);
             String preview = latestPreview.get();
             if (preview != null && !preview.isEmpty()) {
-                sendEnhanceResult(true, preview, null, false);
+                sendEnhanceResult(true, preview, null, false, usageMeta);
             }
         });
     }
@@ -596,14 +639,32 @@ public class PromptEnhancerHandler extends BaseMessageHandler {
      * Send the enhancement result (or streaming progress) to the frontend.
      *
      * @param done when false, the UI keeps the loading state and shows partial text
+     * @param usageMeta optional provider/model/mode info for the dialog header
      */
-    private void sendEnhanceResult(boolean success, String enhancedPrompt, String error, boolean done) {
+    private void sendEnhanceResult(
+            boolean success,
+            String enhancedPrompt,
+            String error,
+            boolean done,
+            JsonObject usageMeta
+    ) {
         JsonObject result = new JsonObject();
         result.addProperty("success", success);
         result.addProperty("enhancedPrompt", enhancedPrompt != null ? enhancedPrompt : "");
         result.addProperty("done", done);
         if (error != null) {
             result.addProperty("error", error);
+        }
+        if (usageMeta != null) {
+            if (usageMeta.has("provider") && !usageMeta.get("provider").isJsonNull()) {
+                result.addProperty("provider", usageMeta.get("provider").getAsString());
+            }
+            if (usageMeta.has("model") && !usageMeta.get("model").isJsonNull()) {
+                result.addProperty("model", usageMeta.get("model").getAsString());
+            }
+            if (usageMeta.has("resolutionSource") && !usageMeta.get("resolutionSource").isJsonNull()) {
+                result.addProperty("resolutionSource", usageMeta.get("resolutionSource").getAsString());
+            }
         }
 
         String resultJson = gson.toJson(result);

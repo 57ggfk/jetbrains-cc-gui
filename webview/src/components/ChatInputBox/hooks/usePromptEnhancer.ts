@@ -14,6 +14,13 @@ interface UsePromptEnhancerOptions {
   onInput?: (content: string) => void;
 }
 
+/** Runtime usage shown in the enhance dialog (mode / CLI / model). */
+export interface EnhanceUsageInfo {
+  provider: string | null;
+  model: string | null;
+  resolutionSource: 'manual' | 'auto' | 'unavailable' | null;
+}
+
 interface UsePromptEnhancerReturn {
   /** Whether prompt enhancement is in progress */
   isEnhancing: boolean;
@@ -23,6 +30,8 @@ interface UsePromptEnhancerReturn {
   originalPrompt: string;
   /** Enhanced prompt text (may stream in while isEnhancing) */
   enhancedPrompt: string;
+  /** Provider/model/mode used for the active enhance request */
+  usageInfo: EnhanceUsageInfo | null;
   /** Trigger prompt enhancement */
   handleEnhancePrompt: () => void;
   /** Use enhanced prompt */
@@ -39,6 +48,21 @@ export interface EnhancedPromptPayload {
   error?: string;
   /** false while streaming partial text; true (or omitted) when finished */
   done?: boolean;
+  /** Effective CLI provider id (claude/codex/grok/...) */
+  provider?: string | null;
+  /** Model id for the effective provider */
+  model?: string | null;
+  /** auto | manual | unavailable */
+  resolutionSource?: string | null;
+}
+
+function parseResolutionSource(
+  value: unknown
+): EnhanceUsageInfo['resolutionSource'] {
+  if (value === 'manual' || value === 'auto' || value === 'unavailable') {
+    return value;
+  }
+  return null;
 }
 
 /**
@@ -50,6 +74,7 @@ export function applyEnhancedPromptPayload(
   setters: {
     setEnhancedPrompt: (text: string) => void;
     setIsEnhancing: (value: boolean) => void;
+    setUsageInfo?: (info: EnhanceUsageInfo | null) => void;
   }
 ): void {
   const done = data.done !== false;
@@ -60,6 +85,23 @@ export function applyEnhancedPromptPayload(
   } else if (data.enhancedPrompt) {
     // Streaming progress without success flag — still show text
     setters.setEnhancedPrompt(data.enhancedPrompt);
+  }
+
+  if (
+    setters.setUsageInfo
+    && (data.provider !== undefined
+      || data.model !== undefined
+      || data.resolutionSource !== undefined)
+  ) {
+    setters.setUsageInfo({
+      provider: typeof data.provider === 'string' && data.provider.trim()
+        ? data.provider.trim()
+        : null,
+      model: typeof data.model === 'string' && data.model.trim()
+        ? data.model.trim()
+        : null,
+      resolutionSource: parseResolutionSource(data.resolutionSource),
+    });
   }
 
   if (done) {
@@ -84,6 +126,7 @@ export function usePromptEnhancer({
   const [showEnhancerDialog, setShowEnhancerDialog] = useState(false);
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [enhancedPrompt, setEnhancedPrompt] = useState('');
+  const [usageInfo, setUsageInfo] = useState<EnhanceUsageInfo | null>(null);
   /** Bumped on close / new request to ignore late backend updates. */
   const requestIdRef = useRef(0);
   /** Generation id for the currently open enhance request. */
@@ -103,6 +146,7 @@ export function usePromptEnhancer({
     // Set original prompt and open dialog
     setOriginalPrompt(content);
     setEnhancedPrompt('');
+    setUsageInfo(null);
     setShowEnhancerDialog(true);
     setIsEnhancing(true);
 
@@ -156,7 +200,11 @@ export function usePromptEnhancer({
       }
       try {
         const data = JSON.parse(result) as EnhancedPromptPayload;
-        applyEnhancedPromptPayload(data, { setEnhancedPrompt, setIsEnhancing });
+        applyEnhancedPromptPayload(data, {
+          setEnhancedPrompt,
+          setIsEnhancing,
+          setUsageInfo,
+        });
       } catch {
         setEnhancedPrompt(result);
         setIsEnhancing(false);
@@ -173,6 +221,7 @@ export function usePromptEnhancer({
     showEnhancerDialog,
     originalPrompt,
     enhancedPrompt,
+    usageInfo,
     handleEnhancePrompt,
     handleUseEnhancedPrompt,
     handleKeepOriginalPrompt,

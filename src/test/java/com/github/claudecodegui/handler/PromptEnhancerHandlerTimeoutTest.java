@@ -1,9 +1,12 @@
 package com.github.claudecodegui.handler;
 
+import com.google.gson.JsonObject;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Unit tests for pure helpers on {@link PromptEnhancerHandler}:
@@ -31,5 +34,39 @@ public class PromptEnhancerHandlerTimeoutTest {
         assertEquals("plain", PromptEnhancerHandler.parseJsonStringPayload("plain"));
         assertNull(PromptEnhancerHandler.parseJsonStringPayload(""));
         assertNull(PromptEnhancerHandler.parseJsonStringPayload(null));
+    }
+
+    @Test
+    public void buildUsageMeta_extractsProviderModelAndMode() {
+        JsonObject config = new JsonObject();
+        config.addProperty("effectiveProvider", "claude");
+        config.addProperty("resolutionSource", "manual");
+        JsonObject models = new JsonObject();
+        models.addProperty("claude", "claude-sonnet-4-6");
+        models.addProperty("codex", "gpt-5.5");
+        config.add("models", models);
+
+        JsonObject meta = PromptEnhancerHandler.buildUsageMeta(config);
+        assertEquals("claude", meta.get("provider").getAsString());
+        assertEquals("claude-sonnet-4-6", meta.get("model").getAsString());
+        assertEquals("manual", meta.get("resolutionSource").getAsString());
+    }
+
+    @Test
+    public void buildUsageMeta_nullConfigIsUnavailable() {
+        JsonObject meta = PromptEnhancerHandler.buildUsageMeta(null);
+        assertEquals("unavailable", meta.get("resolutionSource").getAsString());
+        assertFalse(meta.has("provider"));
+        assertFalse(meta.has("model"));
+    }
+
+    @Test
+    public void buildUsageMeta_autoModeWithoutProviderOmitsProvider() {
+        JsonObject config = new JsonObject();
+        config.addProperty("resolutionSource", "auto");
+        JsonObject meta = PromptEnhancerHandler.buildUsageMeta(config);
+        assertEquals("auto", meta.get("resolutionSource").getAsString());
+        assertFalse(meta.has("provider"));
+        assertTrue(meta.has("resolutionSource"));
     }
 }

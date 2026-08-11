@@ -1509,6 +1509,9 @@
     "searchPlaceholder": "モデルを検索",
     "noModelsFound": "モデルが見つかりません",
     "hiddenModelCount": "+ {{count}} 件のモデルがあります。入力して検索してください。",
+    "pinned": "ピン留め",
+    "pin": "ピン留め",
+    "unpin": "ピンを外す",
     "longContext": {
       "label": "1M",
       "shortLabel": "1Mコンテキスト",
@@ -1645,7 +1648,18 @@
     "keepOriginal": "元のままにする",
     "enhanceFailed": "プロンプトの強化に失敗しました",
     "emptyPrompt": "最初にプロンプトを入力してください",
-    "copyEnhanced": "強化版をコピー"
+    "copyEnhanced": "強化版をコピー",
+    "modeLabel": "モード",
+    "modeAuto": "自動",
+    "modeManual": "手動",
+    "modeUnavailable": "利用不可",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI 未解決",
+    "modelLabel": "モデル",
+    "modelUnresolved": "デフォルトモデル",
+    "openSettings": "設定",
+    "openSettingsTooltip": "プロンプト強化の設定を開く",
+    "resolvingUsage": "実行設定を解決中…"
   },
   "fileContext": {
     "placeholder": "ファイルコンテキスト",
