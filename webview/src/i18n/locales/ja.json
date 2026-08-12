@@ -1341,6 +1341,25 @@
     "stopped": "停止",
     "progress": "{{total}} 件中 {{completed}} 件完了"
   },
+  "subagent": {
+    "process": {
+      "title": "エージェントプロセス",
+      "prompt": "プロンプト",
+      "thought": "思考",
+      "filesRead_one": "{{count}} 件のファイルを読む",
+      "filesRead_other": "{{count}} 件のファイルを読む",
+      "otherTools": "その他ツール",
+      "result": "結果",
+      "showFullOutput": "出力全体を表示",
+      "loading": "エージェントプロセスを読み込み中…",
+      "unavailable": "セッションに id ができるまでプロセスログは利用できません。",
+      "reportGenerated": "構造化分析レポートを生成しました",
+      "unitMs": "ミリ秒",
+      "unitS": "秒",
+      "unitTools": "ツール",
+      "unitTokens": "トークン"
+    }
+  },
   "statusPanel": {
     "todoTab": "計画",
     "tasksTab": "タスク",

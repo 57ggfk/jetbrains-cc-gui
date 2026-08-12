@@ -1335,6 +1335,25 @@
     "allCompleted": "{{completed}}/{{total}} कार्य पूर्ण",
     "stopped": "रुका हुआ"
   },
+  "subagent": {
+    "process": {
+      "title": "एजेंट प्रक्रिया",
+      "prompt": "प्रॉम्प्ट",
+      "thought": "विचार",
+      "filesRead_one": "{{count}} फ़ाइल पढ़ें",
+      "filesRead_other": "{{count}} फ़ाइलें पढ़ें",
+      "otherTools": "अन्य उपकरण",
+      "result": "परिणाम",
+      "showFullOutput": "पूरा आउटपुट देखें",
+      "loading": "एजेंट प्रक्रिया लोड हो रही है…",
+      "unavailable": "जब तक सत्र का id नहीं है, प्रक्रिया लॉग उपलब्ध नहीं है।",
+      "reportGenerated": "संरचित विश्लेषण रिपोर्ट तैयार की गई",
+      "unitMs": "मि॰से॰",
+      "unitS": "से॰",
+      "unitTools": "उपकरण",
+      "unitTokens": "टोकन"
+    }
+  },
   "statusPanel": {
     "todoTab": "योजना",
     "tasksTab": "कार्य",
