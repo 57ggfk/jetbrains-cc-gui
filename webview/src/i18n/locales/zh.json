@@ -1690,6 +1690,7 @@
   "subagent": {
     "process": {
       "title": "Agent 进程",
+      "prompt": "提示词",
       "thought": "思考",
       "filesRead_one": "读取 {{count}} 个文件",
       "filesRead_other": "读取 {{count}} 个文件",

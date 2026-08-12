@@ -1431,6 +1431,25 @@
     "allCompleted": "모두 완료 {{completed}}/{{total}} 작업",
     "stopped": "중단됨"
   },
+  "subagent": {
+    "process": {
+      "title": "에이전트 프로세스",
+      "prompt": "프롬프트",
+      "thought": "생각",
+      "filesRead_one": "파일 {{count}}개 읽기",
+      "filesRead_other": "파일 {{count}}개 읽기",
+      "otherTools": "기타 도구",
+      "result": "결과",
+      "showFullOutput": "전체 출력 보기",
+      "loading": "에이전트 프로세스 로드 중…",
+      "unavailable": "세션에 id가 생기기 전까지 프로세스 로그를 사용할 수 없습니다.",
+      "reportGenerated": "구조화된 분석 보고서가 생성됨",
+      "unitMs": "ms",
+      "unitS": "초",
+      "unitTools": "도구",
+      "unitTokens": "토큰"
+    }
+  },
   "statusPanel": {
     "todoTab": "계획",
     "tasksTab": "작업",
