@@ -1,7 +1,7 @@
 import { AsyncStream } from '../../utils/async-stream.js';
 import { loadClaudeSdk } from '../../utils/sdk-loader.js';
 import { createPreToolUseHook, normalizePermissionMode } from './permission-mode.js';
-import { parseTaskNotificationXml, buildTaskNotificationEvent, extractUserMessageTaskNotificationXml } from './task-notification-parser.js';
+import { parseTaskNotificationXml, buildTaskNotificationEvent, extractTaskNotificationXml } from './task-notification-parser.js';
 import {
   beginRuntimeTurn,
   cleanupStaleAnonymousRuntimes as cleanupAnonymousFromRegistry,
@@ -382,28 +382,29 @@ export function startPerpetualReader(runtime, callbacks) {
             }
           }
           // Recent Claude Code terminates a background Agent by injecting a
-          // <task-notification> XML as the CONTENT of a plain user message in
-          // the main session, not as a queued_command attachment and not as an
-          // SDK task_notification event. The user message carries the agent's
+          // <task-notification> XML into the main session, not as an SDK
+          // task_notification event. The XML arrives as either a plain user
+          // message (content) or a queued_command attachment (prompt); both are
+          // recognized by extractTaskNotificationXml. It carries the agent's
           // full <result> report; inter-turn it is otherwise silently consumed
           // (the frontend only sees it after a reload). Parse the XML and
           // synthesize the task_notification event the SDK no longer emits, so
           // window.onTaskEvent can surface the report without waiting for a
           // reload. (The frontend also recovers these from history on its own —
           // see collectTaskEventsFromMessages — so this is the live fast-path.)
-          const taskNotificationXml = extractUserMessageTaskNotificationXml(msg);
+          const taskNotificationXml = extractTaskNotificationXml(msg);
           if (taskNotificationXml !== null) {
             if (runtime.sessionId) {
               const parsed = parseTaskNotificationXml(taskNotificationXml);
               const event = buildTaskNotificationEvent(parsed);
               if (event) {
-                console.log('[PERPETUAL_READER] Inter-turn task-notification user message for sessionId=' + runtime.sessionId + ', toolUseId=' + parsed.toolUseId + ', status=' + event.status);
+                console.log('[PERPETUAL_READER] Inter-turn task-notification message for sessionId=' + runtime.sessionId + ', toolUseId=' + parsed.toolUseId + ', status=' + event.status);
                 emitTaskEvent(runtime.sessionId, event);
               } else {
-                console.log('[PERPETUAL_READER] Inter-turn task-notification user message could not be parsed (no tool_use_id or non-terminal status), consuming silently');
+                console.log('[PERPETUAL_READER] Inter-turn task-notification message could not be parsed (no tool_use_id or non-terminal status), consuming silently');
               }
             } else {
-              console.log('[PERPETUAL_READER] Inter-turn task-notification user message for anonymous runtime, consuming silently');
+              console.log('[PERPETUAL_READER] Inter-turn task-notification message for anonymous runtime, consuming silently');
             }
           }
           // For other message types during inter-turn, we silently consume

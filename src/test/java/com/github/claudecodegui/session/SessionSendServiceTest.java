@@ -74,8 +74,9 @@ public class SessionSendServiceTest {
         assertNull(SessionSendService.normalizeCliModelForProvider("kimi", "auto"));
         assertNull(SessionSendService.normalizeCliModelForProvider("opencode", "opencode-default"));
         assertEquals("kimi-k2.5", SessionSendService.normalizeCliModelForProvider("kimi", "kimi-k2.5"));
-        assertEquals("grok-4.5", SessionSendService.normalizeCliModelForProvider("grok", "grok-4.5"));
-        assertEquals("grok-4.5", SessionSendService.normalizeCliModelForProvider("grok", "grok"));
+        assertEquals("grok-4.6", SessionSendService.normalizeCliModelForProvider("grok", "grok-4.6"));
+        assertEquals("grok-4.6", SessionSendService.normalizeCliModelForProvider("grok", "grok-4.5"));
+        assertEquals("grok-4.6", SessionSendService.normalizeCliModelForProvider("grok", "grok"));
         assertNull(SessionSendService.normalizeCliModelForProvider("grok", "claude-sonnet-5"));
     }
 

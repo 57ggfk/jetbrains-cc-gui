@@ -1341,6 +1341,25 @@
     "stopped": "已停止",
     "progress": "已完成 {{completed}}/{{total}} 個任務"
   },
+  "subagent": {
+    "process": {
+      "title": "Agent 程序",
+      "prompt": "提示詞",
+      "thought": "思考",
+      "filesRead_one": "讀取 {{count}} 個檔案",
+      "filesRead_other": "讀取 {{count}} 個檔案",
+      "otherTools": "其他工具",
+      "result": "結果",
+      "showFullOutput": "檢視完整輸出",
+      "loading": "正在載入 Agent 程序…",
+      "unavailable": "本次工作階段未產生程序記錄（需要工作階段 ID）。",
+      "reportGenerated": "已產生結構化分析報告",
+      "unitMs": "毫秒",
+      "unitS": "秒",
+      "unitTools": "個工具",
+      "unitTokens": "tokens"
+    }
+  },
   "statusPanel": {
     "todoTab": "計畫",
     "tasksTab": "任務",

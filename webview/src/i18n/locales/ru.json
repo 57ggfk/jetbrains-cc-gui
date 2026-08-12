@@ -1362,6 +1362,25 @@
     "allCompleted": "Все завершены {{completed}}/{{total}} задач",
     "stopped": "Остановлено"
   },
+  "subagent": {
+    "process": {
+      "title": "Процесс агента",
+      "prompt": "Промпт",
+      "thought": "Размышление",
+      "filesRead_one": "Прочитан {{count}} файл",
+      "filesRead_other": "Прочитано {{count}} файлов",
+      "otherTools": "Другие инструменты",
+      "result": "Результат",
+      "showFullOutput": "Показать полный вывод",
+      "loading": "Загрузка процесса агента…",
+      "unavailable": "Журнал процесса недоступен, пока у сессии нет id.",
+      "reportGenerated": "Сформирован структурированный аналитический отчёт",
+      "unitMs": "мс",
+      "unitS": "с",
+      "unitTools": "инструментов",
+      "unitTokens": "токенов"
+    }
+  },
   "statusPanel": {
     "todoTab": "План",
     "tasksTab": "Задачи",

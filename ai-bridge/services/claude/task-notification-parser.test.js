@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTaskNotificationXml, buildTaskNotificationEvent } from './task-notification-parser.js';
+import { parseTaskNotificationXml, buildTaskNotificationEvent, extractTaskNotificationXml } from './task-notification-parser.js';
 
 // Mirrors the user-message content Claude Code injects when a background Agent
 // terminates (built by enqueueAgentNotification). The <result> body is escaped
@@ -130,4 +130,45 @@ test('buildTaskNotificationEvent omits summary when both result and summary are 
   // No summary key at all, so the frontend falls all the way back to the
   // launch ack text rather than rendering an empty report.
   assert.strictEqual('summary' in event, false);
+});
+
+test('extractTaskNotificationXml recognizes a queued_command attachment carrier', () => {
+  // Claude Code sometimes delivers the report as a queued_command attachment
+  // (attachment.commandMode === 'task-notification', XML in attachment.prompt)
+  // rather than a user message. Both carriers must be recognized or the report
+  // is lost on one path.
+  const msg = {
+    type: 'attachment',
+    attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: FULL_XML },
+  };
+  assert.strictEqual(extractTaskNotificationXml(msg), FULL_XML);
+});
+
+test('extractTaskNotificationXml recognizes a user-message carrier', () => {
+  const msg = { type: 'user', message: { role: 'user', content: FULL_XML } };
+  assert.strictEqual(extractTaskNotificationXml(msg), FULL_XML);
+  // Array-of-text-blocks content form is also accepted.
+  const arrayMsg = {
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'text', text: FULL_XML }] },
+  };
+  assert.strictEqual(extractTaskNotificationXml(arrayMsg), FULL_XML);
+});
+
+test('extractTaskNotificationXml rejects non-carriers', () => {
+  // A queued_command that is NOT a task-notification (e.g. an enqueued user
+  // prompt) must not be mistaken for one.
+  assert.strictEqual(extractTaskNotificationXml(null), null);
+  assert.strictEqual(extractTaskNotificationXml({ type: 'assistant', message: { content: 'hi' } }), null);
+  assert.strictEqual(
+    extractTaskNotificationXml({
+      type: 'attachment',
+      attachment: { type: 'queued_command', commandMode: 'user-prompt', prompt: 'do something' },
+    }),
+    null,
+  );
+  assert.strictEqual(
+    extractTaskNotificationXml({ type: 'user', message: { role: 'user', content: 'a normal prompt' } }),
+    null,
+  );
 });

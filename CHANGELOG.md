@@ -1,3 +1,43 @@
+##### **2026年8月12日（v0.5.2）**
+
+English:
+
+✨ Features
+- Show the **subagent's original prompt** in its process details: the Agent group / task execution blocks pass the tool_use input prompt into the details view, rendered as a dedicated section above the thought section, with translations for all 10 UI languages (by @gadfly3173)
+
+🔧 Improvements
+- Update the **contribution branch model**: community PRs now target the current `feature/vX.Y.Z` version branch instead of `main` / `develop`, and README contributor credits switch to the auto-updating contrib.rocks wall (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **streaming frame starvation in dense turns**: StreamMessageCoalescer no longer drops an in-flight frame just because newer data is queued — ordering is enforced against the last pushed sequence (and reset together with the stream state), so tool_use / tool_result blocks reach the webview during the stream instead of only at the stream-end flush; message content / raw snapshots are now volatile to close the cross-thread reassignment race (by @gadfly3173)
+- Fix **Claude async subagent report delivery (dual carrier)**: `<task-notification>` XML is now recognized both as a plain user message and as a queued_command attachment, live and on history reload — history reshapes attachment rows into user messages so the subagent card receives the final report instead of staying stuck on the launch ack text (by @gadfly3173)
+- Fix **subagent thought section content**: the process model collects assistant thinking blocks (the agent's actual reasoning) instead of text blocks, so the terminal report no longer duplicates between the thought and result sections (by @gadfly3173)
+- Fix **JCEF OSR IME composition for CJK input methods**: a repaired input-method listener forwards the real caret position to Blink (Bopomofo / Pinyin candidate picking), terminates the composition when the IME aborts mid-composition, and falls back to the platform adapter when the browser is unavailable; can be disabled with `-Dccg.disable.osr.ime.fix=true` (by @OmarHung)
+- Fix **chat input stuck in composing state**: a non-composition input event while the composing flag is still set proves JCEF dropped compositionEnd (e.g. input source switched mid-composition) and resets the state; tag rendering is now composition-safe (never scheduled during composition, re-checked when the debounced callback runs), and zero-width IME residue no longer blocks the `/` and `#` trigger menus (by @OmarHung, @jianhong-li, refs #1650)
+- Fix **`@` file tag rebuilds erasing existing chips**: only an actually renderable reference in raw text authorizes a DOM rebuild — existing file / quote chips and unrelated raw `@` text (e.g. `@GetMapping`) no longer trigger one (by @jianhong-li, closes #1650)
+- Fix **AskUserQuestion / permission dialogs lost on watcher restart**: the Java permission watcher now only purges session IPC files older than 2 hours on start so fresh in-flight requests survive, ask / plan response files are included in cleanup, and the daemon's stable session routing key is pinned by a regression test (by @zhukunpenglinyutong)
+- Fix **Codex skill toggle stuck spinning**: the toggle result echoes the requested skill name so the frontend can clear its in-progress flag (by @hebulin, closes #1438)
+
+中文：
+
+✨ 新功能
+- 子代理进程详情新增 **原始 prompt 展示**：Agent 分组 / 任务执行块把 tool_use 输入中的 prompt 传入详情视图，在「思考」区块上方以独立区块展示，并补齐全部 10 种界面语言的翻译（by @gadfly3173）
+
+🔧 优化
+- 更新 **贡献分支模型**：社区 PR 改为合入当前 `feature/vX.Y.Z` 版本分支（而非 `main` / `develop`）；README 贡献者名单切换为自动更新的 contrib.rocks 墙（by @zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **密集流式输出时的帧饥饿**：StreamMessageCoalescer 不再仅因已有更新数据排队就丢弃在途帧——顺序改为以「最后已推送序号」为准（并随流状态一起重置），tool_use / tool_result 块在流式过程中即可到达 webview，不再只等流末冲刷；消息 content / raw 快照改为 volatile，消除跨线程重赋值竞态（by @gadfly3173）
+- 修复 **Claude 异步子代理报告投递（双载体）**：`<task-notification>` XML 现在同时识别普通 user 消息与 queued_command attachment 两种载体（实时 + 历史加载），历史加载会把 attachment 行改写为 user 消息，子代理卡片可收到最终报告，不再停在启动确认文本（by @gadfly3173）
+- 修复 **子代理「思考」区块内容**：进程模型改为收集 assistant thinking 块（真实推理过程）而非 text 块，最终报告不再在「思考」与「结果」两个区块重复出现（by @gadfly3173）
+- 修复 **JCEF OSR 中文输入法组合态**：修复后的输入法监听器会把真实光标位置转发给 Blink（注音 / 拼音选字）、在 IME 中途取消时正确结束组合态，并在无法解析 browser 时回退平台适配器；可用 `-Dccg.disable.osr.ime.fix=true` 关闭（by @OmarHung）
+- 修复 **输入框卡在组合态**：组合标记仍存在时收到非组合类输入事件，即证明 JCEF 丢失了 compositionEnd（如输入法中途切换），此时自动重置状态；标签渲染改为组合态安全（组合中不调度、防抖回调执行前二次检查）；零宽 IME 残留字符不再阻挡 `/` 与 `#` 触发菜单（by @OmarHung、@jianhong-li，关联 #1650）
+- 修复 **`@` 文件标签重建误删已有 chip**：只有原始文本中确实存在可渲染引用时才允许 DOM 重建——已渲染的 file / quote chip 和无关的 `@` 文本（如 `@GetMapping`）不再触发重建（by @jianhong-li，关闭 #1650）
+- 修复 **watcher 重启丢失 AskUserQuestion / 权限弹窗**：Java 权限 watcher 启动时只清理 2 小时前的会话 IPC 文件，刚写入的在途请求得以保留；清理范围补全 ask / plan 响应文件；守护进程的稳定会话路由键由回归测试锁定（by @zhukunpenglinyutong）
+- 修复 **Codex skill 开关一直转圈**：开关结果回显请求的 skill 名称，前端可据此清除进行中状态（by @hebulin，关闭 #1438）
+
+---
+
 ##### **2026年8月11日（v0.5.1）**
 
 English:

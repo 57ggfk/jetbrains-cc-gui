@@ -2,12 +2,18 @@
  * Parse a Claude Code task-notification XML string.
  *
  * Recent Claude Code terminates a background (run_in_background) Agent by
- * injecting a <task-notification> XML as the content of a plain user message
- * in the main session, NOT by emitting a task_notification SDK event. The
- * <result> tag carries the agent's finalMessage (its full report); the
- * <summary> tag is only a one-liner like `Agent "desc" finished`. Without
- * parsing this XML the frontend subagent card never sees the report and stays
- * stuck on the launch ack text ("Async agent launched successfully.").
+ * injecting a <task-notification> XML into the main session instead of
+ * emitting a task_notification SDK event. The XML's <result> tag carries the
+ * agent's finalMessage (its full report); the <summary> tag is only a one-liner
+ * like `Agent "desc" finished`. Without parsing this XML the frontend subagent
+ * card never sees the report and stays stuck on the launch ack text ("Async
+ * agent launched successfully.").
+ *
+ * The carrier varies by Claude Code version/scene: the XML arrives either as
+ * the content of a plain user message, or wrapped in a queued_command
+ * attachment (attachment.type === 'queued_command', commandMode ===
+ * 'task-notification', XML in attachment.prompt). extractTaskNotificationXml
+ * recognizes both.
  *
  * The XML body is escaped with a minimal escaper (only & < >), so a
  * non-greedy indexOf scan for the closing tag is safe — the escaped report
@@ -37,21 +43,36 @@ export function parseTaskNotificationXml(xml) {
 }
 
 /**
- * If `msg` is a main-session user message whose content carries a
- * <task-notification> XML, return that XML string; otherwise return null. The
- * content may be a plain string or an array of text blocks (Claude Code uses
- * the string form, but both are accepted). Returning null for "not a carrier"
- * lets the caller keep processing a normal user message (in-turn) or silently
- * consume it (inter-turn) without conflating it with an unparseable payload.
+ * If `msg` carries a <task-notification> XML, return that XML string; otherwise
+ * return null. Two carriers are recognized:
+ *  - a main-session user message whose content is the XML (string, or an array
+ *    of text blocks joined);
+ *  - a queued_command attachment (attachment.type === 'queued_command',
+ *    commandMode === 'task-notification') with the XML in attachment.prompt.
+ * Both forms appear in the wild depending on Claude Code version/scene, so the
+ * caller must handle both or the report is lost on one path. Returning null for
+ * "not a carrier" lets the caller keep processing a normal user message
+ * (in-turn) or silently consume it (inter-turn) without conflating it with an
+ * unparseable payload.
  */
-export function extractUserMessageTaskNotificationXml(msg) {
-  if (!msg || msg.type !== 'user') return null;
-  const rawContent = msg.message?.content ?? msg.content;
-  const xml = typeof rawContent === 'string' ? rawContent
-    : (Array.isArray(rawContent)
-      ? rawContent.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('')
-      : '');
-  return xml.includes('<task-notification') ? xml : null;
+export function extractTaskNotificationXml(msg) {
+  if (!msg) return null;
+  if (msg.type === 'user') {
+    const rawContent = msg.message?.content ?? msg.content;
+    const xml = typeof rawContent === 'string' ? rawContent
+      : (Array.isArray(rawContent)
+        ? rawContent.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('')
+        : '');
+    return xml.includes('<task-notification') ? xml : null;
+  }
+  if (msg.type === 'attachment'
+    && msg.attachment?.type === 'queued_command'
+    && msg.attachment?.commandMode === 'task-notification'
+    && typeof msg.attachment?.prompt === 'string'
+    && msg.attachment.prompt.includes('<task-notification')) {
+    return msg.attachment.prompt;
+  }
+  return null;
 }
 
 function extractTag(xml, tag) {

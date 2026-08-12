@@ -1486,6 +1486,25 @@
     "allCompleted": "Todas Concluídas {{completed}}/{{total}} tarefas",
     "stopped": "Parado"
   },
+  "subagent": {
+    "process": {
+      "title": "Processo do agente",
+      "prompt": "Prompt",
+      "thought": "Raciocínio",
+      "filesRead_one": "Ler {{count}} arquivo",
+      "filesRead_other": "Ler {{count}} arquivos",
+      "otherTools": "Outras ferramentas",
+      "result": "Resultado",
+      "showFullOutput": "Ver saída completa",
+      "loading": "Carregando processo do agente…",
+      "unavailable": "O log do processo não está disponível até que a sessão tenha um id.",
+      "reportGenerated": "Relatório de análise estruturada gerado",
+      "unitMs": "ms",
+      "unitS": "s",
+      "unitTools": "ferramentas",
+      "unitTokens": "tokens"
+    }
+  },
   "statusPanel": {
     "todoTab": "Plano",
     "tasksTab": "Tarefas",

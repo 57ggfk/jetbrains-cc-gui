@@ -1336,6 +1336,25 @@
     "stopped": "Detenido",
     "progress": "{{completed}} de {{total}} tareas completadas"
   },
+  "subagent": {
+    "process": {
+      "title": "Proceso del agente",
+      "prompt": "Indicación",
+      "thought": "Razonamiento",
+      "filesRead_one": "Leer {{count}} archivo",
+      "filesRead_other": "Leer {{count}} archivos",
+      "otherTools": "Otras herramientas",
+      "result": "Resultado",
+      "showFullOutput": "Ver salida completa",
+      "loading": "Cargando proceso del agente…",
+      "unavailable": "El registro del proceso no está disponible hasta que la sesión tenga un id.",
+      "reportGenerated": "Informe de análisis estructurado generado",
+      "unitMs": "ms",
+      "unitS": "s",
+      "unitTools": "herramientas",
+      "unitTokens": "tokens"
+    }
+  },
   "statusPanel": {
     "todoTab": "Plan",
     "tasksTab": "Tareas",

@@ -5,8 +5,8 @@ import { CODEX_MODELS, GROK_MODELS, CLAUDE_MODELS } from './types';
 describe('resolveProviderModels', () => {
   it('uses dynamic Grok catalog when catalogHasEntries is true', () => {
     const catalog = [
-      { id: 'grok', label: 'Grok 4.5', description: 'grok-4.5' },
-      { id: 'work', label: 'Work', description: 'grok-4.5' },
+      { id: 'grok', label: 'Grok 4.6', description: 'grok-4.6' },
+      { id: 'work', label: 'Work', description: 'grok-4.6' },
     ];
     expect(
       resolveProviderModels({

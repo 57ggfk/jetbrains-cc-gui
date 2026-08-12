@@ -187,9 +187,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         }
       };
       const applyGrokModel = makeCliModelApplier((id) => {
-        // Migrate stale sentinel ids saved by older versions — mirrors
+        // Migrate stale sentinel / legacy ids saved by older versions — mirrors
         // normalizeGrokModelId in ai-bridge/services/grok/grok-utils.js.
-        const sentinel = ['grok', 'default', '(default)'].includes(id.trim().toLowerCase());
+        const lower = id.trim().toLowerCase();
+        const sentinel = ['grok', 'default', '(default)', 'grok-4.5'].includes(lower);
         const normalized = sentinel ? GROK_DEFAULT_MODEL_ID : id;
         restoredGrokModel = normalized;
         setSelectedGrokModel(normalized);

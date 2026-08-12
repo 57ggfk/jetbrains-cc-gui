@@ -1685,6 +1685,7 @@
   "subagent": {
     "process": {
       "title": "Agent process",
+      "prompt": "Prompt",
       "thought": "Thought",
       "filesRead_one": "Read {{count}} file",
       "filesRead_other": "Read {{count}} files",
@@ -1964,9 +1965,9 @@
       }
     },
     "grok": {
-      "grok45": {
-        "label": "Grok 4.5",
-        "description": "xAI Grok 4.5"
+      "grok46": {
+        "label": "Grok 4.6",
+        "description": "xAI Grok 4.6"
       }
     }
   },

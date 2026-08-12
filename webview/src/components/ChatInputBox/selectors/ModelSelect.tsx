@@ -81,8 +81,9 @@ const MODEL_LABEL_KEYS: Record<string, string> = {
   'gpt-5.6-luna': 'models.codex.gpt56luna.label',
   'gpt-5.5': 'models.codex.gpt55.label',
   'gpt-5.4': 'models.codex.gpt54.label',
-  'grok-4.5': 'models.grok.grok45.label',
-  grok: 'models.grok.grok45.label',
+  'grok-4.6': 'models.grok.grok46.label',
+  'grok-4.5': 'models.grok.grok46.label',
+  grok: 'models.grok.grok46.label',
 };
 
 const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
@@ -100,8 +101,9 @@ const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
   'gpt-5.6-luna': 'models.codex.gpt56luna.description',
   'gpt-5.5': 'models.codex.gpt55.description',
   'gpt-5.4': 'models.codex.gpt54.description',
-  'grok-4.5': 'models.grok.grok45.description',
-  grok: 'models.grok.grok45.description',
+  'grok-4.6': 'models.grok.grok46.description',
+  'grok-4.5': 'models.grok.grok46.description',
+  grok: 'models.grok.grok46.description',
 };
 
 /**
