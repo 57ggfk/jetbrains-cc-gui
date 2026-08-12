@@ -27,6 +27,8 @@ const translations: Record<string, string> = {
   'settings.cli.tools.opencode.description': 'OpenCode desc',
   'settings.cli.tools.pi.name': 'PI CLI',
   'settings.cli.tools.pi.description': 'PI desc',
+  'settings.cli.tools.omp.name': 'OMP CLI',
+  'settings.cli.tools.omp.description': 'OMP desc',
   'settings.cli.installDialog.title': 'Install {{name}}',
   'settings.cli.installDialog.lead': 'Lead {{name}} {{binary}}',
   'settings.cli.installDialog.stepOpenTerminal': 'Open terminal',
@@ -110,6 +112,14 @@ describe('CliSection', () => {
           binaryName: 'pi',
           installed: false,
         },
+        omp: {
+          id: 'omp',
+          name: 'OMP CLI',
+          binaryName: 'omp',
+          installed: true,
+          version: '17.2.14',
+          path: '/home/test/.bun/bin/omp',
+        },
       }));
     });
 
@@ -117,6 +127,7 @@ describe('CliSection', () => {
     expect(screen.getByText('Kimi CLI')).toBeTruthy();
     expect(screen.getByText('OpenCode')).toBeTruthy();
     expect(screen.getByText('PI CLI')).toBeTruthy();
+    expect(screen.getByText('OMP CLI')).toBeTruthy();
     expect(screen.getByText('v1.2.3')).toBeTruthy();
     expect(screen.getByText('/Users/test/.grok/bin/grok')).toBeTruthy();
     expect(screen.getByText('More coming soon')).toBeTruthy();
@@ -131,6 +142,7 @@ describe('CliSection', () => {
         kimi: { id: 'kimi', name: 'Kimi CLI', binaryName: 'kimi', installed: false },
         opencode: { id: 'opencode', name: 'OpenCode', binaryName: 'opencode', installed: false },
         pi: { id: 'pi', name: 'PI CLI', binaryName: 'pi', installed: false },
+        omp: { id: 'omp', name: 'OMP CLI', binaryName: 'omp', installed: false },
       }));
     });
 

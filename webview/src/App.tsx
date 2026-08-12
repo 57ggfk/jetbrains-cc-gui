@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import HistoryView from './components/history/HistoryView';
 import SettingsView from './components/settings';
 import { sendBridgeEvent } from './utils/bridge';
+import { ompModeForModelId } from './hooks/providers/cliProviders';
+import { useOmpRoles } from './hooks/providers/useCliModels';
 import { preloadSlashCommands, forceRefreshPrompts } from './components/ChatInputBox/providers';
 import {
   useScrollBehavior,
@@ -31,6 +33,7 @@ import type { ClaudeMessage } from './types';
 import type { Attachment, ChatInputBoxHandle } from './components/ChatInputBox/types';
 import {
   apply1MContextSuffix,
+  isValidPermissionMode,
   normalizeClaudeModelId,
   strip1MContextSuffix,
 } from './components/ChatInputBox/types';
@@ -166,6 +169,7 @@ const App = () => {
     setSelectedClaudeModel, setSelectedCodexModel,
     setSelectedGrokModel, setSelectedKimiModel,
     setSelectedOpenCodeModel, setSelectedPiModel,
+    setSelectedOmpModel, setOmpPermissionMode,
     setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled, setStreamingEnabledSetting,
@@ -178,6 +182,10 @@ const App = () => {
     handleStreamingEnabledChange, handleSendShortcutChange,
     handleAutoOpenFileEnabledChange, handleLongContextChange,
   } = useModelProviderState({ addToast, t });
+
+  // Dynamic omp model roles (listModels payload; static smol/slow/plan until
+  // loaded) — needed by applyHistoryModel's omp mode⇔model unification.
+  const ompRoles = useOmpRoles();
 
   // ── Global drag event interception ──
   useEffect(() => {
@@ -333,6 +341,16 @@ const App = () => {
         } else if (provider === 'pi') {
           setSelectedPiModel(model);
           sendBridgeEvent('set_model', model);
+        } else if (provider === 'omp') {
+          setSelectedOmpModel(model);
+          sendBridgeEvent('set_model', model);
+          const ompMode = ompModeForModelId(model, ompRoles);
+          setOmpPermissionMode(ompMode);
+          // Dynamic roles are not in Java's static mode whitelist — set_model
+          // above already carries the role; skip set_mode for them.
+          if (isValidPermissionMode(ompMode)) {
+            sendBridgeEvent('set_mode', ompMode);
+          }
         } else {
           // claude (or unrecognized): apply the claude model directly —
           // handleModelSelect reads currentProvider from a stale closure

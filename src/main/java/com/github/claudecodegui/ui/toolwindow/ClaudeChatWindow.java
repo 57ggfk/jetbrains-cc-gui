@@ -13,6 +13,7 @@ import com.github.claudecodegui.provider.grok.GrokCliBridge;
 import com.github.claudecodegui.provider.kimi.KimiCliBridge;
 import com.github.claudecodegui.provider.opencode.OpenCodeCliBridge;
 import com.github.claudecodegui.provider.pi.PiCliBridge;
+import com.github.claudecodegui.provider.omp.OmpCliBridge;
 import com.github.claudecodegui.session.SessionProviderRouter;
 import com.github.claudecodegui.provider.common.DaemonBridge;
 import com.github.claudecodegui.provider.common.MessageCallback;
@@ -77,6 +78,7 @@ public class ClaudeChatWindow {
     private final KimiCliBridge kimiCliBridge;
     private final OpenCodeCliBridge openCodeCliBridge;
     private final PiCliBridge piCliBridge;
+    private final OmpCliBridge ompCliBridge;
     private final Project project;
     private final CodemossSettingsService settingsService;
     private final HtmlLoader htmlLoader;
@@ -220,8 +222,9 @@ public class ClaudeChatWindow {
         this.kimiCliBridge = new KimiCliBridge();
         this.openCodeCliBridge = new OpenCodeCliBridge();
         this.piCliBridge = new PiCliBridge();
+        this.ompCliBridge = new OmpCliBridge();
         this.cliBridges = SessionProviderRouter.registerCliBridges(
-                this.grokCliBridge, this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge);
+                this.grokCliBridge, this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge, this.ompCliBridge);
         this.settingsService = new CodemossSettingsService();
         this.htmlLoader = new HtmlLoader(getClass());
         this.mainPanel = new JPanel(new BorderLayout());
@@ -1385,6 +1388,10 @@ public class ClaudeChatWindow {
 
     public PiCliBridge getPiCliBridge() {
         return piCliBridge;
+    }
+
+    public OmpCliBridge getOmpCliBridge() {
+        return ompCliBridge;
     }
 
     /**

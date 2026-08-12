@@ -408,7 +408,8 @@
           "grok": "Grok CLI",
           "kimi": "Kimi CLI",
           "opencode": "OpenCode",
-          "pi": "PI CLI"
+          "pi": "PI CLI",
+          "omp": "OMP CLI"
         },
         "currentProviderAuto": "当前使用自动选择：{{provider}}",
         "currentProviderManual": "当前使用手动选择的 provider：{{provider}}",
@@ -579,6 +580,10 @@
         "pi": {
           "name": "PI CLI",
           "description": "极简终端编码代理，支持多提供商模型"
+        },
+        "omp": {
+          "name": "OMP CLI",
+          "description": "支持多提供商模型的 Oh My Pi 终端编码代理"
         }
       },
       "installDialog": {
@@ -2020,6 +2025,28 @@
       "description": "完全免审批，写文件和执行命令立即生效，仅受沙箱限制。"
     }
   },
+  "ompModes": {
+    "default": {
+      "label": "默认",
+      "tooltip": "使用所选模型（或 OMP auto）",
+      "description": "使用模型下拉框中选择的模型；设为 Auto 时使用 OMP CLI 默认模型。"
+    },
+    "smol": {
+      "label": "Smol",
+      "tooltip": "快速模型角色 (omp --model smol)",
+      "description": "使用为 omp 的 smol 角色配置的模型运行此对话。覆盖模型下拉框的选择。"
+    },
+    "slow": {
+      "label": "Slow",
+      "tooltip": "推理模型角色 (omp --model slow)",
+      "description": "使用为 omp 的 slow 角色配置的模型运行此对话。覆盖模型下拉框的选择。"
+    },
+    "plan": {
+      "label": "Plan",
+      "tooltip": "规划模型角色 (omp --model plan)",
+      "description": "使用为 omp 的 plan 角色配置的模型运行此对话。覆盖模型下拉框的选择。"
+    }
+  },
   "providers": {
     "claude": {
       "label": "Claude Code"
@@ -2041,6 +2068,9 @@
     },
     "pi": {
       "label": "PI CLI"
+    },
+    "omp": {
+      "label": "OMP CLI"
     },
     "beta": {
       "badge": "Beta",

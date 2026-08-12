@@ -26,6 +26,10 @@ public class SessionState {
         modes.add("acceptEdits");
         modes.add("autoEdit");
         modes.add("bypassPermissions");
+        // omp model-role modes (`omp --model smol|slow`); only offered by the
+        // webview for the omp provider, but validated here so set_mode accepts them.
+        modes.add("smol");
+        modes.add("slow");
         VALID_PERMISSION_MODES = Collections.unmodifiableSet(modes);
     }
 

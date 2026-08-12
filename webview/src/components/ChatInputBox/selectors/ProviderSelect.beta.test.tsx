@@ -18,6 +18,7 @@ vi.mock('react-i18next', () => ({
         'providers.kimi.label': 'Kimi CLI',
         'providers.opencode.label': 'OpenCode',
         'providers.pi.label': 'PI CLI',
+        'providers.omp.label': 'OMP CLI',
         'providers.beta.badge': 'Beta',
         'providers.beta.title': 'Beta Feature',
         'providers.beta.message':
@@ -41,14 +42,14 @@ describe('ProviderSelect Beta badge and first-click notice', () => {
     window.updateCodexSubscriptionQuota = undefined;
   });
 
-  it('renders Beta badges on Grok, Kimi, OpenCode and PI', () => {
+  it('renders Beta badges on Grok, Kimi, OpenCode, PI and OMP', () => {
     render(<ProviderSelect value="claude" />);
     fireEvent.click(screen.getByRole('button'));
 
     const badges = screen.getAllByText('Beta');
-    expect(badges).toHaveLength(4);
+    expect(badges).toHaveLength(5);
 
-    for (const id of ['grok', 'kimi', 'opencode', 'pi']) {
+    for (const id of ['grok', 'kimi', 'opencode', 'pi', 'omp']) {
       const row = document.querySelector(`[data-provider-id="${id}"]`);
       expect(row?.querySelector('.provider-beta-badge')).toBeTruthy();
     }

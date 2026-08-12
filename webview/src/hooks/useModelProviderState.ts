@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
 import {
   apply1MContextSuffix,
+  isValidPermissionMode,
   normalizeClaudeModelId,
   strip1MContextSuffix,
 } from '../components/ChatInputBox/types';
@@ -14,7 +15,9 @@ import { useGrokProvider } from './providers/useGrokProvider';
 import { useKimiProvider } from './providers/useKimiProvider';
 import { useOpenCodeProvider } from './providers/useOpenCodeProvider';
 import { usePiProvider } from './providers/usePiProvider';
-import { isCliOnlyProvider, normalizeCliPermissionMode } from './providers/cliProviders';
+import { useOmpProvider } from './providers/useOmpProvider';
+import { isCliOnlyProvider, normalizeCliPermissionMode, ompModeForModelId } from './providers/cliProviders';
+import { useOmpRoles } from './providers/useCliModels';
 import { useUsageTracking } from './providers/useUsageTracking';
 import { useProviderSettings } from './providers/useProviderSettings';
 import { useModelStatePersistence } from './providers/useModelStatePersistence';
@@ -58,6 +61,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const kimi = useKimiProvider();
   const openCode = useOpenCodeProvider();
   const pi = usePiProvider();
+  const omp = useOmpProvider();
+  // Dynamic omp model roles (listModels payload; static smol/slow/plan until
+  // loaded) — drive mode⇔model unification for omp.
+  const ompRoles = useOmpRoles();
   const { isSdkInstalled, isSdkStatusKnown, sdkStatus, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
@@ -89,6 +96,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedPiModel, setSelectedPiModel,
     piPermissionMode, setPiPermissionMode,
   } = pi;
+  const {
+    selectedOmpModel, setSelectedOmpModel,
+    ompPermissionMode, setOmpPermissionMode,
+  } = omp;
 
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
@@ -101,10 +112,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
+    setSelectedOmpModel,
     setGrokPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
+    setOmpPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -118,10 +131,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedKimiModel,
     selectedOpenCodeModel,
     selectedPiModel,
+    selectedOmpModel,
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
+    ompPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -138,7 +153,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
           ? selectedOpenCodeModel
           : currentProvider === 'pi'
             ? selectedPiModel
-            : selectedClaudeModel;
+            : currentProvider === 'omp'
+              ? selectedOmpModel
+              : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
@@ -165,12 +182,26 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       return;
     }
     if (isCliOnlyProvider(currentProvider)) {
-      const cliMode = normalizeCliPermissionMode(mode);
+      const cliMode = normalizeCliPermissionMode(mode, currentProvider);
       setPermissionMode(cliMode);
       if (currentProvider === 'grok') setGrokPermissionMode(cliMode);
       if (currentProvider === 'kimi') setKimiPermissionMode(cliMode);
       if (currentProvider === 'opencode') setOpenCodePermissionMode(cliMode);
       if (currentProvider === 'pi') setPiPermissionMode(cliMode);
+      if (currentProvider === 'omp') {
+        setOmpPermissionMode(cliMode);
+        // The omp mode selector is a shortcut over the model value: role modes
+        // set the model to the role id, 'default' selects the CLI default.
+        const ompModel = cliMode === 'default' ? 'auto' : cliMode;
+        setSelectedOmpModel(ompModel);
+        sendBridgeEvent('set_model', ompModel);
+        // Java's VALID_PERMISSION_MODES is a static whitelist — dynamic roles
+        // (e.g. 'designer') would be rejected there; set_model carries them.
+        if (isValidPermissionMode(cliMode)) {
+          sendBridgeEvent('set_mode', cliMode);
+        }
+        return;
+      }
       sendBridgeEvent('set_mode', cliMode);
       return;
     }
@@ -185,6 +216,8 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setKimiPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
+    setOmpPermissionMode,
+    setSelectedOmpModel,
   ]);
 
   const handleModelSelect = useCallback((modelId: string) => {
@@ -208,16 +241,32 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'pi') {
       setSelectedPiModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'omp') {
+      setSelectedOmpModel(modelId);
+      sendBridgeEvent('set_model', modelId);
+      // Mode⇔model unification: role models select the same-named mode,
+      // anything else ('auto' or catalog models) selects 'default'.
+      const ompMode = ompModeForModelId(modelId, ompRoles);
+      setOmpPermissionMode(ompMode);
+      setPermissionMode(ompMode);
+      // Dynamic roles are not in Java's static mode whitelist — set_model
+      // above already carries the role; skip set_mode for them.
+      if (isValidPermissionMode(ompMode)) {
+        sendBridgeEvent('set_mode', ompMode);
+      }
     }
   }, [
     currentProvider,
     longContextEnabled,
+    ompRoles,
     setSelectedClaudeModel,
     setSelectedCodexModel,
     setSelectedGrokModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
+    setSelectedOmpModel,
+    setOmpPermissionMode,
   ]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
@@ -226,18 +275,24 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
 
     let modeToSet: PermissionMode = claudePermissionMode;
     if (providerId === 'codex') {
-      modeToSet = normalizeCliPermissionMode(codexPermissionMode);
+      modeToSet = normalizeCliPermissionMode(codexPermissionMode, providerId);
     } else if (providerId === 'grok') {
-      modeToSet = normalizeCliPermissionMode(grokPermissionMode);
+      modeToSet = normalizeCliPermissionMode(grokPermissionMode, providerId);
     } else if (providerId === 'kimi') {
-      modeToSet = normalizeCliPermissionMode(kimiPermissionMode);
+      modeToSet = normalizeCliPermissionMode(kimiPermissionMode, providerId);
     } else if (providerId === 'opencode') {
-      modeToSet = normalizeCliPermissionMode(openCodePermissionMode);
+      modeToSet = normalizeCliPermissionMode(openCodePermissionMode, providerId);
     } else if (providerId === 'pi') {
-      modeToSet = normalizeCliPermissionMode(piPermissionMode);
+      modeToSet = normalizeCliPermissionMode(piPermissionMode, providerId);
+    } else if (providerId === 'omp') {
+      modeToSet = normalizeCliPermissionMode(ompPermissionMode, providerId);
     }
     setPermissionMode(modeToSet);
-    sendBridgeEvent('set_mode', modeToSet);
+    // Dynamic omp roles are not in Java's static mode whitelist — the
+    // set_model event below carries the role; skip set_mode for them.
+    if (providerId !== 'omp' || isValidPermissionMode(modeToSet)) {
+      sendBridgeEvent('set_mode', modeToSet);
+    }
 
     let newModel = apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
     if (providerId === 'codex') newModel = selectedCodexModel;
@@ -245,6 +300,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     else if (providerId === 'kimi') newModel = selectedKimiModel;
     else if (providerId === 'opencode') newModel = selectedOpenCodeModel;
     else if (providerId === 'pi') newModel = selectedPiModel;
+    else if (providerId === 'omp') newModel = selectedOmpModel;
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
@@ -253,12 +309,14 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
+    ompPermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
     selectedPiModel,
+    selectedOmpModel,
     longContextEnabled,
   ]);
 
@@ -315,6 +373,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...kimi,
     ...openCode,
     ...pi,
+    ...omp,
     ...usage,
     ...settings,
     sdkStatus,

@@ -3,7 +3,7 @@
  * Detection only — the plugin never auto-installs these binaries.
  */
 
-export type CliToolId = 'grok' | 'kimi' | 'opencode' | 'pi';
+export type CliToolId = 'grok' | 'kimi' | 'opencode' | 'pi' | 'omp';
 
 export interface CliToolStatus {
   id: CliToolId;
@@ -75,5 +75,14 @@ export const CLI_TOOL_DEFINITIONS: CliToolDefinition[] = [
     docsUrl: 'https://pi.dev/',
     installCommand: 'curl -fsSL https://pi.dev/install.sh | sh',
     altInstallCommand: 'npm install -g @earendil-works/pi-coding-agent',
+  },
+  {
+    id: 'omp',
+    nameKey: 'settings.cli.tools.omp.name',
+    descriptionKey: 'settings.cli.tools.omp.description',
+    binaryName: 'omp',
+    docsUrl: 'https://omp.sh/',
+    installCommand: 'curl -fsSL https://omp.sh/install.sh | sh',
+    altInstallCommand: 'npm install -g @oh-my-pi/pi-coding-agent',
   },
 ];
