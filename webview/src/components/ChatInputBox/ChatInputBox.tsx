@@ -51,6 +51,19 @@ import { useContextMenu, copySelection, pasteAtCursor, insertNewline } from '../
 import './styles.css';
 
 /**
+ * InputEvent.inputType values that belong to an active IME composition.
+ * Any other inputType arriving while isComposingRef is set means JCEF lost the
+ * compositionEnd event (e.g. IME switched mid-composition) and the composing
+ * state is stale.
+ */
+const COMPOSITION_INPUT_TYPES = new Set([
+  'insertCompositionText',
+  'deleteCompositionText',
+  'insertFromComposition',
+  'deleteByComposition',
+]);
+
+/**
  * ChatInputBox - Chat input component
  * Uses contenteditable div with auto height adjustment, IME handling, @ file references, / slash commands
  *
@@ -284,9 +297,12 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
 
     /**
      * Handle input event (optimized: use debounce to reduce performance overhead)
+     *
+     * @param inputType - InputEvent.inputType of the triggering native event,
+     *   when available. Programmatic callers omit it.
      */
     const handleInput = useCallback(
-      () => {
+      (inputType?: string) => {
         const timer = perfTimer('handleInput');
 
         // Only trust our composition-event-backed ref for IME state detection.
@@ -295,7 +311,19 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         // by compositionStart/End. Do not restore persistent keyCode 229 state: it
         // can get stuck for Korean IMEs when no matching compositionEnd arrives.
         if (isComposingRef.current) {
-          return;
+          // JCEF/OSR can drop compositionEnd entirely when the user switches the
+          // input source mid-composition (e.g. Bopomofo -> English via Shift).
+          // A non-composition input event while our flag is still set proves the
+          // composition is over — reset the refs so completion detection and
+          // parent sync are not blocked forever.
+          const staleComposition =
+            inputType !== undefined && !COMPOSITION_INPUT_TYPES.has(inputType);
+          if (!staleComposition) {
+            return;
+          }
+          isComposingRef.current = false;
+          sharedComposingRef.current = false;
+          lastCompositionEndTimeRef.current = Date.now();
         }
 
         // Cancel any pending compositionEnd fallback timeout.
@@ -669,11 +697,16 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
             spellCheck={false}
             data-placeholder={placeholder}
             data-completion-suffix={inlineCompletion.suffix || ''}
-            onInput={() => {
+            onInput={(e) => {
               // Don't pass browser's isComposing — it's unreliable in JCEF.
               // isComposingRef (set by compositionStart/End + keyCode 229) is the
-              // sole source of truth for IME state.
-              handleInput();
+              // sole source of truth for IME state. The inputType is forwarded so
+              // handleInput can detect a stale composing flag (lost compositionEnd).
+              const inputType =
+                'inputType' in e.nativeEvent
+                  ? (e.nativeEvent as InputEvent).inputType
+                  : undefined;
+              handleInput(inputType);
             }}
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
