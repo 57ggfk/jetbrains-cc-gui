@@ -38,6 +38,7 @@ import {
   useOpenSourceBannerState,
   useResetAttachmentsOnSessionChange,
   useSpaceKeyListener,
+  useCompositionSafeTagRendering,
   useResizableChatInputBox,
 } from './hooks/index.js';
 import { debounce } from './utils/debounce.js';
@@ -224,11 +225,15 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       el.style.overflowY = 'hidden';
     }, []);
 
-    // Create debounced version of renderFileTags
-    const debouncedRenderFileTags = useMemo(
-      () => debounce(renderTags, DEBOUNCE_TIMING.FILE_TAG_RENDERING_MS),
-      [renderTags]
-    );
+    const {
+      scheduleTagRendering,
+      cancelTagRendering,
+      renderTagsNowIfSafe,
+    } = useCompositionSafeTagRendering({
+      isComposingRef: sharedComposingRef,
+      renderTags,
+      delay: DEBOUNCE_TIMING.FILE_TAG_RENDERING_MS,
+    });
 
     const {
       fileCompletion,
@@ -284,11 +289,11 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       () => {
         const timer = perfTimer('handleInput');
 
-        // Only trust our own isComposingRef for IME state detection.
+        // Only trust our composition-event-backed ref for IME state detection.
         // JCEF's InputEvent.isComposing is unreliable (can be false during active
-        // composition, or true after compositionEnd). Our ref is set synchronously
-        // by compositionStart/End and keyCode 229 detection, making it the sole
-        // reliable source of truth.
+        // composition, or true after compositionEnd). The ref is set synchronously
+        // by compositionStart/End. Do not restore persistent keyCode 229 state: it
+        // can get stuck for Korean IMEs when no matching compositionEnd arrives.
         if (isComposingRef.current) {
           return;
         }
@@ -331,10 +336,10 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         // If determined empty (only zero-width characters), pass empty string to parent
         debouncedOnInput(isEmpty ? '' : text);
 
-        // Trigger file tag rendering so @path text is converted to chips.
+        // Schedule file/quote tag rendering after the input DOM becomes stable.
         // Covers non-keyboard input paths (history restore, paste, etc.)
         // that don't fire the space-key listener.
-        debouncedRenderFileTags();
+        scheduleTagRendering();
 
         timer.end();
       },
@@ -343,7 +348,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         adjustHeight,
         debouncedDetectCompletion,
         debouncedOnInput,
-        debouncedRenderFileTags,
+        scheduleTagRendering,
         invalidateCache,
         syncInlineCompletion,
       ]
@@ -367,9 +372,10 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     // Wrap composition handlers to sync sharedComposingRef (used by completion detection)
     // Both refs are now set synchronously — no RAF, no race conditions.
     const handleCompositionStart = useCallback(() => {
-      rawHandleCompositionStart();
       sharedComposingRef.current = true;
-    }, [rawHandleCompositionStart]);
+      cancelTagRendering();
+      rawHandleCompositionStart();
+    }, [cancelTagRendering, rawHandleCompositionStart]);
 
     const handleCompositionEnd = useCallback(() => {
       rawHandleCompositionEnd();
@@ -377,8 +383,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     }, [rawHandleCompositionEnd]);
 
     useEffect(() => {
-      setRenderFileTags(renderTags);
-    }, [renderTags, setRenderFileTags]);
+      setRenderFileTags(renderTagsNowIfSafe);
+    }, [renderTagsNowIfSafe, setRenderFileTags]);
 
     const { record: recordInputHistory, handleKeyDown: handleHistoryKeyDown } = useInputHistory({
       editableRef,
@@ -393,17 +399,17 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     });
 
     /**
-     * Handle keyboard down event (for detecting space to trigger file tag rendering)
+     * Handle keyboard down event (for detecting space to trigger tag rendering)
      * Optimized: use debounce for delayed rendering
      */
     const handleKeyDownForTagRendering = useCallback(
       (e: KeyboardEvent) => {
-        // If space key pressed, use debounce for delayed file tag rendering
-        if (e.key === ' ') {
-          debouncedRenderFileTags();
+        // IME candidate confirmation also uses Space, so never schedule while composing.
+        if (e.key === ' ' && !sharedComposingRef.current) {
+          scheduleTagRendering();
         }
       },
-      [debouncedRenderFileTags]
+      [scheduleTagRendering]
     );
 
     const handleSubmit = useSubmitHandler({
@@ -549,7 +555,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       pathMappingRef,
       getTextContent,
       adjustHeight,
-      renderFileTags: renderTags,
+      renderFileTags: renderTagsNowIfSafe,
       setHasContent,
       setInternalAttachments,
       onInput,
@@ -586,7 +592,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       pathMappingRef,
       getTextContent,
       adjustHeight,
-      renderFileTags: renderTags,
+      renderFileTags: renderTagsNowIfSafe,
       renderQuoteTags,
       setHasContent,
       onInput,
