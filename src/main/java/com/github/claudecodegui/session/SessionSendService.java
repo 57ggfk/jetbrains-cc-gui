@@ -419,9 +419,10 @@ public class SessionSendService {
             return null;
         }
         if ("grok".equals(provider)) {
-            if ("grok".equals(lower) || "default".equals(lower) || "(default)".equals(lower)) {
-                LOG.info("[Grok] Normalizing sentinel model id '" + trimmed + "' to default model 'grok-4.5'");
-                return "grok-4.5";
+            if ("grok".equals(lower) || "default".equals(lower) || "(default)".equals(lower)
+                    || "grok-4.5".equals(lower)) {
+                LOG.info("[Grok] Normalizing sentinel model id '" + trimmed + "' to default model 'grok-4.6'");
+                return "grok-4.6";
             }
         }
         return trimmed;

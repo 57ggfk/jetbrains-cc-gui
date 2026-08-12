@@ -402,7 +402,7 @@ export const CODEX_MODELS: ModelInfo[] = [
  * `-m <profile>` path did, so custom per-profile base_url/api_key from
  * config.toml may not apply here.
  */
-export const GROK_DEFAULT_MODEL_ID = 'grok-4.5';
+export const GROK_DEFAULT_MODEL_ID = 'grok-4.6';
 
 /**
  * Grok CLI model picker entries.
@@ -411,8 +411,8 @@ export const GROK_DEFAULT_MODEL_ID = 'grok-4.5';
 export const GROK_MODELS: ModelInfo[] = [
   {
     id: GROK_DEFAULT_MODEL_ID,
-    label: 'Grok 4.5',
-    description: 'xAI Grok 4.5',
+    label: 'Grok 4.6',
+    description: 'xAI Grok 4.6',
   },
   {
     id: 'grok-3',

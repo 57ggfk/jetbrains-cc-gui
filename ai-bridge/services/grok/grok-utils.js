@@ -31,7 +31,8 @@ export function resolveGrokBinary() {
 /**
  * Normalize model identifier for Grok.
  * Sentinel or fallback values ("grok", "", "auto", "default", "(default)",
- * "__config_default__", "config-default", ...) map to "grok-4.5".
+ * "__config_default__", "config-default", ...) map to "grok-4.6".
+ * Legacy "grok-4.5" is also upgraded to "grok-4.6".
  * Keep the sentinel set aligned with cli-ask.js isDefaultModelToken so a
  * placeholder never leaks into session/new as a literal model id.
  */
@@ -46,8 +47,9 @@ export function normalizeGrokModelId(modelId) {
     || lower === '__config_default__'
     || lower === 'config-default'
     || lower === 'config_default'
+    || lower === 'grok-4.5'
   ) {
-    return 'grok-4.5';
+    return 'grok-4.6';
   }
   return String(modelId).trim();
 }

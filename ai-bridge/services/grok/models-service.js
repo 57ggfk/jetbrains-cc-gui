@@ -115,7 +115,7 @@ export function parseGrokProfilesFromToml(tomlText, seenSet = new Set()) {
 
 /** Static last-resort list when neither profiles nor cache exist. */
 export const GROK_STATIC_FALLBACK_MODELS = [
-  { id: 'grok-4.5', label: 'Grok 4.5', description: "SpaceXAI's new frontier model" },
+  { id: 'grok-4.6', label: 'Grok 4.6', description: "SpaceXAI's new frontier model" },
   { id: 'grok-3', label: 'Grok 3', description: 'xAI Grok 3' },
   { id: 'grok-2', label: 'Grok 2', description: 'xAI Grok 2' },
   { id: 'grok-beta', label: 'Grok Beta', description: 'xAI Grok Beta' },
@@ -159,7 +159,7 @@ export function resolveGrokPickerModels({ profileModels = [], cacheModels = [], 
 
   return {
     models: [...GROK_STATIC_FALLBACK_MODELS],
-    defaultModel: defaultModel || 'grok-4.5',
+    defaultModel: defaultModel || 'grok-4.6',
   };
 }
 

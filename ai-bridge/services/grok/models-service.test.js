@@ -11,10 +11,10 @@ test('parseModelsCacheJson extracts models from models_cache.json payload', () =
   const json = JSON.stringify({
     fetched_at: '2026-08-09T12:04:19Z',
     models: {
-      'grok-4.5': {
+      'grok-4.6': {
         info: {
-          id: 'grok-4.5',
-          name: 'Grok 4.5',
+          id: 'grok-4.6',
+          name: 'Grok 4.6',
           description: "SpaceXAI's new frontier model",
         },
       },
@@ -38,24 +38,24 @@ test('parseModelsCacheJson extracts models from models_cache.json payload', () =
 
   const { models, seen } = parseModelsCacheJson(json);
   assert.equal(models.length, 2);
-  assert.deepEqual(models[0], { id: 'grok-4.5', label: 'Grok 4.5', description: "SpaceXAI's new frontier model" });
+  assert.deepEqual(models[0], { id: 'grok-4.6', label: 'Grok 4.6', description: "SpaceXAI's new frontier model" });
   assert.deepEqual(models[1], { id: 'grok-3', label: 'Grok 3', description: 'Grok 3 reasoning model' });
-  assert.ok(seen.has('grok-4.5'));
+  assert.ok(seen.has('grok-4.6'));
   assert.ok(seen.has('grok-3'));
 });
 
 test('parseModelsCacheJson skips scalar metadata keys in root-map layout', () => {
   const json = JSON.stringify({
     fetched_at: '2026-08-09T12:04:19Z',
-    'grok-4.5': {
-      id: 'grok-4.5',
-      name: 'Grok 4.5',
+    'grok-4.6': {
+      id: 'grok-4.6',
+      name: 'Grok 4.6',
     },
   });
 
   const { models } = parseModelsCacheJson(json);
   assert.equal(models.length, 1);
-  assert.deepEqual(models[0], { id: 'grok-4.5', label: 'Grok 4.5', description: 'grok-4.5' });
+  assert.deepEqual(models[0], { id: 'grok-4.6', label: 'Grok 4.6', description: 'grok-4.6' });
 });
 
 test('parseGrokProfilesFromToml extracts custom profiles from config.toml', () => {
@@ -64,7 +64,7 @@ test('parseGrokProfilesFromToml extracts custom profiles from config.toml', () =
 default = "grok-custom"
 
 [model."grok-custom"]
-model = "grok-4.5"
+model = "grok-4.6"
 base_url = "https://example.com/v1"
 `;
 
@@ -72,7 +72,7 @@ base_url = "https://example.com/v1"
   assert.equal(defaultModel, 'grok-custom');
   assert.equal(models.length, 1);
   // Nested model id is used as label when name is absent.
-  assert.deepEqual(models[0], { id: 'grok-custom', label: 'grok-4.5', description: 'grok-4.5' });
+  assert.deepEqual(models[0], { id: 'grok-custom', label: 'grok-4.6', description: 'grok-4.6' });
 });
 
 test('parseGrokProfilesFromToml prefers name field for display label', () => {
@@ -81,21 +81,21 @@ test('parseGrokProfilesFromToml prefers name field for display label', () => {
 default = "grok"
 
 [model.grok]
-model = "grok-4.5"
-name = "Grok 4.5"
+model = "grok-4.6"
+name = "Grok 4.6"
 base_url = "https://example.com/v1"
 `;
 
   const { models, defaultModel } = parseGrokProfilesFromToml(toml);
   assert.equal(defaultModel, 'grok');
   assert.equal(models.length, 1);
-  assert.deepEqual(models[0], { id: 'grok', label: 'Grok 4.5', description: 'grok-4.5' });
+  assert.deepEqual(models[0], { id: 'grok', label: 'Grok 4.6', description: 'grok-4.6' });
 });
 
 test('parseGrokProfilesFromToml ignores default keys inside model profiles', () => {
   const toml = `
 [model."grok-custom"]
-model = "grok-4.5"
+model = "grok-4.6"
 default = "not-the-global-default"
 
 [models]
@@ -111,7 +111,7 @@ test('parseGrokProfilesFromToml accepts a top-level default without [models]', (
 default = "grok-top"
 
 [model.grok]
-model = "grok-4.5"
+model = "grok-4.6"
 `;
 
   const { defaultModel } = parseGrokProfilesFromToml(toml);
@@ -119,7 +119,7 @@ model = "grok-4.5"
 });
 
 test('resolveGrokPickerModels prefers config profiles over models_cache dump', () => {
-  const profiles = [{ id: 'grok', label: 'Grok 4.5', description: 'grok-4.5' }];
+  const profiles = [{ id: 'grok', label: 'Grok 4.6', description: 'grok-4.6' }];
   const cache = [
     { id: 'gpt-5.2', label: 'gpt-5.2', description: 'gpt-5.2' },
     { id: 'codex-auto-review', label: 'codex-auto-review', description: 'codex-auto-review' },
@@ -132,7 +132,7 @@ test('resolveGrokPickerModels prefers config profiles over models_cache dump', (
   });
   assert.equal(models.length, 1);
   assert.equal(models[0].id, 'grok');
-  assert.equal(models[0].label, 'Grok 4.5');
+  assert.equal(models[0].label, 'Grok 4.6');
   assert.equal(defaultModel, 'grok');
   // Must not leak gateway catalog noise into the picker.
   assert.equal(models.some((m) => m.id.startsWith('gpt-')), false);
@@ -140,7 +140,7 @@ test('resolveGrokPickerModels prefers config profiles over models_cache dump', (
 
 test('resolveGrokPickerModels falls back to cache when no profiles', () => {
   const cache = [
-    { id: 'grok-4.5', label: 'Grok 4.5', description: 'frontier' },
+    { id: 'grok-4.6', label: 'Grok 4.6', description: 'frontier' },
     { id: 'grok-3', label: 'Grok 3', description: 'legacy' },
   ];
   const { models, defaultModel } = resolveGrokPickerModels({
@@ -148,7 +148,7 @@ test('resolveGrokPickerModels falls back to cache when no profiles', () => {
     cacheModels: cache,
   });
   assert.deepEqual(models, cache);
-  assert.equal(defaultModel, 'grok-4.5');
+  assert.equal(defaultModel, 'grok-4.6');
 });
 
 test('resolveGrokPickerModels uses static fallback when nothing is configured', () => {
@@ -157,5 +157,5 @@ test('resolveGrokPickerModels uses static fallback when nothing is configured', 
     cacheModels: [],
   });
   assert.deepEqual(models, GROK_STATIC_FALLBACK_MODELS);
-  assert.equal(defaultModel, 'grok-4.5');
+  assert.equal(defaultModel, 'grok-4.6');
 });

@@ -34,7 +34,7 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     selectedCodexModel: 'gpt-5-codex',
     claudePermissionMode: 'default' as PermissionMode,
     codexPermissionMode: 'default' as PermissionMode,
-    selectedGrokModel: 'grok-4.5',
+    selectedGrokModel: 'grok-4.6',
     selectedKimiModel: 'auto',
     selectedOpenCodeModel: 'opencode-default',
     selectedPiModel: 'auto',
@@ -284,7 +284,7 @@ describe('useModelStatePersistence — CLI provider persistence', () => {
     expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'kimi-k3']]);
   });
 
-  it('migrates a stale sentinel grok model id to grok-4.5', () => {
+  it('migrates a stale sentinel grok model id to grok-4.6', () => {
     // Versions before the ACP model-id fix persisted the profile name 'grok';
     // the ACP CLI rejects it ("unknown model id"), so it must be upgraded.
     const setSelectedGrokModel = vi.fn();
@@ -296,21 +296,21 @@ describe('useModelStatePersistence — CLI provider persistence', () => {
     renderHook(() => useModelStatePersistence(makeOptions({ setSelectedGrokModel })));
     vi.advanceTimersByTime(200);
 
-    expect(setSelectedGrokModel).toHaveBeenCalledWith('grok-4.5');
-    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'grok-4.5']]);
+    expect(setSelectedGrokModel).toHaveBeenCalledWith('grok-4.6');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'grok-4.6']]);
   });
 
   it('honors a backend-supplied CLI provider via __INITIAL_TAB_PROVIDER__', () => {
     const setCurrentProvider = vi.fn();
     (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__ = 'grok';
-    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'grok-4.5';
+    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'grok-4.6';
 
     renderHook(() => useModelStatePersistence(makeOptions({ setCurrentProvider })));
     vi.advanceTimersByTime(200);
 
     expect(setCurrentProvider).toHaveBeenCalledWith('grok');
     expect(bridgeEventsFor('set_provider')).toEqual([['set_provider', 'grok']]);
-    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'grok-4.5']]);
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'grok-4.6']]);
   });
 
   it('persists CLI model and permission selections in the snapshot', () => {

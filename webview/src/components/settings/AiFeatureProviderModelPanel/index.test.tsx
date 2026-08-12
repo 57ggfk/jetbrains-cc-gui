@@ -39,7 +39,7 @@ vi.mock('../../../hooks/providers/useCliModels', () => ({
     }
     if (provider === 'grok') {
       return {
-        cliModels: [{ id: 'grok', label: 'Grok 4.5' }],
+        cliModels: [{ id: 'grok', label: 'Grok 4.6' }],
         cliCatalogHasEntries: true,
         cliModelsLoading: false,
         cliModelsError: null,
@@ -331,7 +331,7 @@ describe('AiFeatureProviderModelPanel', () => {
     fireEvent.click(within(modelRoot).getByRole('button'));
     const options = within(modelRoot).getAllByRole('option');
     const labels = options.map((opt) => opt.textContent ?? '');
-    expect(labels.some((l) => /Grok 4\.5/i.test(l))).toBe(true);
+    expect(labels.some((l) => /Grok 4\.6/i.test(l))).toBe(true);
     // Must not surface OpenAI-compatible gateway dump entries.
     expect(labels.some((l) => /gpt-5\.2/i.test(l) || /codex-auto-review/i.test(l))).toBe(false);
   });
