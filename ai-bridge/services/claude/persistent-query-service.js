@@ -38,6 +38,7 @@ import {
   touchRuntime,
   createTurnSink,
   emitTaskEvent,
+  waitForReaderQuiescent,
 } from './runtime-lifecycle.js';
 import { parseTaskNotificationXml, buildTaskNotificationEvent, extractTaskNotificationXml } from './task-notification-parser.js';
 import {
@@ -270,6 +271,19 @@ _sessionCleanupTimer.unref();
   try {
     beginRuntimeTurn(runtime);
 
+    // Wait until the perpetual reader has drained the SDK pipe and parked with
+    // no CLI run in flight BEFORE opening the sink or sending the user message.
+    // Because the user message is not enqueued yet, nothing in the pipe can be a
+    // response to it, so anything still buffered is prior-turn tail (a still-
+    // in-flight background run_in_background, #1305) and routes inter-turn
+    // instead of into this turn's sink — where its output, and worse its closing
+    // result, would be misattributed and seed the one-behind shift (#1410). The
+    // CLI would queue our send behind an in-flight run anyway, so this adds no
+    // latency; it only aligns the daemon's accounting with the CLI's order.
+    // Resolves on quiescence, on dispose (abort stays responsive), or a 120s
+    // protocol-anomaly backstop.
+    await waitForReaderQuiescent(runtime);
+
     // Create and register turnSink after beginRuntimeTurn to avoid race
     // (ensures executeTurn is ready to consume before perpetual reader can push)
     runtime.turnSink = createTurnSink();
@@ -336,6 +350,17 @@ _sessionCleanupTimer.unref();
         continue;
       }
 
+      // Substantive output (assistant / user / stream_event) belongs to THIS
+      // turn, so a later result is ours. A bare SUCCESS result arriving with
+      // sawTurnMessage still false is provably foreign (a real run emits output
+      // before its result) and is skipped below rather than ending the turn
+      // empty and seeding the one-behind shift. system/control messages are NOT
+      // counted: a turn almost always opens with a system session_id message,
+      // so counting it would defang the foreign-result skip in production.
+      if (msg?.type === 'assistant' || msg?.type === 'user' || msg?.type === 'stream_event') {
+        turnState.sawTurnMessage = true;
+      }
+
       if (msg?.type === 'stream_event' && turnState.streamingEnabled) {
         turnState.hasStreamEvents = true;
         processStreamEvent(msg, turnState);
@@ -365,6 +390,17 @@ _sessionCleanupTimer.unref();
       if (msg?.type === 'result') {
         if (msg.is_error) {
           throw new Error(msg.result || msg.message || 'API request failed');
+        }
+        // Defense in depth for the boundary the quiescence gate cannot close: a
+        // foreign run whose closing SUCCESS result is read only AFTER this sink
+        // opened. With no prior turn output (sawTurnMessage still false) it is
+        // provably not ours — a real run always emits output before its result —
+        // so skip it instead of ending the turn empty and seeding the one-behind
+        // shift. The background run still renders via the inter-turn
+        // session_updated path (#1305).
+        if (!turnState.sawTurnMessage) {
+          console.log('[LIFECYCLE] Skipping foreign bare-success result (no prior turn output this turn)');
+          continue;
         }
         // A task_notification for a background (run_in_background) Agent that
         // settles AFTER this result cannot ride the in-turn [MESSAGE] stream:
