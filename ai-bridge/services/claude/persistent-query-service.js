@@ -269,6 +269,12 @@ _sessionCleanupTimer.unref();
 
   try {
     beginRuntimeTurn(runtime);
+    // Scope the abort flag to the turn that aborted: it is set by
+    // abortCurrentTurn and must not carry into a fresh turn started right
+    // after an interrupt, or sendInternal would misclassify the new turn's
+    // failures (e.g. "Runtime is closed" on a disposed runtime) as a graceful
+    // "User interrupted" and silently swallow the user's message.
+    runtime.abortRequested = false;
 
     // Create and register turnSink after beginRuntimeTurn to avoid race
     // (ensures executeTurn is ready to consume before perpetual reader can push)

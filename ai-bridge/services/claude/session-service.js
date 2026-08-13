@@ -124,6 +124,15 @@ export function buildSessionMessagesPayload(sessionFile) {
       }
     })
     .filter(msg => msg !== null)
+    // Drop the CLI's synthetic "[Request interrupted by user]" user rows.
+    // They are turn-abort bookkeeping the CLI persists into the transcript,
+    // not real user input: rendered in the chat they read as a phantom
+    // message, and their uuid makes getLatestUserMessage return them as the
+    // "latest user message", starving the rewind uuid-sync for the user's
+    // real last message. The live stream never carries them (the daemon
+    // consumes them inter-turn), so dropping them here keeps reloaded
+    // history consistent with the live view.
+    .filter(msg => !(msg.type === 'user' && isInterruptionMarker(msg)))
     // A background Agent's terminal report can land as a queued_command
     // attachment (type:"attachment") rather than a user message. Java's
     // MessageParser only forwards user/assistant rows, so the attachment row
@@ -215,13 +224,28 @@ export async function getLatestUserMessage(sessionId, cwd = null) {
   }
 }
 
-function isUserTextMessage(message) {
+export function isUserTextMessage(message) {
   return Boolean(
     message &&
     message.type === 'user' &&
     typeof message.uuid === 'string' &&
+    !isInterruptionMarker(message) &&
     extractTextContent(message)?.trim()
   );
+}
+
+/**
+ * Detect the CLI's synthetic user rows for an aborted turn, matching the
+ * transcript markers it persists: "[Request interrupted by user]" (stream
+ * abort) and "[Request interrupted by user for tool use]" (tool-use abort).
+ * Mirrors the filter Java's SessionLiteReader already applies.
+ */
+export function isInterruptionMarker(message) {
+  if (!message || message.type !== 'user') {
+    return false;
+  }
+  const text = extractTextContent(message);
+  return typeof text === 'string' && text.startsWith('[Request interrupted');
 }
 
 function extractTextContent(message) {

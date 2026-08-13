@@ -10,6 +10,7 @@ import { getClaudeProjectSessionFilePath, getRealHomeDir, selectWorkingDirectory
 import { ensureClaudeSdk, hasClaudeProjectSessionFile, waitForClaudeProjectSessionFile, isNoConversationFoundError } from './message-utils.js';
 import { getActiveQueryResult, getActiveSessionIds } from './message-session-registry.js';
 import { getClaudeCliPathOverride } from '../../utils/claude-cli-path.js';
+import { isUserTextMessage } from './session-service.js';
 
 export async function rewindFiles(sessionId, userMessageId, cwd = null) {
   let result = null;
@@ -189,7 +190,7 @@ export async function rewindFiles(sessionId, userMessageId, cwd = null) {
   }
 }
 
-async function resolveRewindCandidateMessageIds(sessionId, cwd, providedMessageId) {
+export async function resolveRewindCandidateMessageIds(sessionId, cwd, providedMessageId) {
   const messages = await readClaudeProjectSessionMessages(sessionId, cwd);
   if (!Array.isArray(messages) || messages.length === 0) {
     return [];
@@ -202,19 +203,9 @@ async function resolveRewindCandidateMessageIds(sessionId, cwd, providedMessageI
     }
   }
 
-  const isUserTextMessage = (m) => {
-    if (!m || m.type !== 'user') return false;
-    const content = m.message?.content;
-    if (!content) return false;
-    if (typeof content === 'string') {
-      return content.trim().length > 0;
-    }
-    if (Array.isArray(content)) {
-      return content.some((b) => b && b.type === 'text' && String(b.text || '').trim().length > 0);
-    }
-    return false;
-  };
-
+  // Reuse the canonical user-text-message predicate from session-service so
+  // the CLI's synthetic "[Request interrupted by user]" rows (which carry
+  // uuid + text and would otherwise qualify) never become rewind anchors.
   const candidates = [];
   const visited = new Set();
 

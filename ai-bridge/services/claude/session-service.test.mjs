@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { buildSessionMessagesPayload } from './session-service.js';
+import { buildSessionMessagesPayload, isUserTextMessage, isInterruptionMarker } from './session-service.js';
 
 test('buildSessionMessagesPayload returns an empty history when the session file is missing', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-claude-session-'));
@@ -74,4 +74,88 @@ test('buildSessionMessagesPayload leaves a non-task-notification queued_command 
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('buildSessionMessagesPayload drops the CLI interruption marker rows', () => {
+  // The CLI persists synthetic "[Request interrupted by user]" user rows when
+  // a turn is aborted. They are turn-abort bookkeeping, not real input: if
+  // they reach the chat they render as a phantom user message, and their uuid
+  // hijacks getLatestUserMessage so the rewind uuid-sync starves the user's
+  // real last message. Both marker variants must be dropped.
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-claude-session-'));
+  try {
+    const file = path.join(tempDir, 'session.jsonl');
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'hi' } }),
+      JSON.stringify({ type: 'user', uuid: 'u2', message: { role: 'user', content: '[Request interrupted by user]' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'ok' } }),
+      JSON.stringify({ type: 'user', uuid: 'u3', message: { role: 'user', content: '[Request interrupted by user for tool use]' } }),
+    ].join('\n') + '\n');
+
+    const { success, messages } = buildSessionMessagesPayload(file);
+    assert.equal(success, true);
+    assert.deepEqual(messages.map((m) => m.uuid), ['u1', undefined]);
+    assert.equal(messages[0].type, 'user');
+    assert.equal(messages[1].type, 'assistant');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('buildSessionMessagesPayload keeps a user message that merely mentions the marker text', () => {
+  // Only whole content exactly equal to the marker is synthetic; a real user
+  // prompt that mentions it must survive.
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-claude-session-'));
+  try {
+    const file = path.join(tempDir, 'session.jsonl');
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'user',
+      uuid: 'u1',
+      message: { role: 'user', content: 'why did you print [Request interrupted by user]?' },
+    }) + '\n');
+
+    const { messages } = buildSessionMessagesPayload(file);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].uuid, 'u1');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('isUserTextMessage rejects the interruption markers', () => {
+  // getLatestUserMessage feeds the rewind uuid-sync: the interruption row must
+  // never be picked as the "latest user message", or the user's real last
+  // message keeps its uuid unpatched and rewind loses the anchor.
+  assert.equal(isUserTextMessage({
+    type: 'user',
+    uuid: 'u1',
+    message: { role: 'user', content: '[Request interrupted by user]' },
+  }), false);
+  assert.equal(isUserTextMessage({
+    type: 'user',
+    uuid: 'u2',
+    message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] },
+  }), false);
+  assert.equal(isUserTextMessage({
+    type: 'user',
+    uuid: 'u3',
+    message: { role: 'user', content: 'hi' },
+  }), true);
+});
+
+test('isInterruptionMarker matches only the synthetic markers', () => {
+  assert.equal(isInterruptionMarker({
+    type: 'user',
+    message: { role: 'user', content: '[Request interrupted by user]' },
+  }), true);
+  assert.equal(isInterruptionMarker({
+    type: 'user',
+    message: { role: 'user', content: '[Request interrupted by user for tool use]' },
+  }), true);
+  assert.equal(isInterruptionMarker({
+    type: 'user',
+    message: { role: 'user', content: 'why did you print [Request interrupted by user]?' },
+  }), false);
+  assert.equal(isInterruptionMarker({ type: 'assistant', message: { role: 'assistant', content: '[Request interrupted by user]' } }), false);
+  assert.equal(isInterruptionMarker(null), false);
 });
