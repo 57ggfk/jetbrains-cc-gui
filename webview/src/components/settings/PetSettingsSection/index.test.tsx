@@ -274,11 +274,22 @@ describe('PetSettingsSection catalog pagination', () => {
       .toBe(true);
   });
 
-  it('shows scope-specific guidance and keeps the window position hint separate', () => {
+  it('changes the action preview without persisting an action mapping', () => {
+    render(<PetSettingsSection addToast={vi.fn()} />);
+    openActionsTab();
+    mocks.setConfig.mockClear();
+
+    const previewAction = screen.getByLabelText('settings.pet.previewAction');
+    fireEvent.change(previewAction, { target: { value: 'jumping' } });
+
+    expect((previewAction as HTMLSelectElement).value).toBe('jumping');
+    expect(mocks.setConfig).not.toHaveBeenCalled();
+  });
+
+  it('shows scope-specific guidance', () => {
     render(<PetSettingsSection addToast={vi.fn()} />);
 
     expect(screen.getByText('settings.pet.scopeDescriptions.project')).toBeTruthy();
-    expect(screen.getByText('settings.pet.scopePositionHint')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.pet.scopeOptions.global' }));
 
@@ -286,13 +297,14 @@ describe('PetSettingsSection catalog pagination', () => {
     expect(mocks.setConfig).toHaveBeenCalledWith({ scope: 'global' });
   });
 
-  it('groups the basic pet actions directly below the floating pet description', () => {
+  it('groups basic controls in the pet display and operations panel', () => {
     render(<PetSettingsSection addToast={vi.fn()} />);
 
     const actions = screen.getByTestId('pet-basic-actions');
-    expect(actions.contains(screen.getByText('settings.pet.disabled'))).toBe(true);
-    expect(actions.contains(screen.getByText('settings.pet.showStatusIndicator'))).toBe(true);
-    expect(actions.contains(screen.getByRole('button', { name: 'settings.pet.resetPosition' }))).toBe(true);
+    expect(actions.contains(screen.getByRole('combobox', { name: 'settings.pet.currentPet' }))).toBe(true);
+    expect(screen.getByText('settings.pet.displayAndOperations')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'settings.pet.refreshAssets' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'settings.pet.resetPosition' })).toBeTruthy();
   });
 
   it('requests the next offset and replaces the previous page', () => {
