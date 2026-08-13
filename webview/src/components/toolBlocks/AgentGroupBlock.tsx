@@ -219,7 +219,7 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
             totalTokens={(isAsync ? taskEvent?.totalTokens : undefined) ?? agentToolMeta.totalTokens}
             totalToolUseCount={(isAsync ? taskEvent?.totalToolUseCount : undefined) ?? agentToolMeta.totalToolUseCount}
             resultText={(isAsync ? taskEvent?.summary : undefined) ?? extractResultText(result)}
-            prompt={typeof input?.prompt === 'string' ? input.prompt : undefined}
+            prompt={toolName !== 'spawn_agent' && typeof input?.prompt === 'string' ? input.prompt : undefined}
             history={history}
             canLoad={Boolean(currentSessionId)}
           />

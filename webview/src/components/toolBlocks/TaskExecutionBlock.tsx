@@ -239,7 +239,7 @@ const TaskExecutionBlock = memo(function TaskExecutionBlock({ name, input, resul
                 totalTokens={detailTokens}
                 totalToolUseCount={detailToolUseCount}
                 resultText={detailResultText}
-                prompt={typeof prompt === 'string' ? prompt : undefined}
+                prompt={!isSpawnAgent && typeof prompt === 'string' ? prompt : undefined}
                 history={history}
                 canLoad={Boolean(currentSessionId)}
               />
