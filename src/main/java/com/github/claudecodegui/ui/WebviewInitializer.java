@@ -999,14 +999,32 @@ public class WebviewInitializer {
 
     private void showJcefRemoteModeErrorPanel() {
         // Terminal state: the remote CefServer process is unhealthy, so every
-        // reload/recreate against it will keep throwing the same NPE. Stop the
-        // watchdog so it does not loop back into recreate every cooldown and
-        // re-flash this panel. Recovery requires an IDE restart.
+        // reload/recreate against it will keep throwing the same NPE (JBR-9234,
+        // out-of-process JCEF on IntelliJ 2025.2+ / JCEF 144). Stop the watchdog
+        // so it does not loop back into recreate every cooldown and re-flash this
+        // panel. The offered action disables out-of-process JCEF in the Registry
+        // — the documented workaround — after which an IDE restart initialises
+        // JCEF in-process and the message router stops throwing.
         host.getWebviewWatchdog().stop();
         JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
             "⚠️",
             ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteError"),
-            ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteSolution")
+            ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteSolution"),
+            ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteAction"),
+            this::disableOutOfProcessJcefAndShowRestartPanel
+        );
+        replaceMainContent(panel);
+    }
+
+    private void disableOutOfProcessJcefAndShowRestartPanel() {
+        if (!JBCefBrowserFactory.disableOutOfProcessJcefInRegistry()) {
+            LOG.warn("Could not disable out-of-process JCEF in the IDE registry");
+            return;
+        }
+        JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
+                "✓",
+                ClaudeCodeGuiBundle.message("toolwindow.jcefRestartRequired"),
+                ClaudeCodeGuiBundle.message("toolwindow.jcefRestartRequiredSolution")
         );
         replaceMainContent(panel);
     }
