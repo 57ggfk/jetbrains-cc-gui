@@ -69,7 +69,7 @@ public class CodexPetHandlerTest {
     }
 
     @Test
-    public void sendsCompactPngPreviewInsteadOfFullPetdexSpriteSheet() throws Exception {
+    public void sendsFullPetdexSpriteSheetForActionPreview() throws Exception {
         Path tempDir = temporaryFolder.getRoot().toPath();
         Path petDir = Files.createDirectories(tempDir.resolve("petdex-cat"));
         BufferedImage spriteSheet = new BufferedImage(1536, 1872, BufferedImage.TYPE_INT_ARGB);
@@ -86,8 +86,8 @@ public class CodexPetHandlerTest {
         assertTrue(dataUrl.startsWith("data:image/png;base64,"));
         byte[] previewBytes = Base64.getDecoder().decode(dataUrl.substring(dataUrl.indexOf(',') + 1));
         BufferedImage previewImage = ImageIO.read(new ByteArrayInputStream(previewBytes));
-        assertEquals(704, previewImage.getWidth());
-        assertEquals(96, previewImage.getHeight());
+        assertEquals(1536, previewImage.getWidth());
+        assertEquals(1872, previewImage.getHeight());
     }
 
     @Test

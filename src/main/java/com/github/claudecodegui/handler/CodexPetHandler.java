@@ -972,11 +972,11 @@ public class CodexPetHandler extends BaseMessageHandler {
             throw new IOException("INVALID_LOCAL_PET_IMAGE");
         }
         boolean spriteSheet = CodexPetImageSupport.isCanonicalPetdexSheet(dimensions);
-        byte[] previewBytes = spriteSheet ? PetdexRepository.createPreviewPng(decodedImage) : bytes;
-        String previewMimeType = spriteSheet ? "image/png" : mimeType;
         JsonObject result = new JsonObject();
-        result.addProperty("dataUrl", "data:" + previewMimeType + ";base64,"
-                + Base64.getEncoder().encodeToString(previewBytes));
+        // The settings action preview needs the complete 8x9 sheet to select individual frames.
+        // Sending a compact first-frame strip while marking it as a spritesheet makes CSS crop it again.
+        result.addProperty("dataUrl", "data:" + mimeType + ";base64,"
+                + Base64.getEncoder().encodeToString(bytes));
         result.addProperty("spriteSheet", spriteSheet);
         return result;
     }

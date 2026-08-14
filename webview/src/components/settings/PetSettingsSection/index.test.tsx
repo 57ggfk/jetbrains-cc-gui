@@ -248,8 +248,9 @@ describe('PetSettingsSection catalog pagination', () => {
     openActionsTab();
 
     const idleGroup = screen.getByRole('group', { name: 'settings.pet.visualStates.idle' });
-    const waving = within(idleGroup).getByRole('checkbox', { name: 'settings.pet.actions.waving' });
-    fireEvent.click(waving);
+    expect(within(idleGroup).getByRole('checkbox', { name: /settings.pet.actions.idle/ }))
+      .toHaveProperty('disabled', false);
+    fireEvent.click(within(idleGroup).getByRole('checkbox', { name: /settings.pet.actions.waving/ }));
 
     expect(mocks.setConfig).toHaveBeenCalledWith({
       actionMappings: {
@@ -260,7 +261,7 @@ describe('PetSettingsSection catalog pagination', () => {
         error: ['failed'],
       },
     });
-    fireEvent.click(within(idleGroup).getByRole('checkbox', { name: 'settings.pet.actions.idle' }));
+    fireEvent.click(within(idleGroup).getByRole('checkbox', { name: /settings.pet.actions.idle/ }));
     expect(mocks.setConfig).toHaveBeenLastCalledWith({
       actionMappings: {
         idle: ['waving'],
@@ -270,8 +271,19 @@ describe('PetSettingsSection catalog pagination', () => {
         error: ['failed'],
       },
     });
-    expect((within(idleGroup).getByRole('checkbox', { name: 'settings.pet.actions.waving' }) as HTMLInputElement).disabled)
-      .toBe(true);
+    expect(within(idleGroup).getByRole('checkbox', { name: /settings.pet.actions.waving/ }))
+      .toHaveProperty('checked', true);
+  });
+
+  it('switches the action mapping through the compact status tabs', () => {
+    render(<PetSettingsSection addToast={vi.fn()} />);
+    openActionsTab();
+
+    fireEvent.click(screen.getByRole('tab', { name: /settings.pet.visualStates.success/ }));
+
+    const successGroup = screen.getByRole('group', { name: 'settings.pet.visualStates.success' });
+    expect(within(successGroup).getByRole('checkbox', { name: /settings.pet.actions.jumping/ }))
+      .toHaveProperty('checked', true);
   });
 
   it('changes the action preview without persisting an action mapping', () => {

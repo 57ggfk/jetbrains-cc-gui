@@ -203,6 +203,27 @@
       "actionsTitle": "Status actions",
       "actionsDescription": "Choose one or more sprite actions for each task status.",
       "actionsHint": "One selected action is chosen at random when a status begins. Action mappings apply to animated 8x9 pets; static images use the full image.",
+      "actionStateLabel": "Task status",
+      "actionMappingTitle": "Action mapping",
+      "actionSelectedCount": "{{count}} selected",
+      "actionStateDescriptions": {
+        "idle": "Choose an animation while waiting for the next task.",
+        "success": "Choose an animation when a task completes.",
+        "thinking": "Choose an animation while the model is reasoning.",
+        "running": "Choose an animation while a tool or task is running.",
+        "error": "Choose an animation when a task needs attention."
+      },
+      "actionDescriptions": {
+        "idle": "Default resting frame",
+        "running-right": "Continuous rightward motion",
+        "running-left": "Continuous leftward motion",
+        "waving": "Short greeting loop",
+        "jumping": "Completion or reminder",
+        "failed": "Exceptional state animation",
+        "waiting": "Brief pause",
+        "running": "Loop while running",
+        "review": "Review animation"
+      },
       "actionPreview": "Action preview",
       "actionPreviewHint": "Choose a sprite action to inspect.",
       "previewAction": "Preview action",

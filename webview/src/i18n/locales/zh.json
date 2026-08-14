@@ -203,6 +203,27 @@
       "actionsTitle": "状态动作",
       "actionsDescription": "为每种任务状态选择一个或多个图集动作。",
       "actionsHint": "状态开始时会从已选动作中随机选择一个。动作映射仅对 8×9 动画 Pet 生效，静态图片使用完整图片。",
+      "actionStateLabel": "任务状态",
+      "actionMappingTitle": "动作映射",
+      "actionSelectedCount": "已选 {{count}} 项",
+      "actionStateDescriptions": {
+        "idle": "为等待下一个任务选择动画。",
+        "success": "为任务完成时选择动画。",
+        "thinking": "为模型推理期间选择动画。",
+        "running": "为工具或任务运行时选择动画。",
+        "error": "为任务需要注意时选择动画。"
+      },
+      "actionDescriptions": {
+        "idle": "默认静止帧",
+        "running-right": "连续向右移动",
+        "running-left": "连续向左移动",
+        "waving": "短循环问候",
+        "jumping": "完成或提醒",
+        "failed": "异常状态动画",
+        "waiting": "短暂停留",
+        "running": "执行中的循环帧",
+        "review": "审阅动作"
+      },
       "actionPreview": "动作预览",
       "actionPreviewHint": "选择要检查的图集动作。",
       "previewAction": "预览动作",

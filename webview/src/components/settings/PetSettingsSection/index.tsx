@@ -16,6 +16,7 @@ import {
   type CatalogSort,
   type CodexPetAction,
   type CodexPetConfig,
+  type CodexPetVisualState,
   type HatchPetStatus,
   type LocalCodexPet,
   type PetdexCatalogPet,
@@ -435,6 +436,7 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
   const { draftInput, setDraftInput, setCurrentView } = useUIState();
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [activeTab, setActiveTab] = useState<PetSettingsTab>('basic');
+  const [selectedActionState, setSelectedActionState] = useState<CodexPetVisualState>('idle');
   const [previewAction, setPreviewAction] = useState<CodexPetAction>('idle');
   const [previewFrame, setPreviewFrame] = useState(0);
   const [previewPlaying, setPreviewPlaying] = useState(false);
@@ -781,6 +783,12 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
       <p className={styles.description}>{t('settings.pet.description')}</p>
 
       <div className={styles.scopeBar} role="group" aria-label={t('settings.pet.scopeLabel')}>
+        <div className={styles.scopeCopy} aria-live="polite">
+          <span className={styles.scopeTitle}>{t('settings.pet.scopeLabel')}</span>
+          <p className={styles.scopeDescription}>
+            {t(`settings.pet.scopeDescriptions.${config.scope}`)}
+          </p>
+        </div>
         <div className={styles.segmentedControl}>
           {SCOPE_OPTIONS.map((scope) => (
             <button
@@ -793,12 +801,6 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
               {t(`settings.pet.scopeOptions.${scope}`)}
             </button>
           ))}
-        </div>
-        <div className={styles.scopeCopy} aria-live="polite">
-          <span className={styles.scopeTitle}>{t('settings.pet.scopeLabel')}</span>
-          <p className={styles.scopeDescription}>
-            {t(`settings.pet.scopeDescriptions.${config.scope}`)}
-          </p>
         </div>
       </div>
 
@@ -831,9 +833,14 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
               <section className={styles.previewPanel} aria-label={t('settings.pet.preview')}>
                 <div className={styles.previewPanelHeader}>
                   <span>{t('settings.pet.preview')}</span>
-                  <span className={styles.previewStatus}>
-                    {config.enabled ? t('settings.pet.enabled') : t('settings.pet.disabled')}
-                  </span>
+                  <label className={`${styles.switchLabel} ${styles.previewEnabledToggle}`}>
+                    <input
+                      type="checkbox"
+                      checked={config.enabled}
+                      onChange={(event) => updateConfig({ enabled: event.target.checked })}
+                    />
+                    <span>{config.enabled ? t('settings.pet.enabled') : t('settings.pet.disabled')}</span>
+                  </label>
                 </div>
                 <div className={styles.previewStage}>
                   {currentPet ? (
@@ -1008,48 +1015,74 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
                   <p>{t('settings.pet.actionsDescription')}</p>
                 </div>
               </div>
-              <div className={styles.actionWorkspace}>
-                <div className={styles.actionMappingGrid}>
+              <div className={styles.actionConfigurationBar}>
+                <div className={styles.actionStateTabs} role="tablist" aria-label={t('settings.pet.actionStateLabel')}>
                   {PET_VISUAL_STATES.map((state) => {
-                    const selectedActions = config.actionMappings[state];
+                    const selected = state === selectedActionState;
                     return (
-                      <div key={state} className={styles.field}>
+                      <button
+                        key={state}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        className={selected ? styles.actionStateTabActive : styles.actionStateTab}
+                        onClick={() => setSelectedActionState(state)}
+                      >
                         <span>{t(`settings.pet.visualStates.${state}`)}</span>
-                        <div
-                          className={styles.actionMappingOptions}
-                          role="group"
-                          aria-label={t(`settings.pet.visualStates.${state}`)}
-                        >
-                          {PET_ACTIONS.map((action) => {
-                            const checked = selectedActions.includes(action);
-                            return (
-                              <label key={action} className={styles.actionOption}>
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  disabled={checked && selectedActions.length === 1}
-                                  onChange={(event) => {
-                                    const nextActions = event.target.checked
-                                      ? [...selectedActions, action]
-                                      : selectedActions.filter((item) => item !== action);
-                                    if (nextActions.length === 0) return;
-                                    updateConfig({
-                                      actionMappings: {
-                                        ...config.actionMappings,
-                                        [state]: [...new Set(nextActions)],
-                                      },
-                                    });
-                                  }}
-                                />
-                                <span>{t(`settings.pet.actions.${action}`)}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
+                        <em>{config.actionMappings[state].length}</em>
+                      </button>
                     );
                   })}
                 </div>
+              </div>
+              <div className={styles.actionWorkspace}>
+                <section className={styles.actionEditor}>
+                  <header className={styles.actionEditorHeader}>
+                    <div>
+                      <h5>{t('settings.pet.actionMappingTitle')}</h5>
+                      <p>{t('settings.pet.actionsDescription')}</p>
+                    </div>
+                    <span>{t('settings.pet.actionSelectedCount', {
+                      count: config.actionMappings[selectedActionState].length,
+                    })}</span>
+                  </header>
+                  <div className={styles.actionOptionGrid} role="group" aria-label={t(`settings.pet.visualStates.${selectedActionState}`)}>
+                    {PET_ACTIONS.map((action) => {
+                      const selectedActions = config.actionMappings[selectedActionState];
+                      const checked = selectedActions.includes(action);
+                      return (
+                        <label
+                          key={action}
+                          className={checked ? styles.actionOptionSelected : styles.actionOption}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              const nextActions = checked
+                                ? selectedActions.filter((item) => item !== action)
+                                : [...selectedActions, action];
+                              if (nextActions.length === 0) {
+                                event.currentTarget.checked = true;
+                                return;
+                              }
+                              updateConfig({
+                                actionMappings: {
+                                  ...config.actionMappings,
+                                  [selectedActionState]: [...new Set(nextActions)],
+                                },
+                              });
+                            }}
+                          />
+                          <span>
+                            <strong>{t(`settings.pet.actions.${action}`)}</strong>
+                            <small>{t(`settings.pet.actionDescriptions.${action}`)}</small>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
                 <aside className={styles.actionPreview}>
                   <div className={styles.actionPreviewHeader}>
                     <div>
@@ -1210,7 +1243,7 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
             </section>
           )}
           {activeTab === 'local' && (
-            <section className={styles.controlSection}>
+            <section className={`${styles.controlSection} ${styles.hatchSection}`}>
               <div className={styles.hatchHeader}>
                 <div>
                   <h4>{t('settings.pet.hatchTitle')}</h4>
@@ -1234,12 +1267,6 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
                   </button>
                 </div>
               </div>
-              <div className={styles.hatchDirectoryShortcut}>
-                <button type="button" className={styles.secondaryButton} onClick={petBridge.openPetDirectory}>
-                  <span className="codicon codicon-folder-opened" aria-hidden="true" />
-                  {t('settings.pet.openPetDirectory')}
-                </button>
-              </div>
               {hatchStatus === null ? null : hatchStatus.status !== 'installed' ? (
                 <div className={styles.hatchActions}>
                   <span className={styles.pathText}>{hatchStatus.skillPath}</span>
@@ -1253,6 +1280,10 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
                   <button type="button" className={styles.secondaryButton} onClick={petBridge.openHatchWebsite}>
                     <span className="codicon codicon-link-external" aria-hidden="true" />
                     {t('settings.pet.hatchOfficialSource')}
+                  </button>
+                  <button type="button" className={styles.secondaryButton} onClick={petBridge.openPetDirectory}>
+                    <span className="codicon codicon-folder-opened" aria-hidden="true" />
+                    {t('settings.pet.openPetDirectory')}
                   </button>
                 </div>
               ) : (
@@ -1284,19 +1315,10 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
                       <div className={styles.referenceDropzone}>
                         <span className="codicon codicon-file-media" aria-hidden="true" />
                         <p>{hatchReference || t('settings.pet.noReference')}</p>
-                        <button type="button" className={styles.secondaryButton} onClick={petBridge.chooseHatchReference}>
-                          {t('settings.pet.chooseReference')}
-                        </button>
                       </div>
-                    </div>
-                    <div className={styles.hatchDirectoryRow}>
-                      <div>
-                        <span>{t('settings.pet.petDirectory')}</span>
-                        <p>{t('settings.pet.petDirectoryHint')}</p>
-                      </div>
-                      <button type="button" className={styles.secondaryButton} onClick={petBridge.openPetDirectory}>
-                        <span className="codicon codicon-folder-opened" aria-hidden="true" />
-                        {t('settings.pet.openPetDirectory')}
+                      <button type="button" className={`${styles.secondaryButton} ${styles.referenceChooseButton}`}
+                        onClick={petBridge.chooseHatchReference}>
+                        {t('settings.pet.chooseReference')}
                       </button>
                     </div>
                   </aside>
@@ -1310,6 +1332,10 @@ export default function PetSettingsSection({ addToast }: PetSettingsSectionProps
                       onClick={() => prepareHatchCommand('create')}>
                       <span className="codicon codicon-sparkle" aria-hidden="true" />
                       {t('settings.pet.prepareCreatePet')}
+                    </button>
+                    <button type="button" className={styles.secondaryButton} onClick={petBridge.openPetDirectory}>
+                      <span className="codicon codicon-folder-opened" aria-hidden="true" />
+                      {t('settings.pet.openPetDirectory')}
                     </button>
                     <button type="button" className={styles.secondaryButton}
                       onClick={() => prepareHatchCommand('repair')}>
