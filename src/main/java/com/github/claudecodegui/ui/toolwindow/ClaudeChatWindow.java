@@ -2972,20 +2972,54 @@ public class ClaudeChatWindow {
             }
             ClaudeSession current = session;
             if (current == null) {
+                callJavaScript("historyLoadComplete", "0");
                 return;
             }
             String currentId = current.getSessionId();
             if (currentId == null) {
+                callJavaScript("historyLoadComplete", "0");
                 return;
             }
             if (streamCoalescer != null && streamCoalescer.isStreamActive()) {
                 deferredReload.defer(currentId);
                 LOG.info("[ClaudeChatWindow] Same-session resume deferred — "
                         + "turn streaming, will reload at stream end, sessionId=" + currentId);
+                // Frontend may have begun a transition (cleared the list). Release the
+                // guard now so a later deferred reload can paint; if the list is empty
+                // the stream-end drain will repopulate it.
+                callJavaScript("historyLoadComplete", String.valueOf(current.getMessages().size()));
                 return;
             }
             LOG.info("[ClaudeChatWindow] Same-session resume soft reload (no interrupt), sessionId=" + currentId);
-            requestSessionReload(currentId);
+            // Do not only requestSessionReload: that path never signals historyLoadComplete,
+            // so a frontend that cleared the list under __sessionTransitioning stays blank.
+            ClaudeSession restoring = current;
+            restoring.loadFromServer().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
+                if (disposed || session != restoring) {
+                    callJavaScript("historyLoadComplete", "0");
+                    return;
+                }
+                int count = restoring.getMessages().size();
+                if (streamCoalescer != null) {
+                    streamCoalescer.flush(seq -> {
+                        if (!disposed) {
+                            callJavaScript("historyLoadComplete", String.valueOf(count));
+                        }
+                    });
+                } else {
+                    callJavaScript("historyLoadComplete", String.valueOf(count));
+                }
+            })).exceptionally(ex -> {
+                LOG.warn("[ClaudeChatWindow] Same-session soft reload failed: " + ex.getMessage(), ex);
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (!disposed) {
+                        callJavaScript("historyLoadComplete");
+                        callJavaScript("addErrorMessage",
+                                JsUtils.escapeJs("Failed to reload session: " + ex.getMessage()));
+                    }
+                });
+                return null;
+            });
         });
     }
 

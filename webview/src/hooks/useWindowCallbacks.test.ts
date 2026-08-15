@@ -536,6 +536,40 @@ describe('useWindowCallbacks integration', () => {
     expect(applied).toBe(true);
   });
 
+  it('clearMessages does not wipe a post-barrier stashed history snapshot', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    window.__sessionTransitioning = true;
+    // Simulate clearMessages barrier first (normal order), then history arrives with higher sequence.
+    act(() => {
+      window.clearMessages!('10');
+    });
+    const historyMessages: ClaudeMessage[] = [
+      { type: 'user', content: 'post-clear history', timestamp: new Date().toISOString() },
+    ];
+    act(() => {
+      window.updateMessages!(JSON.stringify(historyMessages), 11);
+    });
+    expect(window.__deferredTransitionUpdateMessages?.json).toContain('post-clear history');
+
+    // Reordered clear with lower/same barrier must not drop the post-barrier stash
+    act(() => {
+      window.clearMessages!('10');
+    });
+    expect(window.__deferredTransitionUpdateMessages?.json).toContain('post-clear history');
+
+    act(() => {
+      window.historyLoadComplete!();
+    });
+    const applied = (opts.setMessages as ReturnType<typeof vi.fn>).mock.calls.some(([arg]) => {
+      if (typeof arg !== 'function') return false;
+      const next = (arg as (prev: ClaudeMessage[]) => ClaudeMessage[])([]);
+      return Array.isArray(next) && next.some((m) => m.content === 'post-clear history');
+    });
+    expect(applied).toBe(true);
+  });
+
   it('updateMessages works normally after guard is released', () => {
     const opts = createOptions();
     renderHook(() => useWindowCallbacks(opts));

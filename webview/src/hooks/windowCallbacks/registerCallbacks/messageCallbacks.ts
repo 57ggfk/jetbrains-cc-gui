@@ -751,9 +751,20 @@ export function registerMessageCallbacks(
         barrierSequence,
       );
     }
-    // Drop transition-stashed snapshots from the outgoing session; the upcoming
-    // history load will stash a fresh authoritative list if needed.
-    clearDeferredTransitionUpdateMessages();
+    // Drop only STALE transition-stashed snapshots. A reordered clearMessages that
+    // arrives AFTER the history load already stashed a post-barrier snapshot must
+    // not wipe it — that was the "open history blank until switch away and back" bug.
+    const deferred = window.__deferredTransitionUpdateMessages;
+    if (deferred) {
+      const deferredSeq = deferred.sequence;
+      const isPostBarrier =
+        barrierSequence != null
+        && deferredSeq != null
+        && deferredSeq >= barrierSequence;
+      if (!isPostBarrier) {
+        clearDeferredTransitionUpdateMessages();
+      }
+    }
     // Cancel any pending deferred updateMessages to prevent stale data from
     // being applied after messages are cleared.
     if (pendingUpdateRaf !== null) {

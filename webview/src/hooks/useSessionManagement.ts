@@ -276,15 +276,14 @@ export function useSessionManagement({
       applyHistoryModel(effectiveProvider, effectiveModel, effectiveAgent || null);
     }
 
-    // Re-opening the very session already active: don't interrupt the in-flight
-    // turn or wipe the view - just ask the backend to soft-reload the transcript
-    // from the server. The backend sessionLoadCallback detects the same-session
-    // case and routes through reloadActiveSessionMessages (reusing the
-    // session_updated reload path, never interrupting).
-    // Claude only: codex goes through loadCodexSession, which lacks streaming
-    // defer - skipping interrupt there would clearMessages mid-stream and
-    // disturb the live reply.
-    if (sessionId === currentSessionId && effectiveProvider === 'claude') {
+    // Re-opening the session already active: soft-reload only — do NOT
+    // beginSessionTransition (which clears messages and holds the transition
+    // guard). Backend routes same-session to reloadActiveSessionMessages.
+    // Codex still uses a full transition: its loadCodexSession path is separate
+    // and mid-stream soft-reload without interrupt can clearMessages under the
+    // live reply.
+    const isSameSession = sessionId === currentSessionId;
+    if (isSameSession && effectiveProvider !== 'codex') {
       sendBridgeEvent('load_session', JSON.stringify({
         sessionId,
         provider: effectiveProvider,
@@ -294,7 +293,7 @@ export function useSessionManagement({
       return;
     }
 
-    // Switching to a different session (or codex same-session): interrupt first
+    // Switching to a different session (or Codex same-session): interrupt first
     // if the AI is mid-reply, then do a full session swap.
     if (loading) {
       sendBridgeEvent('interrupt_session');
