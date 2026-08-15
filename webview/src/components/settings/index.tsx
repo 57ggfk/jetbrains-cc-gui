@@ -193,6 +193,9 @@ const SettingsView = ({
     statusBarWidgetEnabled,
     setStatusBarWidgetEnabled,
     handleStatusBarWidgetEnabledChange,
+    allowShellFileModification,
+    setAllowShellFileModification,
+    handleAllowShellFileModificationChange,
     taskCompletionNotificationEnabled,
     setTaskCompletionNotificationEnabled,
     handleTaskCompletionNotificationEnabledChange,
@@ -386,6 +389,7 @@ const SettingsView = ({
     setCommitGenerationEnabled,
     setAiTitleGenerationEnabled,
     setStatusBarWidgetEnabled,
+    setAllowShellFileModification,
     setTaskCompletionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
     setSystemNotificationOnlyWhenUnfocused,
@@ -556,6 +560,8 @@ const SettingsView = ({
                 handleStatusBarWidgetEnabledChange(enabled);
                 addToast(t('toast.restartRequired'), 'warning');
               }}
+              allowShellFileModification={allowShellFileModification}
+              onAllowShellFileModificationChange={handleAllowShellFileModificationChange}
               aiTitleGenerationEnabled={aiTitleGenerationEnabled}
               onAiTitleGenerationEnabledChange={handleAiTitleGenerationEnabledChange}
               newSessionConfirmEnabled={!skipNewSessionConfirm}

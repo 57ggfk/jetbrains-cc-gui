@@ -396,6 +396,13 @@
         "disabled": "Disabled",
         "hint": "When enabled, selecting a file in the project tree will automatically send its file path to AI (note: only the file path is sent, not the file content). When disabled, manual action is required."
       },
+      "allowShellFileModification": {
+        "label": "Allow shell to modify files",
+        "enabled": "On (shell may write files)",
+        "disabled": "Off (AI Edit/Write only)",
+        "hintDisabled": "Default off. When off, the AI must change files via Edit/Write tools so you get diffs and StatusPanel edit stats. Bash/sed/echo file writes are denied with a prompt to use AI edit tools.",
+        "hintEnabled": "On: shell and other local commands may modify files. Warning: those changes are not tracked in StatusPanel edit stats and have no structured diff cards. Prefer Edit/Write when possible."
+      },
       "promptEnhancer": {
         "label": "Prompt Enhancer",
         "modelLabel": "Enhancer Model",

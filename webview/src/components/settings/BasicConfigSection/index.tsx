@@ -77,6 +77,9 @@ interface BasicConfigSectionProps {
   // Status bar widget configuration
   statusBarWidgetEnabled?: boolean;
   onStatusBarWidgetEnabledChange?: (enabled: boolean) => void;
+  // Shell file modification (default false = AI Edit/Write only)
+  allowShellFileModification?: boolean;
+  onAllowShellFileModificationChange?: (enabled: boolean) => void;
   // AI title generation configuration
   aiTitleGenerationEnabled?: boolean;
   onAiTitleGenerationEnabledChange?: (enabled: boolean) => void;
@@ -177,6 +180,8 @@ const BasicConfigSection = (props: BasicConfigSectionProps) => {
           onCommitGenerationEnabledChange={props.onCommitGenerationEnabledChange}
           statusBarWidgetEnabled={props.statusBarWidgetEnabled}
           onStatusBarWidgetEnabledChange={props.onStatusBarWidgetEnabledChange}
+          allowShellFileModification={props.allowShellFileModification}
+          onAllowShellFileModificationChange={props.onAllowShellFileModificationChange}
           aiTitleGenerationEnabled={props.aiTitleGenerationEnabled}
           onAiTitleGenerationEnabledChange={props.onAiTitleGenerationEnabledChange}
           newSessionConfirmEnabled={props.newSessionConfirmEnabled}

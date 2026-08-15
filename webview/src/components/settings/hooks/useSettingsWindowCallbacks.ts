@@ -46,6 +46,7 @@ export const SETTINGS_BOOTSTRAP_BRIDGE_MESSAGES = [
   'get_commit_generation_enabled:',
   'get_ai_title_generation_enabled:',
   'get_status_bar_widget_enabled:',
+  'get_allow_shell_file_modification:',
   'get_task_completion_notification_enabled:',
   'get_ask_user_question_notification_enabled:',
   'get_system_notification_only_when_unfocused:',
@@ -85,6 +86,7 @@ export interface SettingsWindowCallbacksDeps {
   setCommitGenerationEnabled?: (enabled: boolean) => void;
   setAiTitleGenerationEnabled?: (enabled: boolean) => void;
   setStatusBarWidgetEnabled?: (enabled: boolean) => void;
+  setAllowShellFileModification?: (enabled: boolean) => void;
   setTaskCompletionNotificationEnabled?: (enabled: boolean) => void;
   setAskUserQuestionNotificationEnabled?: (enabled: boolean) => void;
   setSystemNotificationOnlyWhenUnfocused?: (enabled: boolean) => void;
@@ -393,6 +395,15 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       }
     };
 
+    window.updateAllowShellFileModification = (jsonStr: string) => {
+      try {
+        const data = JSON.parse(jsonStr);
+        d().setAllowShellFileModification?.(data.allowShellFileModification ?? false);
+      } catch (error) {
+        console.error('[SettingsView] Failed to parse allow shell file modification config:', error);
+      }
+    };
+
     // Task completion notification config callback (opt-in feature, default false)
     window.updateTaskCompletionNotificationEnabled = (jsonStr: string) => {
       try {
@@ -617,6 +628,7 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       window.updateCommitGenerationEnabled = undefined;
       window.updateAiTitleGenerationEnabled = undefined;
       window.updateStatusBarWidgetEnabled = undefined;
+      window.updateAllowShellFileModification = undefined;
       window.updateTaskCompletionNotificationEnabled = undefined;
       window.updateAskUserQuestionNotificationEnabled = undefined;
       window.updateSystemNotificationOnlyWhenUnfocused = undefined;

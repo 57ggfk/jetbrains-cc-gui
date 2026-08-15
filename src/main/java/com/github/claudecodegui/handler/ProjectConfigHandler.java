@@ -699,6 +699,21 @@ public class ProjectConfigHandler {
             "Failed to save status bar config");
     }
 
+    public void handleGetAllowShellFileModification() {
+        respondWithJson("window.updateAllowShellFileModification",
+            () -> jsonOf("allowShellFileModification", settingsService.getAllowShellFileModification()),
+            jsonOf("allowShellFileModification", false),
+            "Failed to get allow shell file modification");
+    }
+
+    public void handleSetAllowShellFileModification(String content) {
+        // Default false: AI Edit/Write only for file changes
+        handleBooleanToggle(content, "allowShellFileModification", false, "allow shell file modification",
+            settingsService::setAllowShellFileModification,
+            "window.updateAllowShellFileModification",
+            "Failed to save allow shell file modification setting");
+    }
+
     public void handleGetTaskCompletionNotificationEnabled() {
         respondWithJson("window.updateTaskCompletionNotificationEnabled",
             () -> jsonOf("taskCompletionNotificationEnabled", settingsService.getTaskCompletionNotificationEnabled()),

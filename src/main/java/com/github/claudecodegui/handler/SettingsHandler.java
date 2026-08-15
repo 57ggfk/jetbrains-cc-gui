@@ -75,6 +75,8 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_commit_generation_enabled",
         "get_status_bar_widget_enabled",
         "set_status_bar_widget_enabled",
+        "get_allow_shell_file_modification",
+        "set_allow_shell_file_modification",
         "get_task_completion_notification_enabled",
         "set_task_completion_notification_enabled",
         "get_ask_user_question_notification_enabled",
@@ -277,6 +279,12 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_status_bar_widget_enabled":
                 projectConfigHandler.handleSetStatusBarWidgetEnabled(content);
+                return true;
+            case "get_allow_shell_file_modification":
+                projectConfigHandler.handleGetAllowShellFileModification();
+                return true;
+            case "set_allow_shell_file_modification":
+                projectConfigHandler.handleSetAllowShellFileModification(content);
                 return true;
             case "get_task_completion_notification_enabled":
                 projectConfigHandler.handleGetTaskCompletionNotificationEnabled();

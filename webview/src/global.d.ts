@@ -425,6 +425,7 @@ interface Window {
    * Update status bar widget enabled state
    */
   updateStatusBarWidgetEnabled?: (json: string) => void;
+  updateAllowShellFileModification?: (json: string) => void;
 
   /**
    * Update task completion notification enabled state

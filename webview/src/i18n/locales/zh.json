@@ -396,6 +396,13 @@
         "disabled": "已关闭",
         "hint": "开启后，在项目树选择文件时会自动将文件路径告诉 AI（注意：只传递文件路径，不传文件内容）。关闭后需要手动操作。"
       },
+      "allowShellFileModification": {
+        "label": "允许 Shell 命令修改文件",
+        "enabled": "已开启（Shell 可改文件）",
+        "disabled": "已关闭（仅 AI Edit/Write）",
+        "hintDisabled": "默认关闭。关闭时，AI 只能通过 Edit / Write 等专用工具改文件，才能显示 diff 与「编辑 +N -M」统计。用 Bash/sed/echo 等改文件会被拒绝，并提示改用 AI 编辑工具。",
+        "hintEnabled": "已开启：允许用 Shell 等本地命令改文件。注意：此类修改无法进入 StatusPanel 编辑统计，也没有结构化 diff 卡片。建议仍优先使用 Edit / Write。"
+      },
       "promptEnhancer": {
         "label": "增强提示词",
         "modelLabel": "增强模型",

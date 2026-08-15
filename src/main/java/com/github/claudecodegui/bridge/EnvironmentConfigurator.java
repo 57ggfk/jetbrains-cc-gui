@@ -33,6 +33,8 @@ public class EnvironmentConfigurator {
     private static final String CLAUDE_PERMISSION_ENV = "CLAUDE_PERMISSION_DIR";
     private static final String CLAUDE_SESSION_ID_ENV = "CLAUDE_SESSION_ID";
     private static final String CLAUDE_PERMISSION_SAFETY_NET_ENV = "CLAUDE_PERMISSION_SAFETY_NET_MS";
+    /** When true, shell may modify files (no StatusPanel edit stats). Default false. */
+    public static final String CODEMOSS_ALLOW_SHELL_FILE_MODIFICATION_ENV = "CODEMOSS_ALLOW_SHELL_FILE_MODIFICATION";
     private static final String CODEX_HOME_ENV = "CODEX_HOME";
     private static final String HOME_ENV = "HOME";
     private static final Pattern WSL_MOUNT_PATH_PATTERN = Pattern.compile("^/mnt/([a-zA-Z])(?:/(.*))?$");
@@ -251,6 +253,14 @@ public class EnvironmentConfigurator {
             env.put(CLAUDE_SESSION_ID_ENV, sid);
         }
         env.put(CLAUDE_PERMISSION_SAFETY_NET_ENV, String.valueOf(getPermissionSafetyNetMs()));
+        // Bootstrap only — node re-reads ~/.codemoss/config.json on each check for live toggles.
+        try {
+            boolean allowShellFileMod = settingsService.getAllowShellFileModification();
+            env.put(CODEMOSS_ALLOW_SHELL_FILE_MODIFICATION_ENV, allowShellFileMod ? "true" : "false");
+        } catch (Exception e) {
+            env.put(CODEMOSS_ALLOW_SHELL_FILE_MODIFICATION_ENV, "false");
+            LOG.debug("Failed to read allowShellFileModification for env: " + e.getMessage());
+        }
         propagateWslEnv(env, isWsl);
     }
 
@@ -258,7 +268,8 @@ public class EnvironmentConfigurator {
     private static final String[] WSL_PROPAGATED_KEYS = {
             CLAUDE_PERMISSION_ENV,
             CLAUDE_SESSION_ID_ENV,
-            CLAUDE_PERMISSION_SAFETY_NET_ENV
+            CLAUDE_PERMISSION_SAFETY_NET_ENV,
+            CODEMOSS_ALLOW_SHELL_FILE_MODIFICATION_ENV
     };
 
     /** Appends permission-bridge keys to WSLENV so they reach the daemon inside WSL. */
