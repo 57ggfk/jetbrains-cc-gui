@@ -3,16 +3,6 @@ import assert from 'node:assert/strict';
 
 import { createPreToolUseHook } from './permission-mode.js';
 import { validateHookOutput, assertSdkAcceptsHookOutput } from './permission-mode-schema.js';
-import { setAllowShellFileModificationForTests } from '../../utils/shell-file-modification.js';
-
-// Isolate shell-file-mod policy from the developer's ~/.codemoss/config.json
-// (CI has no config → default false; local may have allow=true from Settings).
-test.beforeEach(() => {
-  setAllowShellFileModificationForTests(false);
-});
-test.afterEach(() => {
-  setAllowShellFileModificationForTests(undefined);
-});
 
 // Wrap the hook so every test invocation also runs SDK-shape validation.
 // This is the regression guard for PR #1121 → #1126 → #1213: returning a value
@@ -29,11 +19,9 @@ function makeHook(mode = 'default', cwd = '/tmp/test-cwd') {
 
 test('default mode: Bash returns "ask" so settings.json allow-rules cannot silently approve commands', async () => {
   const hook = makeHook('default');
-  // Use a non-mutating command: file-mutating shell (rm/sed/>) is denied earlier by
-  // the shell-file-modification policy (Edit/Write preferred for tracked diffs).
   const result = await hook({
     tool_name: 'Bash',
-    tool_input: { command: 'ls -la' },
+    tool_input: { command: 'rm something.txt' },
   });
   // Hook 'ask' takes precedence over settings.json allow-rules. This is deliberate:
   // settingSources includes 'project' and 'local', whose .claude/settings.json is
@@ -42,16 +30,6 @@ test('default mode: Bash returns "ask" so settings.json allow-rules cannot silen
   // control request, which reaches canUseTool -> the Java dialog, whose "Always allow"
   // is remembered at tool level (confirm once per tool per conversation).
   assert.equal(result?.hookSpecificOutput?.permissionDecision, 'ask');
-});
-
-test('default mode: file-mutating Bash is denied by shell-file-modification policy', async () => {
-  const hook = makeHook('default');
-  const result = await hook({
-    tool_name: 'Bash',
-    tool_input: { command: 'rm something.txt' },
-  });
-  assert.equal(result?.hookSpecificOutput?.permissionDecision, 'deny');
-  assert.match(String(result?.reason || ''), /Edit|Write|shell/i);
 });
 
 test('default mode: Write returns "ask" so unmatched writes reach canUseTool / Java permissions', async () => {
@@ -122,23 +100,13 @@ test('acceptEdits mode: Edit outside CWD yields "continue"', async () => {
 
 test('acceptEdits mode: Bash returns "ask" (acceptEdits auto-accepts edits only, not command execution)', async () => {
   const hook = makeHook('acceptEdits');
-  // Non-mutating shell: still requires confirmation (not auto-accepted by acceptEdits).
-  const result = await hook({
-    tool_name: 'Bash',
-    tool_input: { command: 'date' },
-  });
-  // Security fix (F/B): acceptEdits must not auto-run shell commands, and a project
-  // allow-rule must not auto-approve Bash execution either.
-  assert.equal(result?.hookSpecificOutput?.permissionDecision, 'ask');
-});
-
-test('acceptEdits mode: file-mutating Bash is denied by shell-file-modification policy', async () => {
-  const hook = makeHook('acceptEdits');
   const result = await hook({
     tool_name: 'Bash',
     tool_input: { command: 'rm x' },
   });
-  assert.equal(result?.hookSpecificOutput?.permissionDecision, 'deny');
+  // Security fix (F/B): acceptEdits must not auto-run shell commands, and a project
+  // allow-rule must not auto-approve Bash execution either.
+  assert.equal(result?.hookSpecificOutput?.permissionDecision, 'ask');
 });
 
 test('default mode: read-only MCP tool (verb allowlist) yields "continue"', async () => {

@@ -1,9 +1,5 @@
 import { canUseTool, requestPlanApproval, SAFE_ALWAYS_ALLOW_TOOLS, EDIT_TOOLS, EXECUTION_TOOLS } from '../../permission-handler.js';
 import { debugLog } from '../../permission-ipc.js';
-import {
-  evaluateShellFileModificationPolicy,
-  isShellToolName,
-} from '../../utils/shell-file-modification.js';
 
 /**
  * Plan mode allowed tools.
@@ -139,32 +135,6 @@ export function createPreToolUseHook(permissionModeState, cwd = null, onModeChan
     const toolName = input?.tool_name;
 
     debugLog('PERMISSION_HOOK', `Called for tool: ${toolName}, mode: ${currentPermissionMode}`);
-
-    // ======== Shell file-modification policy (all modes) ========
-    // Prefer structured Edit/Write so StatusPanel can show diffs / edit stats.
-    // Default: deny shell commands that write/delete/move files.
-    // Settings → allowShellFileModification: warn but continue (no edit stats).
-    if (isShellToolName(toolName)) {
-      const policy = evaluateShellFileModificationPolicy(toolName, input?.tool_input);
-      if (policy.action === 'deny') {
-        debugLog('PERMISSION_HOOK', `Denying shell file modification: ${toolName}`);
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-          },
-          reason: policy.message,
-        };
-      }
-      if (policy.action === 'warn') {
-        // Attach warning for permission UI / canUseTool path; still yield/ask as usual.
-        const toolInput = input?.tool_input && typeof input.tool_input === 'object'
-          ? { ...input.tool_input, _shellFileModWarning: policy.message }
-          : { _shellFileModWarning: policy.message };
-        input = { ...input, tool_input: toolInput };
-        debugLog('PERMISSION_HOOK', `Shell file mod allowed with no-stats warning: ${toolName}`);
-      }
-    }
 
     // ======== HANDLE EnterPlanMode - update permissionModeState ========
     // When EnterPlanMode is called, we need to switch to plan mode for subsequent tools

@@ -1893,27 +1893,6 @@ public class CodemossSettingsService {
     }
 
     /**
-     * Whether shell/Bash may modify files.
-     * Default {@code false}: only structured AI Edit/Write tools may change files
-     * (so StatusPanel can track diffs). When {@code true}, shell file writes are
-     * allowed but not counted in edit stats.
-     */
-    public boolean getAllowShellFileModification() throws IOException {
-        JsonObject config = readConfig();
-        if (config.has("allowShellFileModification") && !config.get("allowShellFileModification").isJsonNull()) {
-            return config.get("allowShellFileModification").getAsBoolean();
-        }
-        return false;
-    }
-
-    public void setAllowShellFileModification(boolean enabled) throws IOException {
-        JsonObject config = readConfig();
-        config.addProperty("allowShellFileModification", enabled);
-        writeConfig(config);
-        LOG.info("[CodemossSettings] Set allowShellFileModification: " + enabled);
-    }
-
-    /**
      * Get whether AI session title generation is enabled.
      *
      * @return whether AI title generation is enabled, default is true

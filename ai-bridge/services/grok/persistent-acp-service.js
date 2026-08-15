@@ -38,7 +38,6 @@ import {
   normalizeGrokModelId,
 } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
-import { evaluateShellFileModificationPolicy } from '../../utils/shell-file-modification.js';
 import { AcpTerminalHost } from './acp-terminal-host.js';
 
 export { buildGrokContextUsagePayload, extractUsedTokens };
@@ -187,20 +186,13 @@ async function createRuntime(params, { log } = {}) {
     },
     authorizeCreate: async (info) => {
       const mode = live.permissionMode || 'default';
-      const input = {
-        command: info.commandLine || info.command,
-        cwd: info.cwd,
-      };
-      // Shell file-mod policy even in auto-approve (Edit/Write preferred for stats).
-      const shellPolicy = evaluateShellFileModificationPolicy('run_terminal_command', input);
-      if (shellPolicy.action === 'deny') return false;
-      if (shellPolicy.action === 'warn') {
-        input._shellFileModWarning = shellPolicy.message;
-      }
       if (isAutoApproveMode(mode)) return true;
       try {
         // default / plan / acceptEdits+exec: always surface the permission dialog
-        return await requestPermissionFromJava('run_terminal_command', input);
+        return await requestPermissionFromJava('run_terminal_command', {
+          command: info.commandLine || info.command,
+          cwd: info.cwd,
+        });
       } catch {
         return false;
       }

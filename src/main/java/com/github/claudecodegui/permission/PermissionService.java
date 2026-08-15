@@ -1,6 +1,5 @@
 package com.github.claudecodegui.permission;
 
-import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
@@ -317,27 +316,6 @@ public class PermissionService {
             String requestId = request.get("requestId").getAsString();
             String toolName = request.get("toolName").getAsString();
             JsonObject inputs = request.get("inputs").getAsJsonObject();
-
-            // Policy: default blocks shell/Bash that mutates files (AI Edit/Write only).
-            // Applies even when tool-level "Always allow" would auto-approve Bash.
-            boolean allowShellFileMod = false;
-            try {
-                allowShellFileMod = new CodemossSettingsService().getAllowShellFileModification();
-            } catch (Exception e) {
-                LOG.debug("Failed to read allowShellFileModification, defaulting to false: " + e.getMessage());
-            }
-            ShellFileModificationPolicy.Decision shellPolicy =
-                    ShellFileModificationPolicy.evaluate(toolName, inputs, allowShellFileMod);
-            if (shellPolicy.action == ShellFileModificationPolicy.Action.DENY) {
-                debugLog("SHELL_FILE_MOD_DENY", toolName + " blocked by AI-only file edit policy");
-                fileProtocol.writePermissionResponse(requestId, false);
-                notifyDecision(toolName, inputs, PermissionResponse.DENY);
-                safeDeleteFile(requestFile, "PERM");
-                return;
-            }
-            if (shellPolicy.action == ShellFileModificationPolicy.Action.WARN && inputs != null) {
-                inputs.addProperty("_shellFileModWarning", shellPolicy.message);
-            }
 
             // Check tool-level permission memory
             PermissionResponse toolDecision = decisionStore.getToolDecision(toolName);

@@ -90,8 +90,6 @@ export interface UseSettingsBasicActionsReturn {
   commitGenerationEnabled: boolean;
   aiTitleGenerationEnabled: boolean;
   statusBarWidgetEnabled: boolean;
-  /** When true, shell may modify files (no edit stats). Default false. */
-  allowShellFileModification: boolean;
   taskCompletionNotificationEnabled: boolean;
   askUserQuestionNotificationEnabled: boolean;
   detailedOutputEnabled: boolean;
@@ -128,7 +126,6 @@ export interface UseSettingsBasicActionsReturn {
   handleCommitGenerationEnabledChange: (enabled: boolean) => void;
   handleAiTitleGenerationEnabledChange: (enabled: boolean) => void;
   handleStatusBarWidgetEnabledChange: (enabled: boolean) => void;
-  handleAllowShellFileModificationChange: (enabled: boolean) => void;
   handleTaskCompletionNotificationEnabledChange: (enabled: boolean) => void;
   handleAskUserQuestionNotificationEnabledChange: (enabled: boolean) => void;
   handleDetailedOutputEnabledChange: (enabled: boolean) => void;
@@ -184,7 +181,6 @@ export interface UseSettingsBasicActionsReturn {
   /** @internal */ setCommitGenerationEnabled: (enabled: boolean) => void;
   /** @internal */ setAiTitleGenerationEnabled: (enabled: boolean) => void;
   /** @internal */ setStatusBarWidgetEnabled: (enabled: boolean) => void;
-  /** @internal */ setAllowShellFileModification: (enabled: boolean) => void;
   /** @internal */ setTaskCompletionNotificationEnabled: (enabled: boolean) => void;
   /** @internal */ setAskUserQuestionNotificationEnabled: (enabled: boolean) => void;
   /** @internal */ setSystemNotificationOnlyWhenUnfocused: (enabled: boolean) => void;
@@ -300,9 +296,6 @@ export function useSettingsBasicActions({
 
   // Status bar widget toggle (default: true)
   const [statusBarWidgetEnabled, setStatusBarWidgetEnabled] = useState<boolean>(true);
-
-  // Shell may modify files (default: false — AI Edit/Write only for tracked diffs)
-  const [allowShellFileModification, setAllowShellFileModification] = useState<boolean>(false);
 
   // Task completion notification toggle (default: false, opt-in feature)
   const [taskCompletionNotificationEnabled, setTaskCompletionNotificationEnabled] = useState<boolean>(false);
@@ -528,13 +521,6 @@ export function useSettingsBasicActions({
     setStatusBarWidgetEnabled(enabled);
     const payload = { statusBarWidgetEnabled: enabled };
     sendToJava(`set_status_bar_widget_enabled:${JSON.stringify(payload)}`);
-  }, []);
-
-  // Allow shell to modify files (default off: AI Edit/Write only)
-  const handleAllowShellFileModificationChange = useCallback((enabled: boolean) => {
-    setAllowShellFileModification(enabled);
-    const payload = { allowShellFileModification: enabled };
-    sendToJava(`set_allow_shell_file_modification:${JSON.stringify(payload)}`);
   }, []);
 
   // Task completion notification toggle change handler
@@ -844,9 +830,6 @@ export function useSettingsBasicActions({
     statusBarWidgetEnabled,
     setStatusBarWidgetEnabled,
     handleStatusBarWidgetEnabledChange,
-    allowShellFileModification,
-    setAllowShellFileModification,
-    handleAllowShellFileModificationChange,
     taskCompletionNotificationEnabled,
     setTaskCompletionNotificationEnabled,
     handleTaskCompletionNotificationEnabledChange,

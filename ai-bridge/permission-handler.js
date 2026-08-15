@@ -15,7 +15,6 @@ import {
   requestPlanApproval,
 } from './permission-ipc.js';
 import { rewriteToolInputPaths, isDangerousPath, collectToolInputPaths } from './permission-safety.js';
-import { evaluateShellFileModificationPolicy } from './utils/shell-file-modification.js';
 
 // ========== Tool categories for permission control ==========
 
@@ -144,19 +143,6 @@ export async function canUseTool(toolName, input, options = {}) {
       behavior: 'deny',
       message: 'Tool name is required'
     };
-  }
-
-  // Shell file-modification policy (default: AI Edit/Write only)
-  const shellPolicy = evaluateShellFileModificationPolicy(toolName, input);
-  if (shellPolicy.action === 'deny') {
-    debugLog('SHELL_FILE_MOD_DENY', shellPolicy.message);
-    return {
-      behavior: 'deny',
-      message: shellPolicy.message,
-    };
-  }
-  if (shellPolicy.action === 'warn' && input && typeof input === 'object') {
-    input = { ...input, _shellFileModWarning: shellPolicy.message };
   }
 
   // Check for dangerous paths before allowing.

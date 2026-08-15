@@ -221,13 +221,6 @@ const PermissionDialog = ({
         )}
         <p className="permission-dialog-v3-subtitle">{t('permission.fromExternalProcess')}</p>
 
-        {typeof request.inputs?._shellFileModWarning === 'string' && request.inputs._shellFileModWarning && (
-          <div className="timeout-warning-banner" role="status">
-            <span className="codicon codicon-warning" />
-            <span>{String(request.inputs._shellFileModWarning)}</span>
-          </div>
-        )}
-
         <div className="permission-dialog-v3-command-box">
           <div className="permission-dialog-v3-command-header">
             <span className="command-path">

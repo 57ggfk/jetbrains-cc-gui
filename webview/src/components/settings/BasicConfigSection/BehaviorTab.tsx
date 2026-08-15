@@ -87,9 +87,6 @@ export interface BehaviorTabProps {
   onCommitGenerationEnabledChange?: (enabled: boolean) => void;
   statusBarWidgetEnabled?: boolean;
   onStatusBarWidgetEnabledChange?: (enabled: boolean) => void;
-  /** When true, shell may modify files (no edit stats). Default false. */
-  allowShellFileModification?: boolean;
-  onAllowShellFileModificationChange?: (enabled: boolean) => void;
   aiTitleGenerationEnabled?: boolean;
   onAiTitleGenerationEnabledChange?: (enabled: boolean) => void;
   /**
@@ -138,8 +135,6 @@ const BehaviorTab = ({
   onCommitGenerationEnabledChange = () => {},
   statusBarWidgetEnabled = true,
   onStatusBarWidgetEnabledChange = () => {},
-  allowShellFileModification = false,
-  onAllowShellFileModificationChange = () => {},
   aiTitleGenerationEnabled = true,
   onAiTitleGenerationEnabledChange = () => {},
   newSessionConfirmEnabled = true,
@@ -275,36 +270,6 @@ const BehaviorTab = ({
         <small className={styles.formHint}>
           <span className="codicon codicon-info" />
           <span>{t('settings.basic.autoOpenFile.hint')}</span>
-        </small>
-      </div>
-
-      {/* Shell file modification — default off: AI Edit/Write only */}
-      <div className={styles.streamingSection}>
-        <div className={styles.fieldHeader}>
-          <span className="codicon codicon-terminal" />
-          <span className={styles.fieldLabel}>{t('settings.basic.allowShellFileModification.label')}</span>
-        </div>
-        <label className={styles.toggleWrapper}>
-          <input
-            type="checkbox"
-            className={styles.toggleInput}
-            checked={allowShellFileModification}
-            onChange={(e) => onAllowShellFileModificationChange(e.target.checked)}
-          />
-          <span className={styles.toggleSlider} />
-          <span className={styles.toggleLabel}>
-            {allowShellFileModification
-              ? t('settings.basic.allowShellFileModification.enabled')
-              : t('settings.basic.allowShellFileModification.disabled')}
-          </span>
-        </label>
-        <small className={styles.formHint}>
-          <span className="codicon codicon-info" />
-          <span>
-            {allowShellFileModification
-              ? t('settings.basic.allowShellFileModification.hintEnabled')
-              : t('settings.basic.allowShellFileModification.hintDisabled')}
-          </span>
         </small>
       </div>
 
