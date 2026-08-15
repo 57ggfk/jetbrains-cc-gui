@@ -11,6 +11,7 @@ import { ensureClaudeSdk, hasClaudeProjectSessionFile, waitForClaudeProjectSessi
 import { getActiveQueryResult, getActiveSessionIds } from './message-session-registry.js';
 import { getClaudeCliPathOverride } from '../../utils/claude-cli-path.js';
 import { isUserTextMessage } from './session-service.js';
+import { selectConversationChain } from './conversation-chain.js';
 
 export async function rewindFiles(sessionId, userMessageId, cwd = null) {
   let result = null;
@@ -196,8 +197,13 @@ export async function resolveRewindCandidateMessageIds(sessionId, cwd, providedM
     return [];
   }
 
+  // Anchor candidates must come from the live parentUuid chain: rewound
+  // branches stay on disk, and anchoring on one would restore files to a
+  // state the live conversation no longer reflects.
+  const chainMessages = selectConversationChain(messages);
+
   const byId = new Map();
-  for (const m of messages) {
+  for (const m of chainMessages) {
     if (m && typeof m === 'object' && typeof m.uuid === 'string') {
       byId.set(m.uuid, m);
     }
@@ -223,7 +229,7 @@ export async function resolveRewindCandidateMessageIds(sessionId, cwd, providedM
     current = parent || null;
   }
 
-  const lastUserText = [...messages].reverse().find(isUserTextMessage);
+  const lastUserText = [...chainMessages].reverse().find(isUserTextMessage);
   if (lastUserText?.uuid) {
     candidates.push(lastUserText.uuid);
   }

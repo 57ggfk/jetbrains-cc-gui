@@ -59,4 +59,16 @@ const markerThenReal = await runCandidateResolution([
 assert.ok(markerThenReal.includes('real-3'), 'message after the marker must be picked');
 assert.ok(!markerThenReal.includes('interrupted-1'));
 
+// Rewind forks the transcript in place: rewound user rows stay on disk but
+// the live branch parented past them. Their ids must not become anchors.
+const rewoundFork = await runCandidateResolution([
+  { type: 'user', uuid: 'root-1', parentUuid: null, timestamp: '2026-01-01T10:00:00Z', message: { role: 'user', content: 'hello' } },
+  { type: 'assistant', uuid: 'root-1-answer', parentUuid: 'root-1', timestamp: '2026-01-01T10:00:05Z', message: { id: 'm1', role: 'assistant', content: 'hi' } },
+  { type: 'user', uuid: 'rewound-1', parentUuid: 'root-1-answer', timestamp: '2026-01-01T10:01:00Z', message: { role: 'user', content: 'rewound question' } },
+  { type: 'assistant', uuid: 'rewound-1-answer', parentUuid: 'rewound-1', timestamp: '2026-01-01T10:01:05Z', message: { id: 'm2', role: 'assistant', content: 'rewound answer' } },
+  { type: 'user', uuid: 'live-1', parentUuid: 'root-1-answer', timestamp: '2026-01-01T10:02:00Z', message: { role: 'user', content: 'retry question' } },
+]);
+assert.ok(rewoundFork.includes('live-1'), 'the live branch user message must be a candidate');
+assert.ok(!rewoundFork.includes('rewound-1'), 'a rewound user row must not be a rewind anchor');
+
 console.log('SCENARIO_OK');

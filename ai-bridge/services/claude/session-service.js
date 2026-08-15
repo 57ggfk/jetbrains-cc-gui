@@ -8,6 +8,7 @@ import { dirname } from 'path';
 import { randomUUID } from 'crypto';
 import { createInterface } from 'readline';
 import { getClaudeProjectSessionFilePath } from '../../utils/path-utils.js';
+import { selectConversationChain } from './conversation-chain.js';
 import { extractTaskNotificationXml } from './task-notification-parser.js';
 
 /**
@@ -55,6 +56,24 @@ export function persistJsonlMessage(sessionId, cwd, obj) {
 }
 
 /**
+ * Parse raw JSONL file content into entries, skipping blank and malformed
+ * lines. Shared by every reader that consumes a session transcript.
+ */
+function parseJsonlContent(content) {
+  return content
+    .split('\n')
+    .filter(line => line.trim())
+    .map(line => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(msg => msg !== null);
+}
+
+/**
  * Load session history messages (used to maintain context when resuming a session).
  * Returns an array of messages in the Anthropic Messages API format.
  */
@@ -66,28 +85,16 @@ export function loadSessionHistory(sessionId, cwd) {
       return [];
     }
 
-    const content = readFileSync(sessionFile, 'utf8');
-    const lines = content.split('\n').filter(line => line.trim());
-    const messages = [];
-
-    for (const line of lines) {
-      try {
-        const msg = JSON.parse(line);
-        if (msg.type === 'user' && msg.message && msg.message.content) {
-          messages.push({
-            role: 'user',
-            content: msg.message.content
-          });
-        } else if (msg.type === 'assistant' && msg.message && msg.message.content) {
-          messages.push({
-            role: 'assistant',
-            content: msg.message.content
-          });
-        }
-      } catch (e) {
-        // Skip lines that fail to parse
-      }
-    }
+    // Rewind keeps dead branches on disk; only the parentUuid chain from the
+    // newest leaf is the live conversation the API should see.
+    const messages = selectConversationChain(parseJsonlContent(readFileSync(sessionFile, 'utf8')))
+      .filter(msg =>
+        (msg.type === 'user' || msg.type === 'assistant') &&
+        msg.message && msg.message.content)
+      .map(msg => ({
+        role: msg.type,
+        content: msg.message.content
+      }));
 
     // Exclude the last user message (since we already persisted the current user message before calling this function)
     if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
@@ -113,17 +120,7 @@ export function buildSessionMessagesPayload(sessionFile) {
     return { success: true, messages: [] };
   }
   const content = readFileSync(sessionFile, 'utf8');
-  const messages = content
-    .split('\n')
-    .filter(line => line.trim())
-    .map(line => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(msg => msg !== null)
+  const messages = selectConversationChain(parseJsonlContent(content))
     // Drop the CLI's synthetic "[Request interrupted by user]" user rows.
     // They are turn-abort bookkeeping the CLI persists into the transcript,
     // not real user input: rendered in the chat they read as a phantom

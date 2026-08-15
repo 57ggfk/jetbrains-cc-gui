@@ -122,6 +122,31 @@ test('buildSessionMessagesPayload keeps a user message that merely mentions the 
   }
 });
 
+test('buildSessionMessagesPayload drops rewound branches of the transcript', () => {
+  // Rewind never deletes rows: the CLI forks in place, so the next user
+  // message parents onto the pre-rewind assistant and the discarded span
+  // stays on disk as a dead branch. Reading line-by-line would render it;
+  // only the parentUuid chain from the newest leaf is live.
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-claude-session-'));
+  try {
+    const file = path.join(tempDir, 'session.jsonl');
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'user', uuid: 'u1', parentUuid: null, timestamp: '2026-01-01T10:00:00Z', message: { role: 'user', content: 'first' } }),
+      JSON.stringify({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: '2026-01-01T10:00:05Z', message: { id: 'm1', role: 'assistant', content: 'answer one' } }),
+      JSON.stringify({ type: 'user', uuid: 'u2', parentUuid: 'a1', timestamp: '2026-01-01T10:01:00Z', message: { role: 'user', content: 'rewound question' } }),
+      JSON.stringify({ type: 'assistant', uuid: 'a2', parentUuid: 'u2', timestamp: '2026-01-01T10:01:05Z', message: { id: 'm2', role: 'assistant', content: 'rewound answer' } }),
+      JSON.stringify({ type: 'user', uuid: 'u3', parentUuid: 'a1', timestamp: '2026-01-01T10:02:00Z', message: { role: 'user', content: 'retry question' } }),
+      JSON.stringify({ type: 'assistant', uuid: 'a3', parentUuid: 'u3', timestamp: '2026-01-01T10:02:05Z', message: { id: 'm3', role: 'assistant', content: 'retry answer' } }),
+    ].join('\n') + '\n');
+
+    const { success, messages } = buildSessionMessagesPayload(file);
+    assert.equal(success, true);
+    assert.deepEqual(messages.map((m) => m.uuid), ['u1', 'a1', 'u3', 'a3']);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('isUserTextMessage rejects the interruption markers', () => {
   // getLatestUserMessage feeds the rewind uuid-sync: the interruption row must
   // never be picked as the "latest user message", or the user's real last
