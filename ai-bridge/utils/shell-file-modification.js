@@ -99,8 +99,19 @@ export function isShellFileModificationRequest(toolName, input) {
   return looksLikeShellFileModification(command);
 }
 
+/** @type {boolean|undefined} Test-only override so unit tests ignore ~/.codemoss. */
+let allowShellFileModTestOverride;
+
+/** @param {boolean|undefined} value Pass `undefined` to clear. */
+export function setAllowShellFileModificationForTests(value) {
+  allowShellFileModTestOverride = value;
+}
+
 /** Default: shell file mods are blocked (AI Edit/Write only). */
 export function isAllowShellFileModification(env = process.env, readConfig = readCodemossConfigFlag) {
+  if (typeof allowShellFileModTestOverride === 'boolean') {
+    return allowShellFileModTestOverride;
+  }
   // Live config wins so Settings toggles apply without restarting the daemon.
   const fromConfig = readConfig();
   if (typeof fromConfig === 'boolean') return fromConfig;
