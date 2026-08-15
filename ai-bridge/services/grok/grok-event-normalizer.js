@@ -512,10 +512,12 @@ function extractText(content) {
   return '';
 }
 
-const FILE_EDIT_RE = /^(write|write_file|edit|edit_file|replace_string|write_to_file|notebookedit|create_file|multiedit)$/i;
+const FILE_EDIT_RE = /^(write|write_file|edit|edit_file|replace_string|write_to_file|notebookedit|create_file|multiedit|search_replace|searchreplace|str_replace|strreplace|apply_patch)$/i;
 
 export function isFileEditTool(name) {
-  return FILE_EDIT_RE.test(String(name || ''));
+  const raw = String(name || '');
+  const collapsed = raw.toLowerCase().replace(/[\s-]+/g, '_');
+  return FILE_EDIT_RE.test(raw) || FILE_EDIT_RE.test(collapsed);
 }
 
 export function isPermissionMethod(method) {
@@ -549,17 +551,34 @@ export function normalizeEditToolName(rawName, kind = '', title = '') {
   const k = String(kind || '').toLowerCase();
   const t = String(title || name || '');
 
-  if (FILE_EDIT_RE.test(lower)) {
+  // "Search Replace" / "search-replace" → treat as file edit
+  const collapsed = lower.replace(/[\s-]+/g, '_');
+  if (FILE_EDIT_RE.test(lower) || FILE_EDIT_RE.test(collapsed)) {
     if (lower === 'write' || lower === 'write_file' || lower === 'create_file' || lower === 'write_to_file') {
       return lower === 'write' ? 'Write' : name;
     }
-    if (lower === 'edit' || lower === 'edit_file' || lower === 'replace_string' || lower === 'multiedit') {
-      return lower === 'edit' ? 'Edit' : name;
+    if (
+      lower === 'edit'
+      || lower === 'edit_file'
+      || lower === 'replace_string'
+      || lower === 'multiedit'
+      || collapsed === 'search_replace'
+      || collapsed === 'searchreplace'
+      || collapsed === 'str_replace'
+      || collapsed === 'strreplace'
+    ) {
+      return lower === 'edit' ? 'Edit' : (collapsed === 'search_replace' || collapsed === 'searchreplace' || /replace/i.test(lower) ? 'Edit' : name);
     }
     return name || 'Edit';
   }
 
-  if (k === 'edit' || k === 'write' || /write|edit|patch|create.?file|overwrite/i.test(t) || /write|edit|patch/i.test(lower)) {
+  if (
+    k === 'edit'
+    || k === 'write'
+    || /write|edit|patch|create.?file|overwrite|search\s*replace|str\s*replace/i.test(t)
+    || /write|edit|patch|search_?replace|str_?replace/i.test(lower)
+    || /write|edit|patch|search_?replace|str_?replace/i.test(collapsed)
+  ) {
     if (/write|create|overwrite/i.test(t) || /write|create|overwrite/i.test(lower) || k === 'write') {
       return 'Write';
     }

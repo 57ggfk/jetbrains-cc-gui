@@ -1382,7 +1382,9 @@
     "keepAllConfirmMessage": "वर्तमान परिवर्तनों को आधार के रूप में स्वीकार करें। भविष्य के परिवर्तन शून्य से ट्रैक किए जाएंगे।",
     "discardAllSuccess": "सभी परिवर्तन हटा दिए गए",
     "discardAllFailed": "हटाना विफल: {{error}}",
-    "keepAllSuccess": "सभी परिवर्तन रखे गए, ट्रैकिंग रीसेट"
+    "keepAllSuccess": "सभी परिवर्तन रखे गए, ट्रैकिंग रीसेट",
+    "multiAgentBadge": "मल्टी-एजेंट",
+    "multiAgentEdited": "इस सत्र में {{count}} एजेंटों ने इस फ़ाइल को संपादित किया — सावधानी से देखें"
   },
   "skills": {
     "title": "Skills",

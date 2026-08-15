@@ -1388,7 +1388,9 @@
     "keepAllConfirmMessage": "將當前改動作為新基準，後續改動從零開始記錄。",
     "discardAllSuccess": "已撤銷所有檔案更改",
     "discardAllFailed": "撤銷失敗: {{error}}",
-    "keepAllSuccess": "已保存全部，改動記錄已重置"
+    "keepAllSuccess": "已保存全部，改動記錄已重置",
+    "multiAgentBadge": "多 Agent",
+    "multiAgentEdited": "本會話有 {{count}} 個 Agent 修改過此檔案，請留意合併衝突"
   },
   "skills": {
     "title": "Skills",

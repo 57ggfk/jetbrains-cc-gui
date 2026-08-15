@@ -1478,7 +1478,9 @@
     "keepAllConfirmMessage": "현재 변경 사항을 기준선으로 수락합니다. 이후 변경 사항은 처음부터 추적됩니다.",
     "discardAllSuccess": "모든 변경 사항이 버려졌습니다",
     "discardAllFailed": "버리기 실패: {{error}}",
-    "keepAllSuccess": "모든 변경 사항이 유지되었으며, 추적이 초기화되었습니다"
+    "keepAllSuccess": "모든 변경 사항이 유지되었으며, 추적이 초기화되었습니다",
+    "multiAgentBadge": "다중 Agent",
+    "multiAgentEdited": "이 세션에서 {{count}}개 Agent가 이 파일을 수정했습니다. 주의해서 확인하세요"
   },
   "skills": {
     "title": "스킬",

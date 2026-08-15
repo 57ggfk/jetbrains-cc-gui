@@ -1730,8 +1730,11 @@
     "keepAllConfirmMessage": "Accept current changes as baseline. Future changes will be tracked from zero.",
     "discardAllSuccess": "All changes discarded",
     "discardAllFailed": "Discard failed: {{error}}",
-    "keepAllSuccess": "All changes kept, tracking reset"
+    "keepAllSuccess": "All changes kept, tracking reset",
+    "multiAgentBadge": "Multi-agent",
+    "multiAgentEdited": "{{count}} agents edited this file in this session — review carefully"
   },
+
   "skills": {
     "title": "Skills",
     "all": "All",

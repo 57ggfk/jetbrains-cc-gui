@@ -1383,7 +1383,9 @@
     "keepAllConfirmMessage": "Accepter les modifications actuelles comme référence. Les modifications futures seront suivies à partir de zéro.",
     "discardAllSuccess": "Tous les changements annulés",
     "discardAllFailed": "Échec de l'annulation: {{error}}",
-    "keepAllSuccess": "Tous les changements conservés, suivi réinitialisé"
+    "keepAllSuccess": "Tous les changements conservés, suivi réinitialisé",
+    "multiAgentBadge": "Multi-agents",
+    "multiAgentEdited": "{{count}} agents ont modifié ce fichier dans cette session — vérifiez attentivement"
   },
   "skills": {
     "title": "Skills",
