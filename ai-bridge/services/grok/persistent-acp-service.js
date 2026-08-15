@@ -25,6 +25,7 @@ import {
   isAutoApproveMode,
   resolveAcpPermissionDecision,
   isPermissionRequestMethod,
+  extractPermissionToolInfo,
   TURN_PROMPT_TIMEOUT_MS,
 } from './grok-acp-client.js';
 import { GrokEventNormalizer } from './grok-event-normalizer.js';
@@ -340,8 +341,13 @@ async function executeTurn(runtime, params, normalizer) {
       attachments: params.attachments || [],
     });
 
-    // Wire notifications for this turn into the normalizer
+    // Wire notifications / permission / fs writes into the turn normalizer.
+    // Grok file edits arrive mainly as session/request_permission; createRuntime's
+    // onServerRequest must be overridden for the turn so the ledger sees them.
+    // finishSuccess flushes the ledger so edit stats are correct at turn end.
     const originalOnNotif = runtime.client.onNotification;
+    const originalOnFsWrite = runtime.client.onFsWrite;
+    const originalOnServerRequest = runtime.client.onServerRequest;
     runtime.client.onNotification = (method, p) => {
       const usage = usageFromNotification(method, p);
       if (usage) rememberUsageOnRuntime(runtime, usage);
@@ -349,6 +355,40 @@ async function executeTurn(runtime, params, normalizer) {
       if (typeof originalOnNotif === 'function') {
         try { originalOnNotif(method, p); } catch {}
       }
+    };
+    runtime.client.onFsWrite = (payload) => {
+      emit('fs_write', payload);
+      if (typeof originalOnFsWrite === 'function') {
+        try { originalOnFsWrite(payload); } catch {}
+      }
+    };
+    runtime.client.onServerRequest = async (method, paramsReq, id, acp) => {
+      emit('server_request', { method, params: paramsReq });
+      if (isPermissionRequestMethod(method)) {
+        const mode =
+          runtime._livePermission?.permissionMode ||
+          runtime.permissionMode ||
+          'default';
+        const decision = await resolveAcpPermissionDecision(paramsReq, mode, {
+          autoApprove: isAutoApproveMode(mode),
+        });
+        const info = extractPermissionToolInfo(paramsReq || {});
+        emit('permission_decision', {
+          method,
+          toolName: decision.toolName,
+          allowed: decision.allowed,
+          optionId: decision.optionId,
+          source: decision.source,
+          toolCallId: info.input?._acp?.toolCallId || '',
+          input: info.input,
+        });
+        acp.respond(id, decision.response);
+        return true;
+      }
+      if (typeof originalOnServerRequest === 'function') {
+        return originalOnServerRequest(method, paramsReq, id, acp);
+      }
+      return false;
     };
 
     try {
@@ -362,12 +402,15 @@ async function executeTurn(runtime, params, normalizer) {
       }
 
       emit('prompt_result', result);
+      // finishSuccess flushes the file-edit ledger before STREAM_END
       normalizer.finishSuccess(sid || runtime.sessionId, normalizer.assistantText);
 
       runtime.sessionId = sid || runtime.client.activeSessionId;
       return { sessionId: runtime.sessionId, success: true };
     } finally {
       runtime.client.onNotification = originalOnNotif;
+      runtime.client.onFsWrite = originalOnFsWrite;
+      runtime.client.onServerRequest = originalOnServerRequest;
     }
   } catch (err) {
     normalizer.finishError(err);

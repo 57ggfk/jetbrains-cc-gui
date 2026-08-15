@@ -263,6 +263,14 @@ public class ClaudeChatWindow {
 
             @Override
             public void onStreamEnded() {
+                ClaudeSession current = ClaudeChatWindow.this.session;
+                if (current != null && shouldReconcileTranscriptAtStreamEnd(
+                        current.getProvider(), current.getSessionId())) {
+                    // Grok's live ACP stream can omit file-tool blocks that are present
+                    // in chat_history.jsonl. Reuse the proven same-session reload path
+                    // once the turn is idle so derived edit statistics use final data.
+                    ClaudeChatWindow.this.deferredReload.defer(current.getSessionId());
+                }
                 ClaudeChatWindow.this.drainDeferredReload();
             }
         });
@@ -2419,6 +2427,10 @@ public class ClaudeChatWindow {
             return SafetyDrainAction.DONE;
         }
         return streamActive ? SafetyDrainAction.RECHECK_LATER : SafetyDrainAction.DRAIN;
+    }
+
+    static boolean shouldReconcileTranscriptAtStreamEnd(String provider, String sessionId) {
+        return "grok".equals(provider) && sessionId != null && !sessionId.isBlank();
     }
 
     /** (Re)arm the safety backstop; overlapping arms collapse to one pending tick. */
