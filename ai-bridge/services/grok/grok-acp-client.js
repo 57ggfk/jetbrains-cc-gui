@@ -20,6 +20,7 @@ import {
   normalizeGrokModelId,
 } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
+import { evaluateShellFileModificationPolicy } from '../../utils/shell-file-modification.js';
 import { AcpTerminalHost, isTerminalMethod } from './acp-terminal-host.js';
 import {
   buildGrokImageBlocks,
@@ -680,13 +681,20 @@ export async function runAcpTurn({
     // Gate shell spawn when not in auto-approve modes (permission dialog).
     // Agent may also call session/request_permission first; double-gate is OK.
     authorizeCreate: async (info) => {
+      const input = {
+        command: info.commandLine || info.command,
+        cwd: info.cwd,
+      };
+      // Shell file-mod policy applies even in auto-approve (matches Claude PreToolUse).
+      const shellPolicy = evaluateShellFileModificationPolicy('run_terminal_command', input);
+      if (shellPolicy.action === 'deny') return false;
+      if (shellPolicy.action === 'warn') {
+        input._shellFileModWarning = shellPolicy.message;
+      }
       if (isAutoApproveMode(effectiveMode)) return true;
       if (isDenyAllMode(effectiveMode)) return false;
       try {
-        return await requestPermissionFromJava('run_terminal_command', {
-          command: info.commandLine || info.command,
-          cwd: info.cwd,
-        });
+        return await requestPermissionFromJava('run_terminal_command', input);
       } catch {
         return false;
       }
@@ -947,6 +955,29 @@ export async function resolveAcpPermissionDecision(
 ) {
   const info = extractPermissionToolInfo(params || {});
   const { toolName, input, kind, options } = info;
+
+  // Shell file-mod policy (all modes, including auto-approve / bypass).
+  const shellPolicy = evaluateShellFileModificationPolicy(toolName, input || {});
+  if (shellPolicy.action === 'deny') {
+    const rejectId = pickOptionId(
+      options,
+      ['reject-once', 'reject_once', 'reject', 'deny', 'cancel', 'cancelled'],
+      null
+    );
+    return {
+      allowed: false,
+      optionId: rejectId,
+      toolName,
+      source: 'shell-file-mod-policy',
+      message: shellPolicy.message,
+      response: rejectId
+        ? { outcome: { outcome: 'selected', optionId: rejectId } }
+        : { outcome: { outcome: 'cancelled' } },
+    };
+  }
+  if (shellPolicy.action === 'warn' && input && typeof input === 'object') {
+    input._shellFileModWarning = shellPolicy.message;
+  }
 
   if (isDenyAllMode(permissionMode)) {
     const rejectId = pickOptionId(

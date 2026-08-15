@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import { readFile, unlink, writeFile } from 'fs/promises';
 import { requestPermissionFromJava } from '../../permission-handler.js';
+import { evaluateShellFileModificationPolicy } from '../../utils/shell-file-modification.js';
 import { findSessionFileByThreadId } from './codex-agents-loader.js';
 import { extractPatchFromResponseItemPayload, parseApplyPatchToOperations } from './codex-patch-parser.js';
 import {
@@ -714,10 +715,36 @@ function emitDeniedCommandToolResultOnce(state, toolUseId, messageText = 'Comman
 }
 
 async function maybeRequestCommandApprovalViaBridge(state, config, { toolUseId, command, smartTool, description }) {
-  const shouldBridgeApproval = config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never';
-  if (!shouldBridgeApproval) return true;
   const permissionToolName = mapCommandToolNameToPermissionToolName(smartTool);
   const requestInput = { command, description, source: 'codex_command_execution' };
+
+  // Shell file-mod policy applies to ALL approval policies (including never/bypass):
+  // prefer Edit/Write so StatusPanel can track diffs. Matches Claude PreToolUse policy.
+  const shellPolicy = evaluateShellFileModificationPolicy(permissionToolName, requestInput);
+  if (shellPolicy.action === 'deny') {
+    logInfo('PERM_DEBUG', `Shell file-mod policy denied command: toolUseId=${toolUseId}, command=${command}`);
+    state.deniedCommandToolUseIds.add(toolUseId);
+    state.suppressNoResponseFallback = true;
+    emitDeniedCommandToolResultOnce(
+      state,
+      toolUseId,
+      shellPolicy.message || 'Shell file modification denied; use Edit/Write tools',
+    );
+    state.emitMessage({
+      type: 'status',
+      message: 'Shell file modification denied (use Edit/Write for tracked edits)',
+    });
+    state.commandApprovalAbortRequested = true;
+    try { config.turnAbortController.abort(); }
+    catch (error) { logDebug('PERM_DEBUG', `Abort turn failed after shell policy denial: ${error?.message || error}`); }
+    return false;
+  }
+  if (shellPolicy.action === 'warn') {
+    requestInput._shellFileModWarning = shellPolicy.message;
+  }
+
+  const shouldBridgeApproval = config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never';
+  if (!shouldBridgeApproval) return true;
   try {
     logInfo('PERM_DEBUG', `Command approval request: toolUseId=${toolUseId}, tool=${permissionToolName}, command=${command}`);
     const allowed = await requestPermissionFromJava(permissionToolName, requestInput);
