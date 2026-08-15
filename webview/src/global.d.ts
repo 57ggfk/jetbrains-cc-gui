@@ -822,6 +822,19 @@ interface Window {
   __sessionTransitionToken?: string | null;
 
   /**
+   * Latest history/session snapshot received while `__sessionTransitioning` was true.
+   * Applied when the transition ends (historyLoadComplete / setSessionId) so Grok (and
+   * other providers) do not lose the transcript if updateMessages races the guard.
+   */
+  __deferredTransitionUpdateMessages?: { json: string; sequence: number | null } | null;
+
+  /** Stash an updateMessages payload for post-transition flush. */
+  __stashDeferredTransitionUpdateMessages?: (json: string, sequence?: number | null) => void;
+
+  /** Apply and clear `__deferredTransitionUpdateMessages` after the guard is released. */
+  __flushDeferredTransitionUpdateMessages?: () => void;
+
+  /**
    * Resets all transient UI state (loading, streaming, toasts, refs) in one shot.
    * Called by beginSessionTransition (useSessionManagement) to synchronously
    * clear both React state AND internal refs before starting a new session.

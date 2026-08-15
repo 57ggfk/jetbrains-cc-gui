@@ -113,6 +113,7 @@ describe('useWindowCallbacks integration', () => {
   beforeEach(() => {
     window.__sessionTransitioning = false;
     window.__sessionTransitionToken = null;
+    window.__deferredTransitionUpdateMessages = null;
     window.__minAcceptedUpdateSequence = 0;
     window.__prependedHistoryMessageCount = 0;
     window.__messageBaseIndex = 0;
@@ -476,24 +477,63 @@ describe('useWindowCallbacks integration', () => {
     expect(opts.applyHistoryTitleLocal).not.toHaveBeenCalled();
   });
 
-  // ===== updateMessages is blocked during transition =====
+  // ===== updateMessages is deferred during transition =====
 
-  it('updateMessages is silently dropped while __sessionTransitioning is true', () => {
+  it('updateMessages is stashed while __sessionTransitioning is true (not applied yet)', () => {
     const opts = createOptions();
     renderHook(() => useWindowCallbacks(opts));
 
     window.__sessionTransitioning = true;
 
-    const staleMessages: ClaudeMessage[] = [
-      { type: 'assistant', content: 'stale content', timestamp: new Date().toISOString() },
+    const historyMessages: ClaudeMessage[] = [
+      { type: 'assistant', content: 'history content', timestamp: new Date().toISOString() },
     ];
 
     act(() => {
-      window.updateMessages!(JSON.stringify(staleMessages));
+      window.updateMessages!(JSON.stringify(historyMessages));
     });
 
-    // setMessages should NOT be called because guard is active
+    // Not applied while the guard is active
     expect(opts.setMessages).not.toHaveBeenCalled();
+    expect(window.__deferredTransitionUpdateMessages?.json).toContain('history content');
+  });
+
+  it('historyLoadComplete flushes stashed updateMessages after releasing the guard', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    window.__sessionTransitioning = true;
+    const historyMessages: ClaudeMessage[] = [
+      { type: 'user', content: '从历史恢复', timestamp: new Date().toISOString() },
+      { type: 'assistant', content: 'ok', timestamp: new Date().toISOString() },
+    ];
+
+    act(() => {
+      window.updateMessages!(JSON.stringify(historyMessages), 5);
+    });
+    expect(opts.setMessages).not.toHaveBeenCalled();
+
+    act(() => {
+      window.historyLoadComplete!();
+    });
+
+    expect(window.__sessionTransitioning).toBe(false);
+    expect(opts.setMessages).toHaveBeenCalled();
+    expect(window.__deferredTransitionUpdateMessages == null
+      || window.__deferredTransitionUpdateMessages === null).toBe(true);
+
+    // historyLoadComplete also re-scans messages (refreshLoadedHistoryMessages), so
+    // the last setMessages call may be a no-op on []. Assert some updater installs
+    // the restored transcript when given an empty previous list.
+    const applied = (opts.setMessages as ReturnType<typeof vi.fn>).mock.calls.some(([arg]) => {
+      if (typeof arg !== 'function') return false;
+      const next = (arg as (prev: ClaudeMessage[]) => ClaudeMessage[])([]);
+      return Array.isArray(next)
+        && next.length === 2
+        && next[0]?.content === '从历史恢复'
+        && next[1]?.content === 'ok';
+    });
+    expect(applied).toBe(true);
   });
 
   it('updateMessages works normally after guard is released', () => {

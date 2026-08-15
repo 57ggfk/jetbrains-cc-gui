@@ -114,6 +114,8 @@ export function useSessionManagement({
   const beginSessionTransition = useCallback((nextSessionId: string | null, nextTitle: string | null) => {
     window.__sessionTransitioning = true;
     window.__sessionTransitionToken = createSessionTransitionToken();
+    // Discard any deferred snapshot from a prior transition / outgoing session.
+    window.__deferredTransitionUpdateMessages = null;
     // Clear expand/collapse cache on session switch to avoid unbounded growth
     clearAllPersistedExpanded();
     // Use the single cleanup entry point exposed by useWindowCallbacks.
@@ -166,6 +168,10 @@ export function useSessionManagement({
         console.warn('[SessionManagement] Transition guard timed out — auto-releasing');
         window.__sessionTransitioning = false;
         window.__sessionTransitionToken = null;
+        // Apply any history snapshot that arrived while the guard was stuck.
+        if (typeof window.__flushDeferredTransitionUpdateMessages === 'function') {
+          window.__flushDeferredTransitionUpdateMessages();
+        }
       }
     }, 15_000); // 15 seconds — generous enough for slow history loads
   }, [clearToasts, currentSessionIdRef, setStatus, setLoadingState, setIsThinking, setStreamingActive, setMessages, setCurrentSessionId, setCustomSessionTitle, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens, setTaskEvents, setSubagentHistories]);
