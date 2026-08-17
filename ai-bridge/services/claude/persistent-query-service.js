@@ -23,6 +23,7 @@ import { buildQuickFixPrompt } from '../quickfix-prompts.js';
 import { registerActiveQueryResult, removeSession } from './message-service.js';
 import { normalizePermissionMode } from './permission-mode.js';
 import { redactSecrets, truncateString } from './message-output-filter.js';
+import { extractResultError } from './message-utils.js';
 import {
   beginRuntimeTurn,
   cleanupStaleAnonymousRuntimes,
@@ -370,7 +371,10 @@ _sessionCleanupTimer.unref();
 
       if (msg?.type === 'result') {
         if (msg.is_error) {
-          throw new Error(msg.result || msg.message || 'API request failed');
+          // The SDK puts the real error text in msg.errors (array), not in
+          // result/message — extractResultError covers all three so the true
+          // failure reaches the UI instead of a generic fallback.
+          throw new Error(extractResultError(msg));
         }
         // A task_notification for a background (run_in_background) Agent that
         // settles AFTER this result cannot ride the in-turn [MESSAGE] stream:

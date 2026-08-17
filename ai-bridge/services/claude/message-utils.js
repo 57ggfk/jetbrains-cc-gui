@@ -161,6 +161,32 @@ export function truncateErrorContent(content, maxLen = 1000) {
 }
 
 /**
+ * Extract the human-readable error text from an SDK error result message.
+ * Mirrors the Claude Agent SDK's own precedence (see sdk.mjs): a result whose
+ * subtype is "success" carries its text in `result`, all other error results
+ * report in the `errors` array. Reading only `result`/`message` silently
+ * dropped the real failure and left users staring at a generic fallback.
+ * @param {object} msg - The SDK result message
+ * @returns {string} The best available error text, or a generic fallback
+ */
+export function extractResultError(msg) {
+  if (!msg) return 'API request failed';
+  // Mirror the SDK's own precedence (sdk.mjs): an error result whose subtype is
+  // "success" carries its text in `result`; every other error result reports in
+  // the `errors` array. Reading the wrong field silently lost the real failure.
+  if (msg.subtype === 'success') {
+    return msg.result || msg.message || 'API request failed';
+  }
+  if (Array.isArray(msg.errors) && msg.errors.length > 0) {
+    // The SDK joins with `|| void 0`, so an all-blank errors array must not
+    // surface as an empty string — fall through to the generic fallback.
+    const joined = msg.errors.map((r) => String(r).trim()).filter(Boolean).join('; ');
+    if (joined) return joined;
+  }
+  return msg?.result || msg?.message || 'API request failed';
+}
+
+/**
  * Emit [USAGE] tag for Java-side token tracking.
  * NOTE: Uses process.stdout.write for consistent buffering with other IPC messages.
  * The Java backend parses stdout lines starting with "[USAGE]" to extract token metrics.
