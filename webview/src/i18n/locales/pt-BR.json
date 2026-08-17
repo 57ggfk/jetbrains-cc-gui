@@ -1689,11 +1689,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Modelo aprimorado do Sonnet 4.6"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · Usar o modelo padrão"
+        "description": "Sonnet 5 · Usar o modelo padrão"
       },
       "opus5": {
         "label": "Opus 5",

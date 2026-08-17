@@ -301,15 +301,18 @@ export function strip1MContextSuffix(modelId: string | undefined | null): string
  * CLAUDE_MODELS[0], which is the newest tier and the most likely to be missing
  * from a user's API relay.
  */
-export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-4-7';
+export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-5';
 
 /**
- * Retired model IDs → their current-generation replacement. Lookup happens after
+ * Retired model IDs -> their current-generation replacement. Lookup happens after
  * the [1m] suffix is stripped, so keys must be base IDs. Without an entry here a
  * saved retired model fails validation and silently resets to the fallback.
+ * Retired ids must always map to a LIVE model - mapping one retired id to another
+ * (sonnet-4-6 -> sonnet-4-7) kept restoring tabs pinned to a dead model (#1678).
  */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
-  'claude-sonnet-4-6': 'claude-sonnet-4-7',
+  'claude-sonnet-4-6': 'claude-sonnet-5',
+  'claude-sonnet-4-7': 'claude-sonnet-5',
   'claude-opus-4-6': 'claude-opus-4-8',
 };
 
@@ -345,12 +348,7 @@ export const CLAUDE_MODELS: ModelInfo[] = [
   {
     id: 'claude-sonnet-5',
     label: 'Sonnet 5',
-    description: 'Sonnet 5 · Upgraded Sonnet model',
-  },
-  {
-    id: 'claude-sonnet-4-7',
-    label: 'Sonnet 4.7',
-    description: 'Sonnet 4.7 · Use the default model',
+    description: 'Sonnet 5 · Use the default model',
   },
   {
     id: 'claude-haiku-4-5',

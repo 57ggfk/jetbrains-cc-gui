@@ -1550,11 +1550,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 のアップグレードモデル"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · デフォルトモデルを使用"
+        "description": "Sonnet 5 · デフォルトモデルを使用"
       },
       "opus5": {
         "label": "Opus 5",

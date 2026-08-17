@@ -1539,11 +1539,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Modèle amélioré de Sonnet 4.6"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · Modèle recommandé par défaut"
+        "description": "Sonnet 5 · Modèle recommandé par défaut"
       },
       "opus5": {
         "label": "Opus 5",

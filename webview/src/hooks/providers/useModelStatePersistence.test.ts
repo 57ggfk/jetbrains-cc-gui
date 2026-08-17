@@ -207,9 +207,9 @@ describe('useModelStatePersistence — retired model migration', () => {
     renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
     vi.advanceTimersByTime(200);
 
-    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-4-7');
+    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-5');
     expect(setSelectedClaudeModel).not.toHaveBeenCalledWith('claude-fable-5');
-    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-4-7']]);
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-5']]);
   });
 
   it('migrates a backend-supplied retired model via __INITIAL_TAB_MODEL__', () => {
@@ -225,8 +225,8 @@ describe('useModelStatePersistence — retired model migration', () => {
     renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
     vi.advanceTimersByTime(200);
 
-    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-4-7');
-    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-4-7']]);
+    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-5');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-5']]);
   });
 
   it('falls back to the default model (not the list head) for unrecognized saved models', () => {
