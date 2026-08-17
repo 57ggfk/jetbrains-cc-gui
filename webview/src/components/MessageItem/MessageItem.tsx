@@ -734,9 +734,8 @@ export const MessageItem = memo(function MessageItem({
       }
 
       if (grouped.type === 'agent_group') {
-        const agentToolId = grouped.agentBlock.type === 'tool_use' ? grouped.agentBlock.id : undefined;
         return (
-          <div key={`agentgroup-${agentToolId ?? grouped.startIndex}`} className="content-block">
+          <div key={`${messageKey}-agentgroup-${grouped.startIndex}`} className="content-block">
             <AgentGroupBlock
               agentBlock={grouped.agentBlock}
               followingBlocks={grouped.followingBlocks}

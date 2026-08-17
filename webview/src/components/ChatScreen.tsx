@@ -236,6 +236,11 @@ export const ChatScreen = ({
     setSearchOpen(false);
   }, [setSearchOpen]);
 
+  const handleNavigateToDependencySettings = useCallback(() => {
+    setSettingsInitialTab('dependencies');
+    setCurrentView('settings');
+  }, [setCurrentView, setSettingsInitialTab]);
+
   return (
     <>
       <div className="messages-shell">
@@ -284,10 +289,7 @@ export const ChatScreen = ({
                   onMessageNodeRef={onMessageNodeRef}
                   onCollapsedCountChange={setAnchorCollapsedCount}
                   onNavigateToProviderSettings={onNavigateToProviderSettings}
-                  onNavigateToDependencySettings={() => {
-                    setSettingsInitialTab('dependencies');
-                    setCurrentView('settings');
-                  }}
+                  onNavigateToDependencySettings={handleNavigateToDependencySettings}
                   currentProvider={currentProvider}
                   currentSessionId={currentSessionId}
                 />
