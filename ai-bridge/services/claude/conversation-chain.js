@@ -74,7 +74,8 @@ export function selectConversationChain(entries) {
   if (chain.length === 0) {
     return entries;
   }
-  return recoverOrphanedParallelToolResults(byUuid, chain);
+  const chainWithAttachments = recoverOrphanedTerminalAttachments(byUuid, chain);
+  return recoverOrphanedParallelToolResults(byUuid, chainWithAttachments);
 }
 
 /**
@@ -83,24 +84,20 @@ export function selectConversationChain(entries) {
  * chain). The newest non-sidechain leaf is the tip of the live branch;
  * leaves of rewound branches are older by timestamp.
  *
- * When every leaf is a sidechain tail (the main branch ended in a
- * subagent call), sidechain rows are excluded and leaves are recomputed
- * so the main branch still resolves instead of degrading to line order.
+ * Sidechain rows are excluded before computing leaves so their main-thread
+ * parents remain candidates even when a subagent call is the newest row.
  */
 function selectNewestLeaf(byUuid) {
-  let tip = newestNonSidechainLeaf(byUuid, byUuid);
-  if (!tip) {
-    const mainThread = new Map();
-    for (const entry of byUuid.values()) {
-      if (!entry.isSidechain) {
-        mainThread.set(entry.uuid, entry);
-      }
-    }
-    if (mainThread.size > 0 && mainThread.size < byUuid.size) {
-      tip = newestNonSidechainLeaf(byUuid, mainThread);
+  // A sidechain child hides its main-thread parent from the full graph's
+  // leaf set. Exclude sidechains before finding leaves so a dead main branch
+  // cannot win merely because the live branch ends in a sidechain row.
+  const mainThread = new Map();
+  for (const entry of byUuid.values()) {
+    if (!entry.isSidechain) {
+      mainThread.set(entry.uuid, entry);
     }
   }
-  return tip;
+  return newestNonSidechainLeaf(byUuid, mainThread) ?? newestNonSidechainLeaf(byUuid, byUuid);
 }
 
 function newestNonSidechainLeaf(byUuid, graph) {
@@ -161,6 +158,37 @@ function walkParentChain(byUuid, tip) {
   }
   chain.reverse();
   return chain;
+}
+
+/**
+ * Recover terminal attachment rows that parent directly to the selected
+ * message. They are leaves in the JSONL graph, but their payload still
+ * belongs to the live turn and must reach the session-history transformer.
+ */
+function recoverOrphanedTerminalAttachments(byUuid, chain) {
+  const tip = chain[chain.length - 1];
+  if (!tip) {
+    return chain;
+  }
+
+  const onChain = new Set(chain.map((entry) => entry.uuid));
+  const attachments = [];
+  for (const entry of byUuid.values()) {
+    if (
+      entry.type === 'attachment' &&
+      !entry.isSidechain &&
+      !onChain.has(entry.uuid) &&
+      entry.parentUuid === tip.uuid
+    ) {
+      attachments.push(entry);
+    }
+  }
+  if (attachments.length === 0) {
+    return chain;
+  }
+
+  byTimestamp(attachments);
+  return [...chain, ...attachments];
 }
 
 /**

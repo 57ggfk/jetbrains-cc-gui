@@ -205,6 +205,34 @@ test('ignores sidechain leaves when picking the chain tip', () => {
   assert.deepEqual(chainTexts(chain), ['main', 'main answer']);
 });
 
+test('prefers the live main branch when it ends with a sidechain entry', () => {
+  const firstQuestion = userEntry(null, 'first question', '2026-01-01T10:00:00Z');
+  const firstAnswer = assistantEntry(firstQuestion.uuid, 'first answer', '2026-01-01T10:00:01Z', 'm1');
+  const deadQuestion = userEntry(firstAnswer.uuid, 'dead question', '2026-01-01T10:00:02Z');
+  const deadAnswer = assistantEntry(deadQuestion.uuid, 'dead answer', '2026-01-01T10:00:03Z', 'm-dead');
+  const liveQuestion = userEntry(firstAnswer.uuid, 'live question', '2026-01-01T10:00:04Z');
+  const liveAnswer = assistantEntry(liveQuestion.uuid, 'live answer', '2026-01-01T10:00:05Z', 'm-live');
+  const sidechainAnswer = {
+    type: 'assistant',
+    uuid: uuid('a'),
+    parentUuid: liveAnswer.uuid,
+    isSidechain: true,
+    timestamp: '2026-01-01T10:00:06Z',
+    message: { id: 'm-side', role: 'assistant', content: [{ type: 'text', text: 'sidechain answer' }] },
+  };
+
+  const chain = selectConversationChain([
+    firstQuestion,
+    firstAnswer,
+    deadQuestion,
+    deadAnswer,
+    liveQuestion,
+    liveAnswer,
+    sidechainAnswer,
+  ]);
+  assert.deepEqual(chainTexts(chain), ['first question', 'first answer', 'live question', 'live answer']);
+});
+
 test('stops walking at a parentUuid cycle instead of looping forever', () => {
   const question = userEntry(null, 'first', '2026-01-01T10:00:00Z');
   const answer = assistantEntry(question.uuid, 'answer', '2026-01-01T10:00:05Z', 'm1');

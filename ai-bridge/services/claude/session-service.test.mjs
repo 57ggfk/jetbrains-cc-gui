@@ -55,6 +55,41 @@ test('buildSessionMessagesPayload rewrites a queued_command attachment carrier i
   }
 });
 
+test('buildSessionMessagesPayload keeps a parent-linked queued command attachment on the effective chain', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-claude-session-'));
+  try {
+    const file = path.join(tempDir, 'session.jsonl');
+    const xml = '<task-notification>do the thing</task-notification>';
+    fs.writeFileSync(file, [
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u1',
+        timestamp: '2026-01-01T10:00:00Z',
+        message: { role: 'user', content: 'start' },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'a1',
+        parentUuid: 'u1',
+        timestamp: '2026-01-01T10:00:01Z',
+        message: { role: 'assistant', content: 'working' },
+      }),
+      JSON.stringify({
+        type: 'attachment',
+        uuid: 'attachment-1',
+        parentUuid: 'a1',
+        timestamp: '2026-01-01T10:00:02Z',
+        attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: xml },
+      }),
+    ].join('\n') + '\n');
+
+    const { messages } = buildSessionMessagesPayload(file);
+    assert.deepEqual(messages.map((message) => message.message.content), ['start', 'working', xml]);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('buildSessionMessagesPayload leaves a non-task-notification queued_command attachment untouched', () => {
   // An enqueued user prompt is also a queued_command attachment but not a
   // task-notification carrier; it must not be rewritten into a user message.

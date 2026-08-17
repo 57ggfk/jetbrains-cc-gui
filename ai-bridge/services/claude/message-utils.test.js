@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractResultError } from './message-utils.js';
+import { extractResultError, isRetryableError } from './message-utils.js';
 
 // Regression guard for the "API request failed" masking bug: the Claude Agent
 // SDK reports the real error text in the `errors` array (or in `result` when
@@ -49,4 +49,18 @@ test('extractResultError: falls back to the generic text for an empty message', 
   assert.equal(extractResultError({ type: 'result', is_error: true }), 'API request failed');
   assert.equal(extractResultError(null), 'API request failed');
   assert.equal(extractResultError(undefined), 'API request failed');
+});
+
+test('isRetryableError recognizes retryable SDK errors after detailed extraction', () => {
+  const rateLimitError = new Error(extractResultError({
+    subtype: 'error_during_execution',
+    errors: ['rate_limit_error: 429 Too Many Requests'],
+  }));
+  const overloadedError = new Error(extractResultError({
+    subtype: 'error_during_execution',
+    errors: ['overloaded_error: service temporarily unavailable'],
+  }));
+
+  assert.equal(isRetryableError(rateLimitError), true);
+  assert.equal(isRetryableError(overloadedError), true);
 });

@@ -63,6 +63,7 @@ export const AUTO_RETRY_CONFIG = {
  */
 export function isRetryableError(error) {
   const msg = error?.message || String(error);
+  const normalizedMessage = msg.toLowerCase();
   const retryablePatterns = [
     'API request failed',
     'ECONNRESET',
@@ -75,9 +76,19 @@ export function isRetryableError(error) {
     'getaddrinfo',
     'connect EHOSTUNREACH',
     'No conversation found with session ID',
-    'conversation not found'
+    'conversation not found',
+    'rate_limit_error',
+    'rate limit',
+    'overloaded_error',
+    'temporarily unavailable'
   ];
-  return retryablePatterns.some(pattern => msg.toLowerCase().includes(pattern.toLowerCase()));
+  if (retryablePatterns.some(pattern => normalizedMessage.includes(pattern.toLowerCase()))) {
+    return true;
+  }
+
+  // Claude SDK errors may expose transient HTTP status codes without the
+  // generic "API request failed" prefix that the retry policy used before.
+  return /\b(?:429|500|502|503|504|529)\b/.test(msg);
 }
 
 export function isNoConversationFoundError(error) {
