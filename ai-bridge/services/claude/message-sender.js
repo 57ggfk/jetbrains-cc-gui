@@ -75,7 +75,7 @@ function buildQueryOptions({ workingDirectory, permissionMode, sdkModelName, max
     cwd: workingDirectory,
     permissionMode,
     model: sdkModelName,
-    maxTurns: 100,
+    maxTurns: 1000,
     enableFileCheckpointing: true,
     env: buildCliEnv(),
     settings: buildWebviewControlledSettingsOverride(modelId),
