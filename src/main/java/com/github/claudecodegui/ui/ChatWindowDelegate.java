@@ -440,7 +440,7 @@ public class ChatWindowDelegate {
             String mode = session != null ? session.getPermissionMode() : "default";
             com.github.claudecodegui.notifications.ClaudeNotifier.setMode(project, mode);
 
-            String model = session != null ? session.getModel() : "claude-sonnet-4-7";
+            String model = session != null ? session.getModel() : "claude-sonnet-5";
             com.github.claudecodegui.notifications.ClaudeNotifier.setModel(project, model);
 
             try {

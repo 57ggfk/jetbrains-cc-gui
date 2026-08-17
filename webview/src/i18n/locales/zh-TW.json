@@ -1544,11 +1544,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 升級模型"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · 預設推薦模型"
+        "description": "Sonnet 5 · 預設推薦模型"
       },
       "opus5": {
         "label": "Opus 5",

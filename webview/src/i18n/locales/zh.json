@@ -1920,11 +1920,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 升级模型"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · 默认推荐模型"
+        "description": "Sonnet 5 · 默认推荐模型"
       },
       "opus5": {
         "label": "Opus 5",

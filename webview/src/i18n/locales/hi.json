@@ -1538,11 +1538,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 का अपग्रेड मॉडल"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · डिफ़ॉल्ट अनुशंसित मॉडल"
+        "description": "Sonnet 5 · डिफ़ॉल्ट अनुशंसित मॉडल"
       },
       "opus5": {
         "label": "Opus 5",
