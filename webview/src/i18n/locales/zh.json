@@ -1735,8 +1735,11 @@
     "keepAllConfirmMessage": "将当前改动作为新基准，后续改动从零开始记录。",
     "discardAllSuccess": "已撤销所有文件更改",
     "discardAllFailed": "撤销失败: {{error}}",
-    "keepAllSuccess": "已保存全部，改动记录已重置"
+    "keepAllSuccess": "已保存全部，改动记录已重置",
+    "multiAgentBadge": "多 Agent",
+    "multiAgentEdited": "本会话有 {{count}} 个 Agent 修改过此文件，请留意合并冲突"
   },
+
   "skills": {
     "title": "Skills",
     "all": "全部",

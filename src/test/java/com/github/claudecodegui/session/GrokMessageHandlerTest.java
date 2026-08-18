@@ -222,4 +222,88 @@ public class GrokMessageHandlerTest {
         int lastUsed = callback.usageUpdates.get(callback.usageUpdates.size() - 1)[0];
         assertEquals(17571, lastUsed);
     }
+
+    /**
+     * REGRESSION: Grok finishSuccess flushes tool_use mid-turn, then emits a final
+     * [MESSAGE] with only thinking/text. That final snapshot must not replace raw
+     * and erase tool_use — otherwise StatusPanel "编辑 +N -M" is empty until the
+     * session is reloaded from history.
+     */
+    @Test
+    public void finalTextMessageDoesNotWipeMidTurnToolUse() {
+        SessionState state = new SessionState();
+        state.addMessage(new Message(Message.Type.USER, "create timestamp file"));
+
+        GrokMessageHandler handler = newHandler(state);
+        handler.onMessage("stream_start", "");
+
+        // Ledger flush: Write tool_use (as GrokEventNormalizer.#emitToolUse)
+        handler.onMessage(
+                "message",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{"
+                        + "\"type\":\"tool_use\",\"id\":\"fs-write-1\",\"name\":\"Write\","
+                        + "\"input\":{\"path\":\"/proj/20260815,172939\",\"file_path\":\"/proj/20260815,172939\","
+                        + "\"content\":\"123\",\"new_string\":\"123\"}}]}}"
+        );
+        handler.onMessage(
+                "tool_result",
+                "{\"type\":\"tool_result\",\"tool_use_id\":\"fs-write-1\",\"content\":\"ok\",\"is_error\":false}"
+        );
+        // block_reset after tool (normalizer emits this after tool_use)
+        handler.onMessage("block_reset", "");
+
+        // finishSuccess final MESSAGE: thinking + text only (no tool_use)
+        handler.onMessage(
+                "message",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":["
+                        + "{\"type\":\"thinking\",\"thinking\":\"create file with timestamp name\"},"
+                        + "{\"type\":\"text\",\"text\":\"已创建文件: 20260815, 172939\"}"
+                        + "]}}"
+        );
+        handler.onMessage("stream_end", "");
+
+        Message assistant = null;
+        for (Message m : state.getMessages()) {
+            if (m.type == Message.Type.ASSISTANT) {
+                assistant = m;
+                break;
+            }
+        }
+        assertTrue("stream-owned assistant must exist", assistant != null);
+        assertTrue(assistant.raw != null && assistant.raw.has("message"));
+
+        com.google.gson.JsonArray content = assistant.raw
+                .getAsJsonObject("message")
+                .getAsJsonArray("content");
+
+        boolean hasToolUse = false;
+        boolean hasText = false;
+        boolean hasThinking = false;
+        for (int i = 0; i < content.size(); i++) {
+            com.google.gson.JsonObject block = content.get(i).getAsJsonObject();
+            String type = block.has("type") ? block.get("type").getAsString() : "";
+            if ("tool_use".equals(type) && "fs-write-1".equals(block.get("id").getAsString())) {
+                hasToolUse = true;
+            }
+            if ("text".equals(type)) {
+                hasText = true;
+            }
+            if ("thinking".equals(type)) {
+                hasThinking = true;
+            }
+        }
+        assertTrue("tool_use must survive final text/thinking MESSAGE for StatusPanel edits", hasToolUse);
+        assertTrue("final text must still be present", hasText);
+        assertTrue("final thinking must still be present", hasThinking);
+
+        // tool_result user message must also remain (useFileChanges needs both)
+        boolean hasToolResult = false;
+        for (Message m : state.getMessages()) {
+            if (m.type == Message.Type.USER && "[tool_result]".equals(m.content)) {
+                hasToolResult = true;
+                break;
+            }
+        }
+        assertTrue("tool_result user message must remain", hasToolResult);
+    }
 }

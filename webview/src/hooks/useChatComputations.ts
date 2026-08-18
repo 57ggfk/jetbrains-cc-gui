@@ -162,6 +162,7 @@ export function useChatComputations({
     startFromIndex: fileChangeMgmt.baseMessageIndex,
     // Sidechain Edit/Write from Agent/Task tools must appear in the Edits tab too
     subagentHistories,
+    currentSessionId,
   });
 
   const filteredFileChanges = useMemo(() => {

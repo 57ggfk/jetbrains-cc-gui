@@ -1533,7 +1533,9 @@
     "keepAllConfirmMessage": "Aceitar as alterações atuais como base. Alterações futuras serão rastreadas a partir do zero.",
     "discardAllSuccess": "Todas as alterações descartadas",
     "discardAllFailed": "Falha ao descartar: {{error}}",
-    "keepAllSuccess": "Todas as alterações mantidas, rastreamento redefinido"
+    "keepAllSuccess": "Todas as alterações mantidas, rastreamento redefinido",
+    "multiAgentBadge": "Multi-agente",
+    "multiAgentEdited": "{{count}} agentes editaram este arquivo nesta sessão — revise com cuidado"
   },
   "skills": {
     "title": "Skills",
