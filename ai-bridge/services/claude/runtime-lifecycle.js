@@ -590,6 +590,21 @@ export async function acquireRuntime(requestContext, callbacks) {
 
   let runtime = findRuntimeForRequest(requestContext);
 
+  // Never reuse a runtime that is closed but somehow still registered. If it
+  // reached acquireRuntime, executeTurn would immediately throw "Runtime is
+  // closed", and the prior abort left abortRequested=true on it, so sendInternal
+  // would swallow that failure as a graceful "User interrupted" — silently
+  // eating the message the user just sent. Evict it from the registry and treat
+  // it as absent so a fresh runtime is created instead. (disposeRuntime removes
+  // the runtime from the registry synchronously, so this branch is a defensive
+  // invariant, not a common path.)
+  if (runtime && runtime.closed) {
+    console.log('[LIFECYCLE] discardClosedRuntime sessionId=' + (runtime.sessionId || '(new)')
+      + ' epoch=' + (runtime.runtimeSessionEpoch || '(none)'));
+    removeRuntime(runtime, callbacks?.removeSession);
+    runtime = null;
+  }
+
   if (runtime && runtime.runtimeSignature !== requestContext.runtimeSignature) {
     await disposeRuntime(runtime, callbacks);
     runtime = null;

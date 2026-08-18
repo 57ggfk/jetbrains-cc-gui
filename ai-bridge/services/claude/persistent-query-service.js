@@ -23,6 +23,7 @@ import { buildQuickFixPrompt } from '../quickfix-prompts.js';
 import { registerActiveQueryResult, removeSession } from './message-service.js';
 import { normalizePermissionMode } from './permission-mode.js';
 import { redactSecrets, truncateString } from './message-output-filter.js';
+import { extractResultError } from './message-utils.js';
 import {
   beginRuntimeTurn,
   cleanupStaleAnonymousRuntimes,
@@ -130,7 +131,7 @@ function buildQueryOptions(workingDirectory, sdkModelName, permissionMode, maxTh
     cwd: workingDirectory,
     permissionMode,
     model: sdkModelName,
-    maxTurns: 100,
+    maxTurns: 1000,
     enableFileCheckpointing: true,
     env: buildCliEnv(),
     settings: buildWebviewControlledSettingsOverride(modelId),
@@ -270,6 +271,12 @@ _sessionCleanupTimer.unref();
 
   try {
     beginRuntimeTurn(runtime);
+    // Scope the abort flag to the turn that aborted: it is set by
+    // abortCurrentTurn and must not carry into a fresh turn started right
+    // after an interrupt, or sendInternal would misclassify the new turn's
+    // failures (e.g. "Runtime is closed" on a disposed runtime) as a graceful
+    // "User interrupted" and silently swallow the user's message.
+    runtime.abortRequested = false;
 
     // Wait until the perpetual reader has drained the SDK pipe and parked with
     // no CLI run in flight BEFORE opening the sink or sending the user message.
@@ -389,7 +396,10 @@ _sessionCleanupTimer.unref();
 
       if (msg?.type === 'result') {
         if (msg.is_error) {
-          throw new Error(msg.result || msg.message || 'API request failed');
+          // The SDK puts the real error text in msg.errors (array), not in
+          // result/message — extractResultError covers all three so the true
+          // failure reaches the UI instead of a generic fallback.
+          throw new Error(extractResultError(msg));
         }
         // Defense in depth for the boundary the quiescence gate cannot close: a
         // foreign run whose closing SUCCESS result is read only AFTER this sink
