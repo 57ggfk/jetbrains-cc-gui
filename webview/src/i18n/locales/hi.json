@@ -1026,6 +1026,7 @@
   },
   "config": {
     "clickToCopy": "कॉपी करने के लिए क्लिक करें",
+    "officialDocs": "आधिकारिक दस्तावेज़",
     "switch": "स्विच",
     "switchProvider": "प्रदाता स्विच करें",
     "runtimeProvider": {

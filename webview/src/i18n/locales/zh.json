@@ -1360,6 +1360,7 @@
   },
   "config": {
     "clickToCopy": "点击复制",
+    "officialDocs": "官方文档",
     "switch": "切换",
     "switchProvider": "切换供应商",
     "runtimeProvider": {

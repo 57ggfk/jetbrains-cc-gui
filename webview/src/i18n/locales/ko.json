@@ -1120,6 +1120,7 @@
   },
   "config": {
     "clickToCopy": "클릭하여 복사",
+    "officialDocs": "공식 문서",
     "switch": "전환",
     "switchProvider": "제공자 전환",
     "runtimeProvider": {

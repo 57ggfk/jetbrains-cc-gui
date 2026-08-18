@@ -1053,6 +1053,7 @@
   },
   "config": {
     "clickToCopy": "Нажмите для копирования",
+    "officialDocs": "Официальная документация",
     "switch": "Переключить",
     "switchProvider": "Переключить провайдер",
     "runtimeProvider": {

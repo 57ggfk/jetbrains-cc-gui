@@ -1026,6 +1026,7 @@
   },
   "config": {
     "clickToCopy": "Haz clic para copiar",
+    "officialDocs": "Documentación oficial",
     "switch": "Cambiar",
     "switchProvider": "Cambiar proveedor",
     "runtimeProvider": {

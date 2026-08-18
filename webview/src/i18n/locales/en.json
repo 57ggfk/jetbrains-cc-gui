@@ -1355,6 +1355,7 @@
   },
   "config": {
     "clickToCopy": "Click to copy",
+    "officialDocs": "Official Docs",
     "switch": "Switch",
     "switchProvider": "Switch provider",
     "runtimeProvider": {

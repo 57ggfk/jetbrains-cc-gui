@@ -1174,6 +1174,7 @@
   },
   "config": {
     "clickToCopy": "Clique para copiar",
+    "officialDocs": "Documentação oficial",
     "switch": "Alternar",
     "switchProvider": "Alternar provedor",
     "runtimeProvider": {

@@ -1031,6 +1031,7 @@
   },
   "config": {
     "clickToCopy": "クリックしてコピー",
+    "officialDocs": "公式ドキュメント",
     "switch": "切り替え",
     "switchProvider": "プロバイダーを切り替え",
     "runtimeProvider": {

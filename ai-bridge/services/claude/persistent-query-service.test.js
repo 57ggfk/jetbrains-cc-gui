@@ -338,6 +338,12 @@ test('executeTurn resets abortRequested at the start of a new turn', async () =>
     userMessage: { type: 'user', message: { role: 'user', content: 'hi' } },
   });
 
+  // executeTurn awaits waitForReaderQuiescent before creating the turnSink,
+  // so the sink is only registered after at least one macrotask — poll for it.
+  while (!runtime.turnSink) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
   // Simulate the CLI closing the stream out from under the turn.
   runtime.turnSink.fail(new Error('stream ended'));
   runtime.closed = true;
