@@ -579,6 +579,10 @@
         "pi": {
           "name": "PI CLI",
           "description": "Minimal terminal coding agent with multi-provider model support"
+        },
+        "dsh": {
+          "name": "DeepSeek Harness",
+          "description": "DeepSeek terminal agent harness (persistent dsh web host)"
         }
       },
       "installDialog": {
@@ -596,7 +600,23 @@
       "listTitle": "Local CLI tools",
       "summary": "{{installed}} / {{total}} installed",
       "moreComingSoon": "More coming soon",
-      "copyPath": "Copy path"
+      "copyPath": "Copy path",
+      "dsh": {
+        "cardTitle": "DeepSeek Harness (DSH)",
+        "hint": "One persistent local dsh web host serves all sessions; the plugin adopts a running host instead of spawning a second one.",
+        "state": {
+          "checking": "Checking…",
+          "notInstalled": "Not installed",
+          "notRunning": "Not running",
+          "connected": "Connected"
+        },
+        "adopted": "adopted",
+        "adoptedHint": "Adopted an already-running host; it is never stopped by the plugin.",
+        "openWebUi": "Open DSH Web UI",
+        "startHost": "Start host",
+        "stopHost": "Stop host (plugin-spawned only)",
+        "autoStart": "Auto-start when needed"
+      }
     },
     "pluginModels": {
       "title": "Custom Models",
@@ -1735,7 +1755,6 @@
     "multiAgentBadge": "Multi-agent",
     "multiAgentEdited": "{{count}} agents edited this file in this session — review carefully"
   },
-
   "skills": {
     "title": "Skills",
     "all": "All",
@@ -2041,6 +2060,9 @@
       "badge": "Beta",
       "title": "Beta Feature",
       "message": "This feature is still in Beta. If you encounter any bugs, please report them to the author promptly."
+    },
+    "dsh": {
+      "label": "DeepSeek Harness"
     }
   },
   "promptEnhancer": {

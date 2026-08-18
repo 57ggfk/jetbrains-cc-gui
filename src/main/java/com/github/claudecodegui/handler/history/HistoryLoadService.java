@@ -8,6 +8,7 @@ import com.github.claudecodegui.cache.SessionIndexCache;
 import com.github.claudecodegui.cache.SessionIndexManager;
 import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
+import com.github.claudecodegui.provider.dsh.DshHistoryReader;
 import com.github.claudecodegui.provider.grok.GrokHistoryReader;
 import com.github.claudecodegui.provider.kimi.KimiHistoryReader;
 import com.github.claudecodegui.provider.opencode.OpenCodeHistoryReader;
@@ -82,6 +83,11 @@ class HistoryLoadService {
                     OpenCodeHistoryReader openCodeReader = new OpenCodeHistoryReader();
                     historyJson = openCodeReader.getSessionsForProjectAsJson(projectPath);
                     LOG.info("[HistoryHandler] OpenCodeHistoryReader 返回的 JSON 长度: " + historyJson.length());
+                } else if ("dsh".equals(provider)) {
+                    LOG.info("[HistoryHandler] 使用 DshHistoryReader 读取 DSH 会话 (项目: " + projectPath + ")");
+                    DshHistoryReader dshReader = new DshHistoryReader();
+                    historyJson = dshReader.getSessionsForProjectAsJson(projectPath);
+                    LOG.info("[HistoryHandler] DshHistoryReader 返回的 JSON 长度: " + historyJson.length());
                 } else if ("kimi".equals(provider)) {
                     LOG.info("[HistoryHandler] 使用 KimiHistoryReader 读取 Kimi 会话 (项目: " + projectPath + ")");
                     KimiHistoryReader kimiReader = new KimiHistoryReader();

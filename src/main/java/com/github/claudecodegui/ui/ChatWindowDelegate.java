@@ -10,6 +10,7 @@ import com.github.claudecodegui.handler.CodexMcpServerHandler;
 import com.github.claudecodegui.handler.CodexPetHandler;
 import com.github.claudecodegui.handler.CliModelsHandler;
 import com.github.claudecodegui.handler.CliStatusHandler;
+import com.github.claudecodegui.handler.DshHostHandler;
 import com.github.claudecodegui.handler.DependencyHandler;
 import com.github.claudecodegui.handler.DiffHandler;
 import com.github.claudecodegui.handler.core.HandlerContext;
@@ -360,6 +361,7 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(new DependencyHandler(handlerContext));
         messageDispatcher.registerHandler(new CliModelsHandler(handlerContext));
         messageDispatcher.registerHandler(new CliStatusHandler(handlerContext));
+        messageDispatcher.registerHandler(new DshHostHandler(handlerContext));
         messageDispatcher.registerHandler(new ClipboardHandler(handlerContext));
         messageDispatcher.registerHandler(new NodeProcessHandler(handlerContext));
 

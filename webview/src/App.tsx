@@ -165,7 +165,7 @@ const App = () => {
     setClaudePermissionMode, setCodexPermissionMode,
     setSelectedClaudeModel, setSelectedCodexModel,
     setSelectedGrokModel, setSelectedKimiModel,
-    setSelectedOpenCodeModel, setSelectedPiModel,
+    setSelectedOpenCodeModel, setSelectedPiModel, setSelectedDshModel,
     setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled, setStreamingEnabledSetting,
@@ -332,6 +332,9 @@ const App = () => {
           sendBridgeEvent('set_model', model);
         } else if (provider === 'pi') {
           setSelectedPiModel(model);
+          sendBridgeEvent('set_model', model);
+        } else if (provider === 'dsh') {
+          setSelectedDshModel(model);
           sendBridgeEvent('set_model', model);
         } else {
           // claude (or unrecognized): apply the claude model directly —

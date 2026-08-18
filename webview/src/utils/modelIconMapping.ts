@@ -117,6 +117,8 @@ const PROVIDER_TO_VENDOR: Record<string, ModelVendor> = {
   'opencode-go': 'opencode',
   // Runtime CLI provider id (ProviderSelect, BlinkingLogo, CliSection)
   pi: 'pi',
+  // DeepSeek Harness — brand follows DeepSeek.
+  dsh: 'deepseek',
   openrouter: 'openrouter',
 };
 

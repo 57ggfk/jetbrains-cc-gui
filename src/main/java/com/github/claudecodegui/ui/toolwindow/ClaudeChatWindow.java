@@ -9,6 +9,7 @@ import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import com.github.claudecodegui.provider.dsh.DshCliBridge;
 import com.github.claudecodegui.provider.grok.GrokCliBridge;
 import com.github.claudecodegui.provider.kimi.KimiCliBridge;
 import com.github.claudecodegui.provider.opencode.OpenCodeCliBridge;
@@ -221,7 +222,8 @@ public class ClaudeChatWindow {
         this.openCodeCliBridge = new OpenCodeCliBridge();
         this.piCliBridge = new PiCliBridge();
         this.cliBridges = SessionProviderRouter.registerCliBridges(
-                this.grokCliBridge, this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge);
+                this.grokCliBridge, this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge,
+                new DshCliBridge());
         this.settingsService = new CodemossSettingsService();
         this.htmlLoader = new HtmlLoader(getClass());
         this.mainPanel = new JPanel(new BorderLayout());

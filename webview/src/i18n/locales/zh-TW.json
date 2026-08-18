@@ -862,6 +862,10 @@
         "pi": {
           "name": "PI CLI",
           "description": "極簡終端編碼代理，支援多提供商模型"
+        },
+        "dsh": {
+          "name": "DeepSeek Harness",
+          "description": "DeepSeek 終端智慧體宿主（常駐 dsh web）"
         }
       },
       "installDialog": {
@@ -879,7 +883,23 @@
       "listTitle": "本機 CLI 工具",
       "summary": "{{installed}} / {{total}} 已安裝",
       "moreComingSoon": "即將支援更多",
-      "copyPath": "複製路徑"
+      "copyPath": "複製路徑",
+      "dsh": {
+        "cardTitle": "DeepSeek Harness (DSH)",
+        "hint": "DSH 由本機一個常駐 dsh web 宿主承載所有工作階段；外掛會接管已在執行的宿主，而不會重複啟動。",
+        "state": {
+          "checking": "檢測中…",
+          "notInstalled": "未安裝",
+          "notRunning": "未執行",
+          "connected": "已連線"
+        },
+        "adopted": "已接管",
+        "adoptedHint": "已接管正在執行的宿主；外掛不會停止它。",
+        "openWebUi": "開啟 DSH Web UI",
+        "startHost": "立即啟動",
+        "stopHost": "關閉（僅限外掛啟動的宿主）",
+        "autoStart": "需要時自動啟動"
+      }
     }
   },
   "history": {
@@ -1669,6 +1689,9 @@
       "badge": "Beta",
       "title": "Beta 功能",
       "message": "此功能仍處於 Beta 階段。如果遇到使用 Bug，請及時回饋給作者。"
+    },
+    "dsh": {
+      "label": "DeepSeek Harness"
     }
   },
   "promptEnhancer": {

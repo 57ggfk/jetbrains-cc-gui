@@ -1161,4 +1161,37 @@ interface Window {
           defaultModel?: string;
         }
   ) => void;
+
+  /**
+   * DSH host lifecycle status. Java pushes JSON after
+   * `get_dsh_status` / `start_dsh_host` / `stop_dsh_host` /
+   * `save_dsh_settings:<json>` via channel-manager `dsh status|ensureHost|stopHost`.
+   */
+  updateDshStatus?: (
+    dataOrStr:
+      | string
+      | {
+          success?: boolean;
+          provider?: string;
+          installed?: boolean;
+          version?: string;
+          bin?: string;
+          origin?: string;
+          hostRunning?: boolean;
+          ownership?: 'spawned' | 'adopted';
+          error?: string;
+          describe?: {
+            version?: string;
+            provider?: string;
+            model?: string;
+            attachedSessions?: number;
+          };
+          settings?: {
+            bin?: string;
+            host?: string;
+            port?: number;
+            autoStart?: boolean;
+          };
+        }
+  ) => void;
 }

@@ -55,7 +55,8 @@ export function resolveProviderModels({
     return cliModels.length > 0 ? cliModels : GROK_MODELS;
   }
 
-  if (provider === 'kimi' || provider === 'opencode' || provider === 'pi') {
+  if (provider === 'kimi' || provider === 'opencode' || provider === 'pi' || provider === 'dsh') {
+    // Runtime catalog from the CLI/host (static fallback list when offline).
     return cliModels;
   }
 

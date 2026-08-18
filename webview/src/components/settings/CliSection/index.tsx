@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
 import { copyToClipboard } from '../../../utils/copyUtils';
+import { openBrowser } from '../../../utils/bridge';
+import DshConnectionCard from './DshConnectionCard';
 import {
   CLI_TOOL_DEFINITIONS,
   type CliStatusMap,
@@ -249,7 +251,7 @@ const CliSection = ({ addToast }: CliSectionProps) => {
   }, []);
 
   const openDocs = useCallback((url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    openBrowser(url);
   }, []);
 
   const { installedCount, totalCount, hasStatus } = useMemo(() => {
@@ -297,6 +299,8 @@ const CliSection = ({ addToast }: CliSectionProps) => {
         </div>
         <p className={styles.headerHint}>{t('settings.cli.hint')}</p>
       </div>
+
+      <DshConnectionCard />
 
       <div className={styles.cliList}>
         {loading && Object.keys(statusMap).length === 0 ? (

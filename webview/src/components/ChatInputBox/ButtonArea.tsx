@@ -156,7 +156,7 @@ export const ButtonArea = ({
   useEffect(() => {
     const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
       || currentProvider === 'pi' || currentProvider === 'codex'
-      || currentProvider === 'grok';
+      || currentProvider === 'grok' || currentProvider === 'dsh';
     if (!isDynamicProvider) return;
     // Only correct once a *real* catalog arrived. Static fallback lists
     // (OPENCODE_MODELS = just "opencode-default", CODEX built-ins, …) must not

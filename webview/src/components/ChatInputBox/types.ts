@@ -473,6 +473,21 @@ export const PI_MODELS: ModelInfo[] = [
 ];
 
 /**
+ * DSH default: skip `session.selectModel` so the host serves whatever the DSH
+ * Web UI configured. The runtime catalog (`provider/model` ids) is fetched
+ * from the host via `llm.models` — this static entry is the offline fallback.
+ */
+export const DSH_DEFAULT_MODEL_ID = 'auto';
+
+export const DSH_MODELS: ModelInfo[] = [
+  {
+    id: DSH_DEFAULT_MODEL_ID,
+    label: 'DSH Auto',
+    description: 'Use the model configured in the DSH Web UI',
+  },
+];
+
+/**
  * Available models (backward compatibility)
  */
 export const AVAILABLE_MODELS = CLAUDE_MODELS;
@@ -499,6 +514,7 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'kimi', label: 'Kimi CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'dsh', label: 'DeepSeek Harness', icon: 'codicon-terminal', enabled: true, beta: true },
 ];
 
 /**

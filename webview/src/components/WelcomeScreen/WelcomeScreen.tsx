@@ -39,6 +39,7 @@ export const WelcomeScreen = memo(function WelcomeScreen({
     kimi: t('providers.kimi.label'),
     opencode: t('providers.opencode.label'),
     pi: t('providers.pi.label'),
+    dsh: t('providers.dsh.label'),
   };
 
   return (
