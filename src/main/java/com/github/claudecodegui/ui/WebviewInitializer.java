@@ -1019,12 +1019,20 @@ public class WebviewInitializer {
     private void disableOutOfProcessJcefAndShowRestartPanel() {
         if (!JBCefBrowserFactory.disableOutOfProcessJcefInRegistry()) {
             LOG.warn("Could not disable out-of-process JCEF in the IDE registry");
+            // The button must not appear to do nothing: show the manual
+            // VM-option fallback so the user can still apply the workaround.
+            JPanel failedPanel = ErrorPanelBuilder.buildCenteredPanel(
+                    "⚠️",
+                    ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteActionFailedTitle"),
+                    ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteActionFailed")
+            );
+            replaceMainContent(failedPanel);
             return;
         }
         JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
                 "✓",
-                ClaudeCodeGuiBundle.message("toolwindow.jcefRestartRequired"),
-                ClaudeCodeGuiBundle.message("toolwindow.jcefRestartRequiredSolution")
+                ClaudeCodeGuiBundle.message("toolwindow.jcefOutOfProcessDisabled"),
+                ClaudeCodeGuiBundle.message("toolwindow.jcefOutOfProcessDisabledSolution")
         );
         replaceMainContent(panel);
     }
