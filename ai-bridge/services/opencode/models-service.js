@@ -3,14 +3,15 @@
  * Output lines look like: `opencode/big-pickle`, `anthropic/claude-fable-5`
  */
 
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { readFileSync, unlinkSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import {
   commonCliBinDirs,
+  decodeCliOutput,
   enrichPathWithBinDirs,
-  isWindowsCmdShim,
+  resolveCliSpawn,
   resolveOpenCodeCliPath,
 } from '../../utils/cli-path.js';
 
@@ -83,14 +84,13 @@ export function parseOpenCodeModelsOutput(stdout) {
 export function runModelsViaTempRedirect(bin, env) {
   const tmpFile = join(tmpdir(), `cc-gui-opencode-models-${process.pid}.txt`);
   try {
-    // cmd.exe /c requires the outer quote pair when the binary path is quoted.
-    execSync(`""${bin}" models > "${tmpFile}""`, {
-      shell: 'cmd.exe',
+    const invocation = resolveCliSpawn(bin, ['models'], {
       env,
       timeout: 45_000,
-      windowsHide: true,
       stdio: ['ignore', 'ignore', 'ignore'],
+      redirectTo: tmpFile,
     });
+    spawnSync(invocation.file, invocation.args, invocation.options);
     return readFileSync(tmpFile, 'utf8');
   } catch {
     return '';
@@ -110,14 +110,13 @@ export function listModels() {
 
   let result;
   try {
-    result = spawnSync(bin, ['models'], {
-      encoding: 'utf8',
+    const invocation = resolveCliSpawn(bin, ['models'], {
       env,
       timeout: 45_000,
       maxBuffer: 8 * 1024 * 1024,
-      // Windows npm `.cmd` shims require a shell to spawn.
-      shell: isWindowsCmdShim(bin),
+      encoding: 'buffer',
     });
+    result = spawnSync(invocation.file, invocation.args, invocation.options);
   } catch (error) {
     console.log(JSON.stringify({
       success: false,
@@ -127,6 +126,9 @@ export function listModels() {
     return;
   }
 
+  const stdout = decodeCliOutput(result.stdout);
+  const stderr = decodeCliOutput(result.stderr);
+
   if (result.error) {
     const hint = result.error.code === 'ENOENT'
       ? 'OpenCode CLI not found. Install it and ensure `opencode` is on PATH (or set OPENCODE_BIN).'
@@ -135,33 +137,34 @@ export function listModels() {
     return;
   }
 
-  if (result.status !== 0) {
-    const stderr = String(result.stderr || '').trim().slice(-800);
-    console.log(JSON.stringify({
-      success: false,
-      error: `opencode models failed (code ${result.status})${stderr ? `: ${stderr}` : ''}`,
-      models: [],
-    }));
-    return;
-  }
-
-  let models = parseOpenCodeModelsOutput(result.stdout || '');
+  let models = parseOpenCodeModelsOutput(stdout);
   let source = models.length > 0 ? 'stdout' : null;
 
   // Some builds emit the list on stderr instead of stdout.
-  if (models.length === 0 && result.stderr) {
-    models = parseOpenCodeModelsOutput(result.stderr);
+  if (models.length === 0 && stderr) {
+    models = parseOpenCodeModelsOutput(stderr);
     if (models.length > 0) source = 'stderr';
   }
 
-  // Windows: piped stdout can come back empty even when the CLI works in a
-  // terminal — retry once through cmd file redirection.
+  // Windows: piped stdout can come back empty (or the first spawn can fail
+  // with a quoting error) even when the CLI works in a terminal — retry once
+  // through cmd file redirection before surfacing the failure.
   if (models.length === 0 && process.platform === 'win32') {
     const fromFile = parseOpenCodeModelsOutput(runModelsViaTempRedirect(bin, env));
     if (fromFile.length > 0) {
       models = fromFile;
-      source = 'file-redirect';
+      source = result.status === 0 ? 'file-redirect' : 'file-redirect-after-error';
     }
+  }
+
+  if (result.status !== 0 && models.length === 0) {
+    const errTail = stderr.trim().slice(-800);
+    console.log(JSON.stringify({
+      success: false,
+      error: `opencode models failed (code ${result.status})${errTail ? `: ${errTail}` : ''}`,
+      models: [],
+    }));
+    return;
   }
 
   if (models.length === 0) {
@@ -183,8 +186,8 @@ export function listModels() {
     payload.debug = {
       reason: 'no-models-parsed',
       status: result.status,
-      stdoutTail: String(result.stdout || '').slice(-500),
-      stderrTail: String(result.stderr || '').slice(-500),
+      stdoutTail: stdout.slice(-500),
+      stderrTail: stderr.slice(-500),
     };
   } else if (source && source !== 'stdout') {
     payload.debug = { modelsSource: source };

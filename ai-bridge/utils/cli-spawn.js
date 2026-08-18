@@ -5,7 +5,7 @@
 import { spawn } from 'child_process';
 import { createInterface } from 'readline';
 import { emitSendError, endStream } from './marker-protocol.js';
-import { isWindowsCmdShim } from './cli-path.js';
+import { resolveCliSpawn } from './cli-path.js';
 
 function killChildTree(child, label) {
   if (!child || child.killed) return;
@@ -88,15 +88,13 @@ export function runCliStreaming({
 
     let child;
     try {
-      child = spawn(bin, args, {
+      const invocation = resolveCliSpawn(bin, args, {
         cwd,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',
-        // Windows npm `.cmd`/`.bat` shims cannot be spawned without a shell
-        // (Node >= 18.20 / 20.12, CVE-2024-27980).
-        shell: isWindowsCmdShim(bin),
       });
+      child = spawn(invocation.file, invocation.args, invocation.options);
     } catch (error) {
       hadError = true;
       reportError(`Failed to spawn ${label} CLI (${bin}): ${error?.message || error}`);
