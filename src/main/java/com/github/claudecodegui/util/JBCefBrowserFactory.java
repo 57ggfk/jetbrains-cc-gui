@@ -36,6 +36,12 @@ public final class JBCefBrowserFactory {
     private static final Logger LOG = Logger.getInstance(JBCefBrowserFactory.class);
     private static final int CONTROL_CHAR_MAX = 0x1F;
     private static final String JCEF_ENABLED_REGISTRY_KEY = "ide.browser.jcef.enabled";
+    /**
+     * Toggles JCEF's out-of-process (remote CEF server) mode. On by default from
+     * IntelliJ 2025.2 / JCEF 144, where it triggers JBR-9234: an NPE in
+     * RemoteMessageRouterImpl when a JBCefJSQuery message router is created.
+     */
+    private static final String JCEF_OUT_OF_PROCESS_REGISTRY_KEY = "ide.browser.jcef.out-of-process.enabled";
     private static final ConcurrentMap<Class<?>, Optional<Method>> IS_CLOSED_METHODS = new ConcurrentHashMap<>();
 
     /**
@@ -390,6 +396,28 @@ public final class JBCefBrowserFactory {
             return Registry.is(JCEF_ENABLED_REGISTRY_KEY, true);
         } catch (Exception | LinkageError e) {
             LOG.warn("Failed to enable JCEF in IDE registry: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Disable the IDE registry flag that runs JCEF in out-of-process (remote CEF
+     * server) mode. That mode throws {@code NullPointerException} in
+     * {@code RemoteMessageRouterImpl} on the JCEF builds bundled with IntelliJ
+     * 2025.2+ (JCEF 144) whenever a {@code JBCefJSQuery} message router is
+     * created — <a href="https://youtrack.jetbrains.com/issue/JBR-9234">JBR-9234</a>.
+     * Flipping it off is the documented workaround; the flag is read during
+     * JBCefApp initialization, so an IDE restart is required for it to take effect.
+     *
+     * @return true when the registry value was updated successfully
+     */
+    public static boolean disableOutOfProcessJcefInRegistry() {
+        try {
+            Registry.get(JCEF_OUT_OF_PROCESS_REGISTRY_KEY).setValue(false);
+            // The key defaults to true, so a successful write must read back false.
+            return !Registry.is(JCEF_OUT_OF_PROCESS_REGISTRY_KEY, true);
+        } catch (Exception | LinkageError e) {
+            LOG.warn("Failed to disable out-of-process JCEF in IDE registry: " + e.getMessage(), e);
             return false;
         }
     }
