@@ -19,15 +19,57 @@
 
 import { pathToFileURL } from 'node:url';
 
-import { loadCodexSdk, isCodexSdkAvailable } from '../utils/sdk-loader.js';
-import { setupApiKey, loadClaudeSettings, getCliUserAgent } from '../config/api-config.js';
-import { resolveModelFromSettings } from '../utils/model-utils.js';
+import {
+  loadClaudeSdk,
+  isClaudeSdkAvailable,
+  loadCodexSdk,
+  isCodexSdkAvailable,
+} from '../utils/sdk-loader.js';
+import {
+  setupApiKey,
+  buildCliEnv,
+  buildWebviewControlledSettingsOverride,
+  loadClaudeSettings,
+  getCliUserAgent,
+} from '../config/api-config.js';
+import { mapModelIdToSdkName, resolveModelFromSettings } from '../utils/model-utils.js';
 import { getRealHomeDir } from '../utils/path-utils.js';
+import { getClaudeCliPathOverride } from '../utils/claude-cli-path.js';
 import { ensureAnthropicSdk } from './claude/message-utils.js';
 import { buildCodexCliEnvironment } from './codex/codex-utils.js';
 import { askCliProvider, isCliAskProvider } from './cli-ask.js';
 
+let claudeSdk = null;
 let codexSdk = null;
+
+/**
+ * Lazy-load and cache the Claude Agent SDK (same pattern as ensureCodexSdk).
+ */
+async function ensureClaudeSdk() {
+  if (!claudeSdk) {
+    if (!isClaudeSdkAvailable()) {
+      const error = new Error('Claude Agent SDK not installed. Please install via Settings > Dependencies.');
+      error.code = 'SDK_NOT_INSTALLED';
+      throw error;
+    }
+    claudeSdk = await loadClaudeSdk();
+  }
+  return claudeSdk;
+}
+
+/** Whether the stateless Anthropic SDK "ask" path can be used (needs a real key). */
+function canUseAnthropicAskPath(config) {
+  return Boolean(config && config.apiKey && (config.authType === 'api_key' || config.authType === 'api_key_helper' || config.authType === 'auth_token'));
+}
+
+/**
+ * Resolve which Claude generation path to use for the current auth config.
+ * Exposed for tests.
+ * @returns {'ask' | 'agent'} 'ask' = stateless Anthropic SDK, 'agent' = Agent SDK (CLI login OAuth)
+ */
+export function resolveClaudeCommitPath(config) {
+  return canUseAnthropicAskPath(config) ? 'ask' : 'agent';
+}
 
 async function ensureCodexSdk() {
   if (!codexSdk) {
@@ -64,15 +106,27 @@ function extractAppendedDelta(previousText, nextText) {
 /**
  * Claude path: direct "ask" via the Anthropic SDK messages.stream().
  * Stateless (no session persisted) + native token streaming.
+ * Falls back to the Agent SDK when the ask path is unavailable
+ * (CLI login / subscription OAuth has no raw API key) - same pattern
+ * as prompt-enhancer.js.
  */
 async function generateWithClaude(prompt, model) {
+  const config = setupApiKey();
+
+  if (canUseAnthropicAskPath(config)) {
+    return generateWithClaudeAsk(prompt, model, config);
+  }
+
+  console.log(`[CommitMessage] Anthropic ask path unavailable (auth: ${config.authType || 'unknown'}), falling back to Agent SDK`);
+  return generateWithClaudeAgent(prompt, model, config);
+}
+
+/**
+ * Fast path: Anthropic SDK messages.stream() with a real API key / auth token.
+ */
+async function generateWithClaudeAsk(prompt, model, config) {
   const anthropicModule = await ensureAnthropicSdk();
   const Anthropic = anthropicModule.default || anthropicModule.Anthropic || anthropicModule;
-
-  const config = setupApiKey();
-  if (!config.apiKey) {
-    throw new Error('No API key configured for the active Claude provider (commit "ask" needs an API key).');
-  }
 
   // Resolve the real model id from the user's model mapping (e.g. claude-sonnet-4-7 -> GLM-5.2).
   const settings = loadClaudeSettings();
@@ -125,6 +179,103 @@ async function generateWithClaude(prompt, model) {
   console.log(`[CommitMessage] Claude response text length: ${streamedText.length}`);
   if (streamedText.trim()) {
     return streamedText.trim();
+  }
+  throw new Error('Claude commit response is empty');
+}
+
+/**
+ * Fallback path: Claude Agent SDK (CLI login OAuth / apiKeyHelper / Bedrock).
+ * The Agent SDK performs the CLI's native OAuth flow, so it works without a
+ * raw API key (#1655). Mirrors enhancePromptWithClaudeAgent in prompt-enhancer.js.
+ */
+async function generateWithClaudeAgent(prompt, model, config) {
+  const sdk = await ensureClaudeSdk();
+  const { query } = sdk;
+
+  console.log(`[CommitMessage] Agent SDK path (auth: ${config.authType}, base URL: ${config.baseUrl || 'https://api.anthropic.com'})`);
+
+  const sdkModelName = mapModelIdToSdkName(model);
+  console.log(`[CommitMessage] Claude Agent model mapping: ${model} -> ${sdkModelName}`);
+
+  const workingDirectory = getRealHomeDir();
+  const fullPrompt = [
+    prompt,
+    '',
+    'Remember: output only the commit message, wrapped in <commit></commit>, with no explanation. Do not run tools.',
+  ].join('\n');
+
+  const claudeCliOverride = getClaudeCliPathOverride();
+  const options = {
+    cwd: workingDirectory,
+    // Commit message generation only summarizes a diff - it must never execute
+    // tools. Deny-all canUseTool, and do NOT load project/local settings (whose
+    // permissions.allow could otherwise auto-approve a prompt-injected tool call).
+    permissionMode: 'default',
+    model: sdkModelName,
+    maxTurns: 1,
+    env: buildCliEnv(),
+    settings: buildWebviewControlledSettingsOverride(model),
+    settingSources: ['user'],
+    canUseTool: async () => ({ behavior: 'deny', message: 'Commit message generation does not execute tools' }),
+    includePartialMessages: true,
+    ...(claudeCliOverride && { pathToClaudeCodeExecutable: claudeCliOverride }),
+  };
+
+  console.log('[CommitMessage] Calling Claude Agent SDK...');
+
+  const result = query({
+    prompt: fullPrompt,
+    options,
+  });
+
+  let responseText = '';
+  let hasStreamDeltas = false;
+  let messageCount = 0;
+
+  for await (const msg of result) {
+    messageCount += 1;
+    console.log(`[CommitMessage] Claude Agent message #${messageCount}, type: ${msg.type}`);
+
+    if (msg.type === 'stream_event') {
+      const event = msg.event;
+      if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+        hasStreamDeltas = true;
+        emitContentDelta(event.delta.text);
+        responseText += event.delta.text;
+      }
+      continue;
+    }
+
+    if (msg.type === 'assistant' && !hasStreamDeltas) {
+      const content = msg.message?.content;
+      let snapshot = '';
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text' && block.text) {
+            snapshot += block.text;
+          }
+        }
+      } else if (typeof content === 'string') {
+        snapshot = content;
+      }
+      if (!snapshot) continue;
+
+      if (!responseText) {
+        emitContentDelta(snapshot);
+        responseText = snapshot;
+      } else if (snapshot.startsWith(responseText)) {
+        const delta = snapshot.slice(responseText.length);
+        if (delta) {
+          emitContentDelta(delta);
+          responseText = snapshot;
+        }
+      }
+    }
+  }
+
+  console.log(`[CommitMessage] Claude Agent response length: ${responseText.length}`);
+  if (responseText.trim()) {
+    return responseText.trim();
   }
   throw new Error('Claude commit response is empty');
 }
