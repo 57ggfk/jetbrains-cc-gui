@@ -3,8 +3,10 @@
  * Output lines look like: `opencode/big-pickle`, `anthropic/claude-fable-5`
  */
 
-import { spawnSync } from 'child_process';
-import { homedir } from 'os';
+import { execSync, spawnSync } from 'child_process';
+import { readFileSync, unlinkSync } from 'fs';
+import { homedir, tmpdir } from 'os';
+import { join } from 'path';
 import {
   commonCliBinDirs,
   enrichPathWithBinDirs,
@@ -32,6 +34,20 @@ function formatLabel(fullId) {
 }
 
 /**
+ * A model id looks like `provider/model`. Reject Windows paths (`C:/...`),
+ * URLs, and UNC-ish tokens so noisy CLI output cannot become a bogus model.
+ * @param {string} part
+ * @returns {boolean}
+ */
+function isModelIdToken(part) {
+  if (!part || !part.includes('/')) return false;
+  if (/^[a-z]:[\/\\]/i.test(part)) return false;
+  if (/^https?:\/\//i.test(part)) return false;
+  if (part.includes('\\')) return false;
+  return /^[\w.-]+\/[\w./-]+$/.test(part);
+}
+
+/**
  * Parse `opencode models` stdout into model entries.
  * @param {string} stdout
  * @returns {{ id: string, label: string, description?: string }[]}
@@ -43,7 +59,7 @@ export function parseOpenCodeModelsOutput(stdout) {
   for (const rawLine of clean.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
-    const token = line.split(/\s+/).find((part) => part.includes('/'));
+    const token = line.split(/\s+/).find(isModelIdToken);
     if (!token || seen.has(token)) continue;
     seen.add(token);
     models.push({
@@ -53,6 +69,34 @@ export function parseOpenCodeModelsOutput(stdout) {
     });
   }
   return models;
+}
+
+/**
+ * Windows fallback: some opencode builds lose piped stdout entirely when
+ * spawned non-TTY (Bun-compiled binary on Windows). Redirecting through
+ * cmd's file handle (`opencode models > file`) bypasses the pipe path.
+ *
+ * @param {string} bin
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string} raw file content, '' on any failure
+ */
+export function runModelsViaTempRedirect(bin, env) {
+  const tmpFile = join(tmpdir(), `cc-gui-opencode-models-${process.pid}.txt`);
+  try {
+    // cmd.exe /c requires the outer quote pair when the binary path is quoted.
+    execSync(`""${bin}" models > "${tmpFile}""`, {
+      shell: 'cmd.exe',
+      env,
+      timeout: 45_000,
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return readFileSync(tmpFile, 'utf8');
+  } catch {
+    return '';
+  } finally {
+    try { unlinkSync(tmpFile); } catch { /* best effort */ }
+  }
 }
 
 /**
@@ -101,9 +145,29 @@ export function listModels() {
     return;
   }
 
-  const models = parseOpenCodeModelsOutput(result.stdout || '');
-  // Keep a default entry so UI always has a selectable fallback.
+  let models = parseOpenCodeModelsOutput(result.stdout || '');
+  let source = models.length > 0 ? 'stdout' : null;
+
+  // Some builds emit the list on stderr instead of stdout.
+  if (models.length === 0 && result.stderr) {
+    models = parseOpenCodeModelsOutput(result.stderr);
+    if (models.length > 0) source = 'stderr';
+  }
+
+  // Windows: piped stdout can come back empty even when the CLI works in a
+  // terminal — retry once through cmd file redirection.
+  if (models.length === 0 && process.platform === 'win32') {
+    const fromFile = parseOpenCodeModelsOutput(runModelsViaTempRedirect(bin, env));
+    if (fromFile.length > 0) {
+      models = fromFile;
+      source = 'file-redirect';
+    }
+  }
+
   if (models.length === 0) {
+    // Keep a default entry so UI always has a selectable fallback. Attach the
+    // raw output tails so support can tell "no providers configured" apart
+    // from "output lost on Windows pipes" from the IDE log.
     models.push({
       id: 'opencode-default',
       label: 'OpenCode Default',
@@ -111,5 +175,19 @@ export function listModels() {
     });
   }
 
-  console.log(JSON.stringify({ success: true, provider: 'opencode', models }));
+  const payload = { success: true, provider: 'opencode', models };
+  const usedDefaultFallback = models.length === 1 && models[0].id === 'opencode-default';
+  if (usedDefaultFallback) {
+    // Surfaces in the IDE log via CliModelsHandler — key for telling
+    // "no providers configured" apart from "output lost on Windows pipes".
+    payload.debug = {
+      reason: 'no-models-parsed',
+      status: result.status,
+      stdoutTail: String(result.stdout || '').slice(-500),
+      stderrTail: String(result.stderr || '').slice(-500),
+    };
+  } else if (source && source !== 'stdout') {
+    payload.debug = { modelsSource: source };
+  }
+  console.log(JSON.stringify(payload));
 }

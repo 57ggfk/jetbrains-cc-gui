@@ -131,6 +131,10 @@ public class CliModelsHandler extends BaseMessageHandler {
                 pushError(provider, "No model list JSON in " + provider + " listModels output");
                 return;
             }
+            if (payload.has("debug") && payload.get("debug").isJsonObject()) {
+                // Bridge-side diagnostics (e.g. empty model parse, fallback source)
+                LOG.warn("[CliModels] " + provider + " listModels debug: " + payload.get("debug"));
+            }
             if (!payload.has("provider") || payload.get("provider").isJsonNull()) {
                 payload.addProperty("provider", provider);
             }
