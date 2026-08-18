@@ -9,6 +9,24 @@ export type ClaudePlanUsageState = {
 const EMPTY: ClaudePlanUsageState = { status: 'idle', snapshot: null };
 
 /**
+ * Apply one poll result. Until the first present payload the bar stays hidden:
+ * backends that never emit {@code rate_limit_event} (API keys, proxies) would
+ * otherwise show a permanent "Usage —" dash.
+ */
+function applySnapshot(
+  prev: ClaudePlanUsageState,
+  snap: PlanUsageSnapshot,
+): ClaudePlanUsageState {
+  if (snap.present) {
+    return { status: 'ready', snapshot: snap };
+  }
+  if (!prev.snapshot?.present) {
+    return EMPTY;
+  }
+  return { status: 'unavailable', snapshot: snap };
+}
+
+/**
  * Claude plan usage for ContextBar via Java bridge
  * ({@code get_claude_plan_usage} → cached SDK rate_limit_event snapshot).
  */
@@ -23,10 +41,8 @@ export function useClaudePlanUsage(currentProvider: string) {
       return;
     }
     const gen = ++genRef.current;
-    setState((prev) => ({
-      status: prev.snapshot?.present ? 'ready' : 'loading',
-      snapshot: prev.snapshot,
-    }));
+    // Keep the last data while re-polling; stay hidden until the first event.
+    setState((prev) => (prev.snapshot?.present ? prev : EMPTY));
 
     const w = window as unknown as {
       updateClaudePlanUsage?: (json: string) => void;
@@ -37,17 +53,10 @@ export function useClaudePlanUsage(currentProvider: string) {
       if (gen !== genRef.current) return;
       try {
         const data = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
-        const snap = parseCapacityPayload(data);
-        if (snap.present) {
-          setState({ status: 'ready', snapshot: snap });
-        } else {
-          setState({ status: 'unavailable', snapshot: snap });
-        }
+        setState((prev) => applySnapshot(prev, parseCapacityPayload(data)));
       } catch {
-        setState({
-          status: 'unavailable',
-          snapshot: { present: false, message: 'Usage unavailable' },
-        });
+        setState((prev) =>
+          applySnapshot(prev, { present: false, message: 'Usage unavailable' }));
       }
     };
 
@@ -62,10 +71,8 @@ export function useClaudePlanUsage(currentProvider: string) {
       w.sendToJava?.('get_claude_plan_usage:');
     } catch {
       if (gen === genRef.current) {
-        setState({
-          status: 'unavailable',
-          snapshot: { present: false, message: 'Usage unavailable' },
-        });
+        setState((prev) =>
+          applySnapshot(prev, { present: false, message: 'Usage unavailable' }));
       }
     }
   }, [currentProvider]);
