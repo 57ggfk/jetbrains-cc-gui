@@ -169,10 +169,9 @@ test('chains through rows appended without the parentUuid key', () => {
   assert.deepEqual(chainTexts(chain), ['root', 'answer', 'appended without the key', 'fallback answer']);
 });
 
-test('stops at a compact boundary root despite pre-compact rows above it', () => {
-  // Compaction writes a system compact_boundary row with parentUuid null;
-  // post-compact rows chain to it. The walk must stop at the boundary so
-  // the stale pre-compact span stays excluded.
+test('keeps pre-compact history before the compact boundary', () => {
+  // The GUI keeps the effective pre-compact prefix visible even though the
+  // boundary starts a new parent chain for Claude Code's model loader.
   const staleUser = userEntry(null, 'stale pre-compact', '2026-01-01T09:00:00Z');
   const boundary = {
     type: 'system',
@@ -184,9 +183,362 @@ test('stops at a compact boundary root despite pre-compact rows above it', () =>
   const freshUser = userEntry(boundary.uuid, 'post-compact', '2026-01-01T10:01:00Z');
 
   const chain = selectConversationChain([staleUser, boundary, freshUser]);
-  // The boundary row itself stays on the chain (system rows are filtered
-  // downstream); the stale pre-compact span must not.
-  assert.deepEqual(chain.map((entry) => entry.uuid), [boundary.uuid, freshUser.uuid]);
+  assert.deepEqual(chain.map((entry) => entry.uuid), [staleUser.uuid, boundary.uuid, freshUser.uuid]);
+});
+
+test('keeps a compact summary ahead of trailing local command output', () => {
+  const previousUser = userEntry(null, 'before compact', '2026-01-01T09:00:00Z');
+  const previousAnswer = assistantEntry(
+    previousUser.uuid,
+    'previous answer',
+    '2026-01-01T09:00:05Z',
+    'm-previous'
+  );
+  const compactCommand = userEntry(
+    previousAnswer.uuid,
+    '<command-name>/compact</command-name>\n<command-args></command-args>',
+    '2026-01-01T09:01:00Z'
+  );
+  const boundary = {
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: uuid('sys'),
+    parentUuid: null,
+    timestamp: '2026-01-01T10:00:00Z',
+  };
+  const summary = userEntry(boundary.uuid, 'compacted summary', '2026-01-01T10:00:01Z');
+  summary.isCompactSummary = true;
+  const stdout = userEntry(
+    compactCommand.uuid,
+    '<local-command-stdout>Compacted Tip</local-command-stdout>',
+    '2026-01-01T10:00:02Z'
+  );
+
+  const chain = selectConversationChain([
+    previousUser,
+    previousAnswer,
+    compactCommand,
+    boundary,
+    summary,
+    stdout,
+  ]);
+
+  assert.deepEqual(chain.map((entry) => entry.uuid), [
+    previousUser.uuid,
+    previousAnswer.uuid,
+    boundary.uuid,
+    summary.uuid,
+  ]);
+});
+
+test('restores compact-preserved messages before the summary', () => {
+  // The GUI keeps the pre-compact tail before the compact summary, rather
+  // than inheriting Claude Code's internal post-summary splice order.
+  const previousUser = userEntry(null, 'before compact', '2026-01-01T09:00:00Z');
+  const preservedAssistant = assistantEntry(
+    previousUser.uuid,
+    'long assistant summary',
+    '2026-01-01T09:01:00Z',
+    'm-preserved'
+  );
+  const boundary = {
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: uuid('sys'),
+    parentUuid: null,
+    timestamp: '2026-01-01T10:00:00Z',
+    compactMetadata: {
+      preservedSegment: {
+        headUuid: preservedAssistant.uuid,
+        anchorUuid: 'anchor-summary',
+        tailUuid: preservedAssistant.uuid,
+      },
+      preservedMessages: {
+        anchorUuid: 'anchor-summary',
+        allUuids: [preservedAssistant.uuid],
+      },
+    },
+  };
+  const summary = userEntry(boundary.uuid, 'compacted summary', '2026-01-01T10:00:01Z');
+  summary.uuid = 'anchor-summary';
+  summary.isCompactSummary = true;
+
+  const chain = selectConversationChain([
+    previousUser,
+    preservedAssistant,
+    boundary,
+    summary,
+  ]);
+
+  assert.deepEqual(chain.map((entry) => entry.uuid), [
+    previousUser.uuid,
+    preservedAssistant.uuid,
+    boundary.uuid,
+    summary.uuid,
+  ]);
+});
+
+test('restores compact-preserved messages from segment metadata alone', () => {
+  // Claude Code's standard compact boundary carries preservedSegment without
+  // the optional UUID carrier; recover the segment by walking tail to head.
+  const previousUser = userEntry(null, 'before compact', '2026-01-01T09:00:00Z');
+  const preservedAssistant = assistantEntry(
+    previousUser.uuid,
+    'kept answer',
+    '2026-01-01T09:01:00Z',
+    'm-preserved'
+  );
+  const preservedQuestion = userEntry(
+    preservedAssistant.uuid,
+    'kept question',
+    '2026-01-01T09:01:30Z'
+  );
+  const preservedAnswer = assistantEntry(
+    preservedQuestion.uuid,
+    'kept follow-up',
+    '2026-01-01T09:02:00Z',
+    'm-preserved-follow-up'
+  );
+  const boundary = {
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: uuid('sys'),
+    parentUuid: null,
+    timestamp: '2026-01-01T10:00:00Z',
+    compactMetadata: {
+      preservedSegment: {
+        headUuid: preservedAssistant.uuid,
+        anchorUuid: 'anchor-summary',
+        tailUuid: preservedAnswer.uuid,
+      },
+    },
+  };
+  const summary = userEntry(boundary.uuid, 'compacted summary', '2026-01-01T10:00:01Z');
+  summary.uuid = 'anchor-summary';
+  summary.isCompactSummary = true;
+
+  const chain = selectConversationChain([
+    previousUser,
+    preservedAssistant,
+    preservedQuestion,
+    preservedAnswer,
+    boundary,
+    summary,
+  ]);
+
+  assert.deepEqual(chain.map((entry) => entry.uuid), [
+    previousUser.uuid,
+    preservedAssistant.uuid,
+    preservedQuestion.uuid,
+    preservedAnswer.uuid,
+    boundary.uuid,
+    summary.uuid,
+  ]);
+});
+
+test('keeps compact-preserved messages before the summary when the anchor is off-chain', () => {
+  // The UUID carrier still identifies the pre-compact tail even when its
+  // anchor is absent; the GUI places that tail before the compact summary.
+  const previousUser = userEntry(null, 'before compact', '2026-01-01T09:00:00Z');
+  const preservedAssistant = assistantEntry(
+    previousUser.uuid,
+    'kept tail',
+    '2026-01-01T09:01:00Z',
+    'm-preserved'
+  );
+  const boundary = {
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: uuid('sys'),
+    parentUuid: null,
+    timestamp: '2026-01-01T10:00:00Z',
+    compactMetadata: {
+      preservedMessages: {
+        anchorUuid: 'missing-anchor',
+        allUuids: [preservedAssistant.uuid],
+      },
+    },
+  };
+  const summary = userEntry(boundary.uuid, 'compacted summary', '2026-01-01T10:00:01Z');
+  summary.isCompactSummary = true;
+
+  const chain = selectConversationChain([
+    previousUser,
+    preservedAssistant,
+    boundary,
+    summary,
+  ]);
+
+  assert.deepEqual(chain.map((entry) => entry.uuid), [
+    previousUser.uuid,
+    preservedAssistant.uuid,
+    boundary.uuid,
+    summary.uuid,
+  ]);
+});
+
+test('reconnects continuation attached to the preserved tail after compact', () => {
+  const previousUser = userEntry(null, 'before compact', '2026-01-01T09:00:00Z');
+  const preservedAssistant = assistantEntry(
+    previousUser.uuid,
+    'last answer before compact',
+    '2026-01-01T09:01:00Z',
+    'm-preserved'
+  );
+  const preservedTail = {
+    type: 'system',
+    subtype: 'stop_hook_summary',
+    uuid: uuid('sys'),
+    parentUuid: preservedAssistant.uuid,
+    timestamp: '2026-01-01T09:01:01Z',
+  };
+  const boundary = {
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: uuid('sys'),
+    parentUuid: null,
+    timestamp: '2026-01-01T10:00:00Z',
+    compactMetadata: {
+      preservedSegment: {
+        headUuid: preservedAssistant.uuid,
+        anchorUuid: 'compact-summary',
+        tailUuid: preservedTail.uuid,
+      },
+      preservedMessages: {
+        allUuids: [preservedAssistant.uuid, preservedTail.uuid],
+      },
+    },
+  };
+  const summary = userEntry(boundary.uuid, 'compacted summary', '2026-01-01T10:00:01Z');
+  summary.uuid = 'compact-summary';
+  summary.isCompactSummary = true;
+  const command = userEntry(
+    preservedTail.uuid,
+    '<command-name>/compact</command-name>\n<command-args></command-args>',
+    '2026-01-01T10:00:02Z'
+  );
+  const continuation = userEntry(command.uuid, 'Continue from where you left off.', '2026-01-01T10:00:03Z');
+  const answer = assistantEntry(continuation.uuid, 'continued answer', '2026-01-01T10:00:04Z', 'm-next');
+
+  const chain = selectConversationChain([
+    previousUser,
+    preservedAssistant,
+    preservedTail,
+    boundary,
+    summary,
+    command,
+    continuation,
+    answer,
+  ]);
+
+  assert.deepEqual(chain.map((entry) => entry.uuid), [
+    previousUser.uuid,
+    preservedAssistant.uuid,
+    preservedTail.uuid,
+    boundary.uuid,
+    summary.uuid,
+    command.uuid,
+    continuation.uuid,
+    answer.uuid,
+  ]);
+
+  const modelChain = selectConversationChain([
+    previousUser,
+    preservedAssistant,
+    preservedTail,
+    boundary,
+    summary,
+    command,
+    continuation,
+    answer,
+  ], { includePreCompactHistory: false });
+  assert.deepEqual(modelChain.map((entry) => entry.uuid), [
+    boundary.uuid,
+    summary.uuid,
+    preservedAssistant.uuid,
+    preservedTail.uuid,
+    command.uuid,
+    continuation.uuid,
+    answer.uuid,
+  ]);
+});
+
+test('unwinds nested compacts without recursing forever', () => {
+  // Two /compact runs in one session: the second boundary's pre-compact
+  // walk crosses the first boundary, and re-running boundary selection
+  // inside that recursion would keep picking the newest boundary forever.
+  const rootUser = userEntry(null, 'root question', '2026-01-01T09:00:00Z');
+  const rootAnswer = assistantEntry(rootUser.uuid, 'root answer', '2026-01-01T09:00:05Z', 'm1');
+  const firstBoundary = {
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: uuid('sys'),
+    parentUuid: null,
+    timestamp: '2026-01-01T09:01:00Z',
+    compactMetadata: {
+      preservedSegment: {
+        headUuid: rootAnswer.uuid,
+        anchorUuid: 'summary-1',
+        tailUuid: rootAnswer.uuid,
+      },
+    },
+  };
+  const firstSummary = userEntry(firstBoundary.uuid, 'first summary', '2026-01-01T09:01:01Z');
+  firstSummary.uuid = 'summary-1';
+  firstSummary.isCompactSummary = true;
+  const midQuestion = userEntry(firstSummary.uuid, 'mid question', '2026-01-01T09:02:00Z');
+  const midAnswer = assistantEntry(midQuestion.uuid, 'mid answer', '2026-01-01T09:02:05Z', 'm2');
+  const secondBoundary = {
+    type: 'system',
+    subtype: 'compact_boundary',
+    uuid: uuid('sys'),
+    parentUuid: null,
+    timestamp: '2026-01-01T09:03:00Z',
+    compactMetadata: {
+      preservedSegment: {
+        headUuid: midAnswer.uuid,
+        anchorUuid: 'summary-2',
+        tailUuid: midAnswer.uuid,
+      },
+    },
+  };
+  const secondSummary = userEntry(secondBoundary.uuid, 'second summary', '2026-01-01T09:03:01Z');
+  secondSummary.uuid = 'summary-2';
+  secondSummary.isCompactSummary = true;
+  const postUser = userEntry(secondSummary.uuid, 'after both compacts', '2026-01-01T09:04:00Z');
+
+  const entries = [
+    rootUser,
+    rootAnswer,
+    firstBoundary,
+    firstSummary,
+    midQuestion,
+    midAnswer,
+    secondBoundary,
+    secondSummary,
+    postUser,
+  ];
+
+  const chain = selectConversationChain(entries);
+  assert.deepEqual(chain.map((entry) => entry.uuid), [
+    rootUser.uuid,
+    rootAnswer.uuid,
+    firstBoundary.uuid,
+    firstSummary.uuid,
+    midQuestion.uuid,
+    midAnswer.uuid,
+    secondBoundary.uuid,
+    secondSummary.uuid,
+    postUser.uuid,
+  ]);
+
+  const modelChain = selectConversationChain(entries, { includePreCompactHistory: false });
+  assert.deepEqual(modelChain.map((entry) => entry.uuid), [
+    secondBoundary.uuid,
+    secondSummary.uuid,
+    midAnswer.uuid,
+    postUser.uuid,
+  ]);
 });
 
 test('ignores sidechain leaves when picking the chain tip', () => {
