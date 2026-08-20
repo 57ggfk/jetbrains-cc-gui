@@ -17,16 +17,20 @@
 /**
  * Select the messages that form the effective conversation.
  * @param {Array<any>} entries parsed JSONL entries in file order
+ * @param {Object} options chain selection options
+ * @param {boolean} options.includePreCompactHistory keep the GUI-visible
+ *   compact prefix; disable it when building model context
  * @returns {Array<any>} chain messages in conversation order; line order
  *   when the transcript carries no parentUuid fields at all (the plugin's
  *   direct-API fallback writer omits them, and chain-walking such a file
  *   would collapse every message into isolated leaves)
  */
-export function selectConversationChain(entries) {
+export function selectConversationChain(entries, options = {}) {
   if (!Array.isArray(entries) || entries.length === 0) {
     return entries ?? [];
   }
 
+  const includePreCompactHistory = options.includePreCompactHistory !== false;
   const byUuid = new Map();
   for (const entry of entries) {
     if (entry && typeof entry.uuid === 'string') {
@@ -74,15 +78,21 @@ export function selectConversationChain(entries) {
   if (chain.length === 0) {
     return entries;
   }
-  const chainWithAttachments = recoverOrphanedTerminalAttachments(byUuid, chain);
+  const chainWithCompactHistory = includePreCompactHistory
+    ? recoverCompactHistory(byUuid, chain)
+    : recoverCompactModelHistory(byUuid, chain);
+  const chainWithAttachments = recoverOrphanedTerminalAttachments(
+    byUuid,
+    chainWithCompactHistory
+  );
   return recoverOrphanedParallelToolResults(byUuid, chainWithAttachments);
 }
 
 /**
- * A leaf is the nearest user/assistant ancestor of any childless message
- * (attachments can trail a user/assistant message without continuing the
- * chain). The newest non-sidechain leaf is the tip of the live branch;
- * leaves of rewound branches are older by timestamp.
+ * A leaf is the nearest real user/assistant ancestor of any childless message
+ * (attachments and local command metadata can trail a conversation message
+ * without continuing the chain). The newest non-sidechain leaf is the tip of
+ * the live branch; leaves of rewound branches are older by timestamp.
  *
  * Sidechain rows are excluded before computing leaves so their main-thread
  * parents remain candidates even when a subagent call is the newest row.
@@ -120,7 +130,8 @@ function newestNonSidechainLeaf(byUuid, graph) {
         break;
       }
       seen.add(current.uuid);
-      if (current.type === 'user' || current.type === 'assistant') {
+      if ((current.type === 'user' || current.type === 'assistant')
+          && !isSyntheticUserMessage(current)) {
         leafUuids.add(current.uuid);
         break;
       }
@@ -144,6 +155,21 @@ function newestNonSidechainLeaf(byUuid, graph) {
   return tip;
 }
 
+/**
+ * Local command caveats and stdout are CLI metadata, not conversation turns.
+ * They may be written after compacting while still pointing to the pre-compact
+ * branch, so they must not hide a newer compact summary leaf.
+ */
+function isSyntheticUserMessage(entry) {
+  if (entry.type !== 'user' || typeof entry.message?.content !== 'string') {
+    return false;
+  }
+  const content = entry.message.content;
+  return content.includes('<local-command-caveat>')
+      || content.includes('<local-command-stdout>')
+      || content.includes('<command-name>');
+}
+
 function walkParentChain(byUuid, tip) {
   const chain = [];
   const seen = new Set();
@@ -158,6 +184,255 @@ function walkParentChain(byUuid, tip) {
   }
   chain.reverse();
   return chain;
+}
+
+function walkPreservedSegment(byUuid, segment) {
+  const uuids = [];
+  const seen = new Set();
+  let current = byUuid.get(segment.tailUuid);
+  while (current && !seen.has(current.uuid)) {
+    seen.add(current.uuid);
+    uuids.push(current.uuid);
+    if (current.uuid === segment.headUuid) {
+      uuids.reverse();
+      return uuids;
+    }
+    current = current.parentUuid ? byUuid.get(current.parentUuid) : null;
+  }
+  return null;
+}
+
+/**
+ * Keep the compact summary and preserved tail for model context without
+ * replaying the pre-compact prefix that Claude Code already summarized.
+ */
+function recoverCompactModelHistory(byUuid, chain) {
+  const compact = findRelevantCompactBoundary(byUuid, chain);
+  if (!compact) {
+    return chain;
+  }
+
+  const { boundary, preservedUuids } = compact;
+  const summary = findCompactSummary(byUuid, boundary);
+  const preservedEntries = preservedUuids
+    .map((uuid) => byUuid.get(uuid))
+    .filter(Boolean);
+  const boundaryIndex = chain.findIndex((entry) => entry.uuid === boundary.uuid);
+
+  if (boundaryIndex >= 0) {
+    const summaryIndex = summary.length > 0
+      ? chain.findIndex((entry) => entry.uuid === summary[0].uuid)
+      : -1;
+    const insertAfter = summaryIndex >= boundaryIndex ? summaryIndex : boundaryIndex;
+    const onChain = new Set(chain.map((entry) => entry.uuid));
+    const inserts = [
+      ...summary.filter((entry) => !onChain.has(entry.uuid)),
+      ...preservedEntries.filter((entry) => !onChain.has(entry.uuid)),
+    ];
+    if (inserts.length === 0) {
+      return chain;
+    }
+    return [
+      ...chain.slice(0, insertAfter + 1),
+      ...inserts,
+      ...chain.slice(insertAfter + 1),
+    ];
+  }
+
+  const continuationIndex = findCompactContinuationIndex(chain, boundary, preservedUuids);
+  if (continuationIndex < 0) {
+    return chain;
+  }
+  const block = [boundary, ...summary, ...preservedEntries];
+  const compactUuids = new Set(block.map((entry) => entry.uuid));
+  return [
+    ...block,
+    ...chain.slice(continuationIndex + 1).filter((entry) => !compactUuids.has(entry.uuid)),
+  ];
+}
+
+/**
+ * Keep the effective pre-compact conversation visible before the boundary.
+ * Claude Code's loader prunes this prefix because it is only needed as model
+ * context, but the GUI is a transcript viewer and must show the messages that
+ * led to the compact summary. The preserved UUID carrier bridges the physical
+ * gap between the last pre-compact assistant and the boundary; standard
+ * Claude Code metadata can derive the same suffix from preservedSegment.
+ */
+function recoverCompactHistory(byUuid, chain) {
+  const compact = findRelevantCompactBoundary(byUuid, chain);
+  if (!compact) {
+    return chain;
+  }
+  return recoverCompactHistoryForBoundary(byUuid, chain, compact.boundary, compact.preservedUuids);
+}
+
+/**
+ * Recover one pinned boundary. Boundary selection must not re-run inside the
+ * recursion: a pre-compact chain always contains the newest boundary's
+ * preserved uuids, so re-selecting would keep picking that boundary and loop
+ * forever on sessions compacted more than once. The nested boundary handed in
+ * by buildPreCompactPrefix is strictly older, so the recursion terminates.
+ */
+function recoverCompactHistoryForBoundary(byUuid, chain, boundary, preservedUuids) {
+  const boundaryInChain = chain.some((entry) => entry.uuid === boundary.uuid);
+  const prefix = buildPreCompactPrefix(byUuid, boundary, preservedUuids);
+  if (boundaryInChain) {
+    const onChain = new Set(chain.map((entry) => entry.uuid));
+    const uniquePrefix = prefix.filter((entry) => !onChain.has(entry.uuid));
+    return uniquePrefix.length === 0 ? chain : [...uniquePrefix, ...chain];
+  }
+
+  const block = [
+    ...prefix,
+    boundary,
+    ...findCompactSummary(byUuid, boundary),
+  ];
+  const compactUuids = new Set(block.map((entry) => entry.uuid));
+  const continuationIndex = findCompactContinuationIndex(chain, boundary, preservedUuids);
+  if (continuationIndex < 0) {
+    return chain;
+  }
+  return [
+    ...block,
+    ...chain.slice(continuationIndex + 1).filter((entry) => !compactUuids.has(entry.uuid)),
+  ];
+}
+
+function getCompactPreservedUuids(byUuid, boundary) {
+  const preserved = boundary.compactMetadata?.preservedMessages;
+  const segment = boundary.compactMetadata?.preservedSegment;
+  let preservedUuids = Array.isArray(preserved?.allUuids)
+    ? preserved.allUuids
+    : preserved?.uuids;
+  if (!Array.isArray(preservedUuids) && segment) {
+    preservedUuids = walkPreservedSegment(byUuid, segment);
+  }
+  return Array.isArray(preservedUuids) ? preservedUuids : [];
+}
+
+function buildPreCompactPrefix(byUuid, boundary, preservedUuids) {
+  const segment = boundary.compactMetadata?.preservedSegment;
+  const headUuid = segment?.headUuid ?? preservedUuids.find((uuid) => byUuid.has(uuid));
+  let preCompactChain = headUuid && byUuid.has(headUuid)
+    ? walkParentChain(byUuid, byUuid.get(headUuid))
+    : findPreCompactChain(byUuid, boundary.uuid);
+
+  const nestedBoundary = preCompactChain.find((entry) => (
+    entry.subtype === 'compact_boundary' && entry.uuid !== boundary.uuid
+  ));
+  if (nestedBoundary) {
+    preCompactChain = recoverCompactHistoryForBoundary(
+      byUuid,
+      preCompactChain,
+      nestedBoundary,
+      getCompactPreservedUuids(byUuid, nestedBoundary)
+    );
+  }
+
+  const onChain = new Set([boundary.uuid]);
+  const prefix = [];
+  for (const entry of preCompactChain) {
+    if (!onChain.has(entry.uuid)) {
+      prefix.push(entry);
+      onChain.add(entry.uuid);
+    }
+  }
+  for (const uuid of preservedUuids) {
+    const entry = byUuid.get(uuid);
+    if (entry && !onChain.has(uuid)) {
+      prefix.push(entry);
+      onChain.add(uuid);
+    }
+  }
+  return prefix;
+}
+
+function findLatestCompactBoundary(byUuid) {
+  let boundary = null;
+  for (const entry of byUuid.values()) {
+    if (entry.subtype === 'compact_boundary') {
+      boundary = entry;
+    }
+  }
+  return boundary;
+}
+
+function findRelevantCompactBoundary(byUuid, chain) {
+  const chainBoundary = chain.find((entry) => entry.subtype === 'compact_boundary');
+  const latestBoundary = findLatestCompactBoundary(byUuid);
+  const latestPreservedUuids = latestBoundary
+    ? getCompactPreservedUuids(byUuid, latestBoundary)
+    : [];
+  const boundary = latestBoundary && (
+    !chainBoundary
+    || chainBoundary.uuid === latestBoundary.uuid
+    || hasCompactContinuation(chain, latestBoundary, latestPreservedUuids)
+  )
+    ? latestBoundary
+    : chainBoundary;
+  if (!boundary) {
+    return null;
+  }
+
+  const preservedUuids = boundary.uuid === latestBoundary?.uuid
+    ? latestPreservedUuids
+    : getCompactPreservedUuids(byUuid, boundary);
+  if (
+    chain.some((entry) => entry.uuid === boundary.uuid)
+    || hasCompactContinuation(chain, boundary, preservedUuids)
+  ) {
+    return { boundary, preservedUuids };
+  }
+  return null;
+}
+
+function findCompactSummary(byUuid, boundary) {
+  const summaries = [];
+  for (const entry of byUuid.values()) {
+    if (entry.parentUuid === boundary.uuid && (entry.type === 'user' || entry.type === 'assistant')) {
+      summaries.push(entry);
+    }
+  }
+  const marked = summaries.find((entry) => entry.isCompactSummary);
+  return marked ? [marked] : summaries.slice(0, 1);
+}
+
+function hasCompactContinuation(chain, boundary, preservedUuids) {
+  const compactUuids = new Set([
+    boundary.uuid,
+    ...preservedUuids,
+    boundary.compactMetadata?.preservedSegment?.headUuid,
+    boundary.compactMetadata?.preservedSegment?.tailUuid,
+  ]);
+  return chain.some((entry) => compactUuids.has(entry.uuid));
+}
+
+function findCompactContinuationIndex(chain, boundary, preservedUuids) {
+  const compactUuids = new Set([
+    ...preservedUuids,
+    boundary.compactMetadata?.preservedSegment?.headUuid,
+    boundary.compactMetadata?.preservedSegment?.tailUuid,
+  ]);
+  let index = -1;
+  for (let i = 0; i < chain.length; i++) {
+    if (compactUuids.has(chain[i].uuid)) {
+      index = i;
+    }
+  }
+  return index;
+}
+
+function findPreCompactChain(byUuid, boundaryUuid) {
+  const beforeBoundary = new Map();
+  for (const [uuid, entry] of byUuid) {
+    if (uuid === boundaryUuid) {
+      break;
+    }
+    beforeBoundary.set(uuid, entry);
+  }
+  const leaf = selectNewestLeaf(beforeBoundary);
+  return leaf ? walkParentChain(beforeBoundary, leaf) : [];
 }
 
 /**

@@ -87,7 +87,12 @@ export function loadSessionHistory(sessionId, cwd) {
 
     // Rewind keeps dead branches on disk; only the parentUuid chain from the
     // newest leaf is the live conversation the API should see.
-    const messages = selectConversationChain(parseJsonlContent(readFileSync(sessionFile, 'utf8')))
+    // Keep the model context compact: the UI reader intentionally restores the
+    // pre-compact transcript, but the API must rely on Claude's summary instead.
+    const messages = selectConversationChain(
+      parseJsonlContent(readFileSync(sessionFile, 'utf8')),
+      { includePreCompactHistory: false }
+    )
       .filter(msg =>
         (msg.type === 'user' || msg.type === 'assistant') &&
         msg.message && msg.message.content)
