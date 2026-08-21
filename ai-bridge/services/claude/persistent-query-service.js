@@ -455,7 +455,11 @@ _sessionCleanupTimer.unref();
             // the foreign check above and ends this turn with empty output.
             runtime.turnSink?.push({ type: 'result', is_error: false, [IDLE_BACKSTOP_RESULT]: true });
           }, foreignResultIdleBackstopMs);
-          foreignResultIdleTimer.unref?.();
+          // Do not unref: this timer is the only handle keeping a silent turn
+          // (and node:test) alive until the backstop settles it. Unref'ing it
+          // lets the event loop drain while executeTurn is still parked on
+          // take(), which cancels remaining tests with
+          // "Promise resolution is still pending but the event loop has already resolved".
           continue;
         }
         // A task_notification for a background (run_in_background) Agent that

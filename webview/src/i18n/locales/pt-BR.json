@@ -1050,7 +1050,7 @@
     "loading": "Carregando histórico...",
     "loadFailed": "Falha ao carregar",
     "noSessions": "Sem sessões no histórico",
-    "noSessionsDesc": "Nenhum registro de sessão do Claude encontrado no projeto atual",
+    "noSessionsDesc": "Nenhum registro de sessão encontrado no projeto atual",
     "totalSessions": "{{count}} sessões · {{total}} mensagens",
     "messageCount": "{{count}} mensagens",
     "searchPlaceholder": "Pesquisar títulos de sessão...",

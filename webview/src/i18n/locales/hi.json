@@ -903,7 +903,7 @@
     "loading": "इतिहास लोड हो रहा है...",
     "loadFailed": "लोड विफल",
     "noSessions": "कोई इतिहास सत्र नहीं",
-    "noSessionsDesc": "वर्तमान परियोजना में Claude सत्र रिकॉर्ड नहीं मिले",
+    "noSessionsDesc": "वर्तमान परियोजना में सत्र रिकॉर्ड नहीं मिले",
     "totalSessions": "कुल {{count}} सत्र · {{total}} संदेश",
     "messageCount": "{{count}} संदेश",
     "searchPlaceholder": "सत्र शीर्षक खोजें...",

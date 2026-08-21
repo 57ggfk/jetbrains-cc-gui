@@ -903,7 +903,7 @@
     "loading": "Chargement de l'historique...",
     "loadFailed": "Échec du chargement",
     "noSessions": "Aucune session historique",
-    "noSessionsDesc": "Aucun enregistrement de session Claude trouvé dans le projet actuel",
+    "noSessionsDesc": "Aucun enregistrement de session trouvé dans le projet actuel",
     "totalSessions": "{{count}} sessions · {{total}} messages",
     "messageCount": "{{count}} messages",
     "searchPlaceholder": "Rechercher titre de session...",

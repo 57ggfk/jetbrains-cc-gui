@@ -903,7 +903,7 @@
     "loading": "Cargando historial...",
     "loadFailed": "Error al cargar",
     "noSessions": "Sin sesiones históricas",
-    "noSessionsDesc": "No se encontraron registros de sesión de Claude en el proyecto actual",
+    "noSessionsDesc": "No se encontraron registros de sesión en el proyecto actual",
     "totalSessions": "{{count}} sesiones · {{total}} mensajes",
     "messageCount": "{{count}} mensajes",
     "searchPlaceholder": "Buscar título de sesión...",

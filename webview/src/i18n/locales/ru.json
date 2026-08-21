@@ -915,7 +915,7 @@
     "loading": "Загрузка истории...",
     "loadFailed": "Ошибка загрузки",
     "noSessions": "Нет чатов в истории",
-    "noSessionsDesc": "В текущем проекте не найдено чатов с Claude",
+    "noSessionsDesc": "В текущем проекте не найдено записей сессий",
     "totalSessions": "{{count}} чатов · {{total}} сообщений",
     "messageCount": "{{count}} сообщений",
     "searchPlaceholder": "Поиск по чатам...",
