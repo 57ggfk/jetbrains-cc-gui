@@ -915,7 +915,7 @@
     "loading": "Загрузка истории...",
     "loadFailed": "Ошибка загрузки",
     "noSessions": "Нет чатов в истории",
-    "noSessionsDesc": "В текущем проекте не найдено чатов с Claude",
+    "noSessionsDesc": "В текущем проекте не найдено записей сессий",
     "totalSessions": "{{count}} чатов · {{total}} сообщений",
     "messageCount": "{{count}} сообщений",
     "searchPlaceholder": "Поиск по чатам...",
@@ -1053,6 +1053,7 @@
   },
   "config": {
     "clickToCopy": "Нажмите для копирования",
+    "officialDocs": "Официальная документация",
     "switch": "Переключить",
     "switchProvider": "Переключить провайдер",
     "runtimeProvider": {
@@ -1409,7 +1410,9 @@
     "keepAllConfirmMessage": "Принять изменения как базу. Дальнейшие правки будут отслеживаться заново.",
     "discardAllSuccess": "Все изменения отменены",
     "discardAllFailed": "Ошибка отмены: {{error}}",
-    "keepAllSuccess": "Все изменения сохранены, отслеживание сброшено"
+    "keepAllSuccess": "Все изменения сохранены, отслеживание сброшено",
+    "multiAgentBadge": "Несколько агентов",
+    "multiAgentEdited": "{{count}} агентов изменили этот файл в сессии — проверьте внимательно"
   },
   "skills": {
     "title": "Навыки",
@@ -1565,11 +1568,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Обновленная модель Sonnet 4.6"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · Модель по умолчанию"
+        "description": "Sonnet 5 · Модель по умолчанию"
       },
       "opus5": {
         "label": "Opus 5",
@@ -1646,7 +1645,7 @@
   "codexModes": {
     "default": {
       "label": "Предложение (одобрение)",
-      "tooltip": "Codex approval_policy=untrusted — запрашивает перед редактированием файлов или выполнением команд.",
+      "tooltip": "Codex approval_policy=on-request - запрашивает перед редактированием файлов или выполнением команд.",
       "description": "Самый безопасный вариант. Каждая запись или команда требует вашего одобрения."
     },
     "plan": {

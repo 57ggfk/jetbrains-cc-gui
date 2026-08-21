@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
 import { copyToClipboard } from '../../../utils/copyUtils';
+import { openBrowser } from '../../../utils/bridge';
+import DshConnectionCard from './DshConnectionCard';
 import {
   CLI_TOOL_DEFINITIONS,
   type CliStatusMap,
@@ -14,6 +16,97 @@ import styles from './style.module.less';
 interface CliSectionProps {
   addToast?: (message: string, type: 'info' | 'success' | 'warning' | 'error') => void;
 }
+
+interface CliToolCardProps {
+  tool: CliToolDefinition;
+  status?: CliToolStatus;
+  onOpenInstall: (id: CliToolId) => void;
+  onOpenDocs: (url: string) => void;
+}
+
+const CliToolCard = ({ tool, status, onOpenInstall, onOpenDocs }: CliToolCardProps) => {
+  const { t } = useTranslation();
+  const installed = status?.installed === true;
+  const version = status?.version;
+  const path = status?.path;
+  const description = t(tool.descriptionKey);
+  // Prefer path when installed; fall back to description for missing tools.
+  const meta = installed && path ? path : description;
+  const metaTitle = installed && path
+    ? `${description}\n${path}`
+    : description;
+  const howToInstallLabel = t('settings.cli.howToInstall');
+  const openDocsLabel = t('settings.cli.installDialog.openDocs');
+
+  return (
+    <div
+      className={`${styles.cliCard} ${installed ? styles.installed : styles.missing}`}
+    >
+      <div className={styles.cliMain} title={metaTitle}>
+        <div className={styles.cliIcon}>
+          <ProviderModelIcon providerId={tool.id} size={16} colored />
+        </div>
+
+        <span className={styles.cliName}>{t(tool.nameKey)}</span>
+        {installed && version && (
+          <span className={styles.versionBadge}>v{version}</span>
+        )}
+        {!installed && (
+          <span className={styles.binaryChip}>{tool.binaryName}</span>
+        )}
+        <span className={styles.cliMeta}>{meta}</span>
+      </div>
+
+      <div className={styles.cliActions}>
+        {installed ? (
+          <>
+            <span className={`${styles.statusBadge} ${styles.ok}`}>
+              <span className="codicon codicon-check" aria-hidden="true" />
+              {t('settings.cli.status.installed')}
+            </span>
+            <span className={styles.divider} aria-hidden="true" />
+            <div className={styles.actionButtons}>
+              <button
+                type="button"
+                className={styles.iconBtn}
+                onClick={() => onOpenInstall(tool.id)}
+                data-tooltip={howToInstallLabel}
+                title={howToInstallLabel}
+                aria-label={howToInstallLabel}
+              >
+                <span className="codicon codicon-book" />
+              </button>
+              <button
+                type="button"
+                className={styles.iconBtn}
+                onClick={() => onOpenDocs(tool.docsUrl)}
+                data-tooltip={openDocsLabel}
+                title={openDocsLabel}
+                aria-label={openDocsLabel}
+              >
+                <span className="codicon codicon-link-external" />
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className={`${styles.statusBadge} ${styles.missing}`}>
+              {t('settings.cli.status.notInstalled')}
+            </span>
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              onClick={() => onOpenInstall(tool.id)}
+            >
+              <span className="codicon codicon-desktop-download" aria-hidden="true" />
+              {t('settings.cli.viewInstallGuide')}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
 
 /** Java may not answer get_cli_status (handler absent) — show an error instead of spinning forever. */
 const CLI_STATUS_TIMEOUT_MS = 15_000;
@@ -249,7 +342,7 @@ const CliSection = ({ addToast }: CliSectionProps) => {
   }, []);
 
   const openDocs = useCallback((url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    openBrowser(url);
   }, []);
 
   const { installedCount, totalCount, hasStatus } = useMemo(() => {
@@ -300,107 +393,41 @@ const CliSection = ({ addToast }: CliSectionProps) => {
 
       <div className={styles.cliList}>
         {loading && Object.keys(statusMap).length === 0 ? (
-          <div className={styles.loadingState}>
-            <span className="codicon codicon-loading codicon-modifier-spin" />
-            <span>{t('settings.cli.loading')}</span>
-          </div>
+          <>
+            <div className={styles.loadingState}>
+              <span className="codicon codicon-loading codicon-modifier-spin" />
+              <span>{t('settings.cli.loading')}</span>
+            </div>
+            <DshConnectionCard />
+          </>
         ) : statusError && Object.keys(statusMap).length === 0 ? (
-          <div className={styles.errorState}>
-            <span className="codicon codicon-warning" />
-            <span>{t('settings.cli.loadFailed')}</span>
-            <button type="button" className={styles.refreshBtn} onClick={requestStatus}>
-              <span className="codicon codicon-refresh" />
-              {t('settings.cli.retry')}
-            </button>
-          </div>
+          <>
+            <div className={styles.errorState}>
+              <span className="codicon codicon-warning" />
+              <span>{t('settings.cli.loadFailed')}</span>
+              <button type="button" className={styles.refreshBtn} onClick={requestStatus}>
+                <span className="codicon codicon-refresh" />
+                {t('settings.cli.retry')}
+              </button>
+            </div>
+            <DshConnectionCard />
+          </>
         ) : (
-          CLI_TOOL_DEFINITIONS.map((tool) => {
-            const status = statusMap[tool.id];
-            const installed = status?.installed === true;
-            const version = status?.version;
-            const path = status?.path;
-            const description = t(tool.descriptionKey);
-            // Prefer path when installed; fall back to description for missing tools.
-            const meta = installed && path ? path : description;
-            const metaTitle = installed && path
-              ? `${description}\n${path}`
-              : description;
-
-            const howToInstallLabel = t('settings.cli.howToInstall');
-            const openDocsLabel = t('settings.cli.installDialog.openDocs');
-
-            return (
-              <div
-                key={tool.id}
-                className={`${styles.cliCard} ${installed ? styles.installed : styles.missing}`}
-              >
-                {/* Left: identity + path/description */}
-                <div className={styles.cliMain} title={metaTitle}>
-                  <div className={styles.cliIcon}>
-                    <ProviderModelIcon providerId={tool.id} size={16} colored />
-                  </div>
-
-                  <span className={styles.cliName}>{t(tool.nameKey)}</span>
-                  {installed && version && (
-                    <span className={styles.versionBadge}>v{version}</span>
-                  )}
-                  {!installed && (
-                    <span className={styles.binaryChip}>{tool.binaryName}</span>
-                  )}
-                  <span className={styles.cliMeta}>{meta}</span>
-                </div>
-
-                {/* Right: status + actions */}
-                <div className={styles.cliActions}>
-                  {installed ? (
-                    <>
-                      <span className={`${styles.statusBadge} ${styles.ok}`}>
-                        <span className="codicon codicon-check" aria-hidden="true" />
-                        {t('settings.cli.status.installed')}
-                      </span>
-                      <span className={styles.divider} aria-hidden="true" />
-                      <div className={styles.actionButtons}>
-                        <button
-                          type="button"
-                          className={styles.iconBtn}
-                          onClick={() => openInstallGuide(tool.id)}
-                          data-tooltip={howToInstallLabel}
-                          title={howToInstallLabel}
-                          aria-label={howToInstallLabel}
-                        >
-                          <span className="codicon codicon-book" />
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.iconBtn}
-                          onClick={() => openDocs(tool.docsUrl)}
-                          data-tooltip={openDocsLabel}
-                          title={openDocsLabel}
-                          aria-label={openDocsLabel}
-                        >
-                          <span className="codicon codicon-link-external" />
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <span className={`${styles.statusBadge} ${styles.missing}`}>
-                        {t('settings.cli.status.notInstalled')}
-                      </span>
-                      <button
-                        type="button"
-                        className={styles.primaryBtn}
-                        onClick={() => openInstallGuide(tool.id)}
-                      >
-                        <span className="codicon codicon-desktop-download" aria-hidden="true" />
-                        {t('settings.cli.viewInstallGuide')}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          CLI_TOOL_DEFINITIONS.map((tool) => (
+            <div
+              key={tool.id}
+              className={tool.id === 'dsh' ? styles.dshGroup : undefined}
+            >
+              <CliToolCard
+                tool={tool}
+                status={statusMap[tool.id]}
+                onOpenInstall={openInstallGuide}
+                onOpenDocs={openDocs}
+              />
+              {/* Host connection belongs with the DSH install row, not above the whole CLI list. */}
+              {tool.id === 'dsh' && <DshConnectionCard />}
+            </div>
+          ))
         )}
       </div>
 

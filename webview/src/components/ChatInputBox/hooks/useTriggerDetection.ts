@@ -268,6 +268,19 @@ function isLineStart(text: string, index: number): boolean {
 }
 
 /**
+ * Check whether a character is *visible* whitespace (space, tab, NBSP, etc.).
+ * Zero-width invisible characters (ZWSP/ZWNJ/BOM) are NOT visible whitespace —
+ * they are treated transparently by isLineStart, and must not count as a
+ * "space before /" here. Otherwise `a\u200B/rev` would wrongly trigger the
+ * slash menu because the zero-width space between the visible text and the
+ * slash gets mistaken for an ordinary space.
+ */
+function isVisibleWhitespace(char: string): boolean {
+  return isWhitespace(char) && !INVISIBLE_CHAR_REGEX.test(char);
+}
+
+
+/**
  * Detect @ file reference trigger
  * Note: Skip rendered file tags to avoid false triggers after file tags
  */
@@ -321,8 +334,10 @@ function detectSlashTrigger(text: string, cursorPosition: number): TriggerQuery 
 
     // Found /
     if (char === '/') {
-      // Check if / is at line start (invisible IME residue is transparent)
-      if (isLineStart(text, start)) {
+      // Allow / at line start (invisible IME residue is transparent),
+      // or preceded by visible whitespace, so users can type content then /
+      // to invoke a slash command — matches the ! and $ triggers and the CLI.
+      if (isLineStart(text, start) || isVisibleWhitespace(text[start - 1])) {
         const query = text.slice(start + 1, cursorPosition);
         return {
           trigger: '/',
@@ -357,8 +372,9 @@ function detectHashTrigger(text: string, cursorPosition: number): TriggerQuery |
 
     // Found #
     if (char === '#') {
-      // Check if # is at line start (invisible IME residue is transparent)
-      if (isLineStart(text, start)) {
+      // Allow # at line start (invisible IME residue is transparent),
+      // or preceded by visible whitespace, matching the / ! $ triggers.
+      if (isLineStart(text, start) || isVisibleWhitespace(text[start - 1])) {
         const query = text.slice(start + 1, cursorPosition);
         return {
           trigger: '#',

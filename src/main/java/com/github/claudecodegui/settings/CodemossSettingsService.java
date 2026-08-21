@@ -212,6 +212,121 @@ public class CodemossSettingsService {
         }
         return url.trim();
     }
+
+    // ============================================================================
+    // DSH (DeepSeek Harness) connection settings — thin connection only:
+    // bin / host / port / autoStart. Provider keys and model catalog stay in
+    // the DSH Web UI ($DSH_HOME); the plugin never writes them.
+    // ============================================================================
+
+    private static final String DSH_SECTION_KEY = "dsh";
+    private static final String DSH_DEFAULT_HOST = "127.0.0.1";
+    private static final int DSH_DEFAULT_PORT = 3080;
+
+    public String getDshBin() throws IOException {
+        return getDshStringSetting("bin");
+    }
+
+    public void setDshBin(String value) throws IOException {
+        setDshStringSetting("bin", value);
+    }
+
+    public String getDshHost() throws IOException {
+        String value = getDshStringSetting("host");
+        return value.isEmpty() ? DSH_DEFAULT_HOST : value;
+    }
+
+    public void setDshHost(String value) throws IOException {
+        setDshStringSetting("host", value);
+    }
+
+    public int getDshPort() throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has(DSH_SECTION_KEY) || config.get(DSH_SECTION_KEY).isJsonNull()) {
+            return DSH_DEFAULT_PORT;
+        }
+        JsonObject dsh = config.getAsJsonObject(DSH_SECTION_KEY);
+        if (!dsh.has("port") || dsh.get("port").isJsonNull()) {
+            return DSH_DEFAULT_PORT;
+        }
+        try {
+            int port = dsh.get("port").getAsInt();
+            return port > 0 && port <= 65535 ? port : DSH_DEFAULT_PORT;
+        } catch (Exception e) {
+            return DSH_DEFAULT_PORT;
+        }
+    }
+
+    public void setDshPort(int port) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject dsh = config.has(DSH_SECTION_KEY) && !config.get(DSH_SECTION_KEY).isJsonNull()
+                ? config.getAsJsonObject(DSH_SECTION_KEY)
+                : new JsonObject();
+        if (port > 0 && port <= 65535 && port != DSH_DEFAULT_PORT) {
+            dsh.addProperty("port", port);
+        } else {
+            dsh.remove("port");
+        }
+        config.add(DSH_SECTION_KEY, dsh);
+        writeConfig(config);
+    }
+
+    public boolean getDshAutoStart() throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has(DSH_SECTION_KEY) || config.get(DSH_SECTION_KEY).isJsonNull()) {
+            return true;
+        }
+        JsonObject dsh = config.getAsJsonObject(DSH_SECTION_KEY);
+        if (!dsh.has("autoStart") || dsh.get("autoStart").isJsonNull()) {
+            return true;
+        }
+        try {
+            return dsh.get("autoStart").getAsBoolean();
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    public void setDshAutoStart(boolean autoStart) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject dsh = config.has(DSH_SECTION_KEY) && !config.get(DSH_SECTION_KEY).isJsonNull()
+                ? config.getAsJsonObject(DSH_SECTION_KEY)
+                : new JsonObject();
+        if (autoStart) {
+            dsh.remove("autoStart");
+        } else {
+            dsh.addProperty("autoStart", false);
+        }
+        config.add(DSH_SECTION_KEY, dsh);
+        writeConfig(config);
+    }
+
+    private String getDshStringSetting(String field) throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has(DSH_SECTION_KEY) || config.get(DSH_SECTION_KEY).isJsonNull()) {
+            return "";
+        }
+        JsonObject dsh = config.getAsJsonObject(DSH_SECTION_KEY);
+        if (!dsh.has(field) || dsh.get(field).isJsonNull()) {
+            return "";
+        }
+        return dsh.get(field).getAsString();
+    }
+
+    private void setDshStringSetting(String field, String value) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject dsh = config.has(DSH_SECTION_KEY) && !config.get(DSH_SECTION_KEY).isJsonNull()
+                ? config.getAsJsonObject(DSH_SECTION_KEY)
+                : new JsonObject();
+        String v = value != null ? value.trim() : "";
+        if (v.isEmpty()) {
+            dsh.remove(field);
+        } else {
+            dsh.addProperty(field, v);
+        }
+        config.add(DSH_SECTION_KEY, dsh);
+        writeConfig(config);
+    }
     private static final String COMMIT_AI_KEY = "commitAi";
     private static final String PROMPT_ENHANCER_KEY = "promptEnhancer";
     private static final String AI_FEATURE_PROVIDER_KEY = "provider";

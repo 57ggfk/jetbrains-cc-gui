@@ -223,6 +223,11 @@ async function createRuntime(requestContext, callbacks) {
     createdAt: Date.now(),
     lastUsedAt: Date.now(),
     activeTurnCount: 0,
+    // CLI turn accounting for the quiescence gate — see waitForReaderQuiescent.
+    // cliTurnInFlight: a run whose output we have seen but whose closing result
+    // has not. readerProgress: ticks per message the perpetual reader routes.
+    cliTurnInFlight: false,
+    readerProgress: 0,
     stderrLines: [],
     query: null,
     inputStream: new AsyncStream(),
@@ -286,6 +291,52 @@ async function createRuntime(requestContext, callbacks) {
 }
 
 /**
+ * Wait until the perpetual reader has drained the SDK pipe and parked on
+ * query.next() with no CLI run in flight. Called by executeTurn BEFORE it opens
+ * the turn sink and enqueues the user message, so anything still buffered in the
+ * pipe is prior-turn tail (e.g. a still-in-flight background run_in_background,
+ * #1305) and routes inter-turn instead of into the new turn's sink — where its
+ * output, and worse its closing result, would be misattributed and seed the
+ * sticky "answered my previous message" / one-behind shift (#1410).
+ *
+ * Quiescence = a full macrotask with no reader progress (the reader is parked on
+ * a pending query.next()) AND cliTurnInFlight === false. An idle pipe therefore
+ * returns after one macrotask — the CLI would queue our send behind an in-flight
+ * run anyway, so this adds no latency on the common path; it only aligns the
+ * daemon's accounting with the CLI's actual order. Resolves on quiescence, on
+ * dispose (runtime.closed is checked each tick so abort stays responsive and the
+ * turn fails fast), or a loud 120s protocol-anomaly backstop so a stuck CLI
+ * cannot wedge the daemon silently.
+ */
+export async function waitForReaderQuiescent(runtime) {
+  if (!runtime || runtime.closed) {
+    throw new Error('Runtime closed while waiting for the CLI to become quiet');
+  }
+  const deadline = Date.now() + 120_000;
+  let lastProgress = runtime.readerProgress || 0;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (runtime.closed) {
+      throw new Error('Runtime closed while waiting for the CLI to become quiet');
+    }
+    // Normalize: readerProgress is undefined until the reader processes its
+    // first message, and undefined !== 0 would otherwise read as perpetual
+    // progress and wedge the gate on a fresh/parked reader.
+    const progress = runtime.readerProgress || 0;
+    const progressed = progress !== lastProgress;
+    lastProgress = progress;
+    if (!progressed && !runtime.cliTurnInFlight) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      console.warn('[LIFECYCLE] waitForReaderQuiescent timed out after 120s'
+        + ' (protocol anomaly; proceeding) cliTurnInFlight=' + !!runtime.cliTurnInFlight);
+      return;
+    }
+  }
+}
+
+/**
  * Start the perpetual reader for a runtime.
  * The reader continuously consumes runtime.query.next() for the runtime's lifetime,
  * routing messages to either the active turn (via turnSink) or inter-turn handling.
@@ -339,6 +390,24 @@ export function startPerpetualReader(runtime, callbacks) {
         // messages are also touched by executeTurn; touching here is idempotent and
         // additionally covers the inter-turn path executeTurn cannot see.
         touchRuntime(runtime);
+
+        // CLI turn accounting for executeTurn's quiescence gate. Substantive
+        // output (assistant / user / stream_event) means a CLI run is in flight;
+        // its closing result clears it (output always precedes its result on the
+        // pipe). system and other control messages leave the flag untouched, so
+        // prewarmed/idle runtimes stay quiet. This lets a new user turn wait for
+        // a still-in-flight run (e.g. a run_in_background completion, #1305)
+        // instead of absorbing its output — and worse, its result — which is the
+        // sticky "answered my previous message" / one-behind shift (#1410).
+        if (msg?.type === 'result') {
+          runtime.cliTurnInFlight = false;
+        } else if (msg?.type === 'assistant' || msg?.type === 'user' || msg?.type === 'stream_event') {
+          runtime.cliTurnInFlight = true;
+        }
+        // readerProgress ticks once per processed message so waitForReaderQuiescent
+        // can tell a parked reader (no progress across a macrotask) from one still
+        // draining the pipe.
+        runtime.readerProgress = (runtime.readerProgress || 0) + 1;
 
         // Dual-mode routing: check if we're in an active turn or inter-turn period
         if (runtime.turnSink) {
@@ -394,6 +463,11 @@ export function startPerpetualReader(runtime, callbacks) {
           // see collectTaskEventsFromMessages — so this is the live fast-path.)
           const taskNotificationXml = extractTaskNotificationXml(msg);
           if (taskNotificationXml !== null) {
+            // A <task-notification> XML carries a background agent's terminal
+            // result report (recent CLI emits no separate `result` for it), so it
+            // IS the run's completion — clear the in-flight flag so the next user
+            // turn's quiescence gate does not wait on a run that already ended.
+            runtime.cliTurnInFlight = false;
             if (runtime.sessionId) {
               const parsed = parseTaskNotificationXml(taskNotificationXml);
               const event = buildTaskNotificationEvent(parsed);
@@ -515,6 +589,21 @@ export async function acquireRuntime(requestContext, callbacks) {
   await cleanupAnonymousFromRegistry((runtime) => disposeRuntime(runtime, callbacks));
 
   let runtime = findRuntimeForRequest(requestContext);
+
+  // Never reuse a runtime that is closed but somehow still registered. If it
+  // reached acquireRuntime, executeTurn would immediately throw "Runtime is
+  // closed", and the prior abort left abortRequested=true on it, so sendInternal
+  // would swallow that failure as a graceful "User interrupted" — silently
+  // eating the message the user just sent. Evict it from the registry and treat
+  // it as absent so a fresh runtime is created instead. (disposeRuntime removes
+  // the runtime from the registry synchronously, so this branch is a defensive
+  // invariant, not a common path.)
+  if (runtime && runtime.closed) {
+    console.log('[LIFECYCLE] discardClosedRuntime sessionId=' + (runtime.sessionId || '(new)')
+      + ' epoch=' + (runtime.runtimeSessionEpoch || '(none)'));
+    removeRuntime(runtime, callbacks?.removeSession);
+    runtime = null;
+  }
 
   if (runtime && runtime.runtimeSignature !== requestContext.runtimeSignature) {
     await disposeRuntime(runtime, callbacks);

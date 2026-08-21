@@ -14,6 +14,7 @@ import { useGrokProvider } from './providers/useGrokProvider';
 import { useKimiProvider } from './providers/useKimiProvider';
 import { useOpenCodeProvider } from './providers/useOpenCodeProvider';
 import { usePiProvider } from './providers/usePiProvider';
+import { useDshProvider } from './providers/useDshProvider';
 import { isCliOnlyProvider, normalizeCliPermissionMode } from './providers/cliProviders';
 import { useUsageTracking } from './providers/useUsageTracking';
 import { useProviderSettings } from './providers/useProviderSettings';
@@ -58,6 +59,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const kimi = useKimiProvider();
   const openCode = useOpenCodeProvider();
   const pi = usePiProvider();
+  const dsh = useDshProvider();
   const { isSdkInstalled, isSdkStatusKnown, sdkStatus, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
@@ -89,6 +91,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedPiModel, setSelectedPiModel,
     piPermissionMode, setPiPermissionMode,
   } = pi;
+  const {
+    selectedDshModel, setSelectedDshModel,
+    dshPermissionMode, setDshPermissionMode,
+  } = dsh;
 
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
@@ -101,10 +107,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
+    setSelectedDshModel,
     setGrokPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
+    setDshPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -118,10 +126,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedKimiModel,
     selectedOpenCodeModel,
     selectedPiModel,
+    selectedDshModel,
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
+    dshPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -138,6 +148,8 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
           ? selectedOpenCodeModel
           : currentProvider === 'pi'
             ? selectedPiModel
+            : currentProvider === 'dsh'
+              ? selectedDshModel
             : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
@@ -171,6 +183,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       if (currentProvider === 'kimi') setKimiPermissionMode(cliMode);
       if (currentProvider === 'opencode') setOpenCodePermissionMode(cliMode);
       if (currentProvider === 'pi') setPiPermissionMode(cliMode);
+      if (currentProvider === 'dsh') setDshPermissionMode(cliMode);
       sendBridgeEvent('set_mode', cliMode);
       return;
     }
@@ -185,6 +198,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setKimiPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
+    setDshPermissionMode,
   ]);
 
   const handleModelSelect = useCallback((modelId: string) => {
@@ -208,6 +222,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'pi') {
       setSelectedPiModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'dsh') {
+      setSelectedDshModel(modelId);
+      sendBridgeEvent('set_model', modelId);
     }
   }, [
     currentProvider,
@@ -218,6 +235,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
+    setSelectedDshModel,
   ]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
@@ -235,6 +253,8 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       modeToSet = normalizeCliPermissionMode(openCodePermissionMode);
     } else if (providerId === 'pi') {
       modeToSet = normalizeCliPermissionMode(piPermissionMode);
+    } else if (providerId === 'dsh') {
+      modeToSet = normalizeCliPermissionMode(dshPermissionMode);
     }
     setPermissionMode(modeToSet);
     sendBridgeEvent('set_mode', modeToSet);
@@ -245,6 +265,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     else if (providerId === 'kimi') newModel = selectedKimiModel;
     else if (providerId === 'opencode') newModel = selectedOpenCodeModel;
     else if (providerId === 'pi') newModel = selectedPiModel;
+    else if (providerId === 'dsh') newModel = selectedDshModel;
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
@@ -253,12 +274,14 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
+    dshPermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
     selectedPiModel,
+    selectedDshModel,
     longContextEnabled,
   ]);
 
@@ -315,6 +338,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...kimi,
     ...openCode,
     ...pi,
+    ...dsh,
     ...usage,
     ...settings,
     sdkStatus,

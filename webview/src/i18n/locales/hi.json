@@ -903,7 +903,7 @@
     "loading": "इतिहास लोड हो रहा है...",
     "loadFailed": "लोड विफल",
     "noSessions": "कोई इतिहास सत्र नहीं",
-    "noSessionsDesc": "वर्तमान परियोजना में Claude सत्र रिकॉर्ड नहीं मिले",
+    "noSessionsDesc": "वर्तमान परियोजना में सत्र रिकॉर्ड नहीं मिले",
     "totalSessions": "कुल {{count}} सत्र · {{total}} संदेश",
     "messageCount": "{{count}} संदेश",
     "searchPlaceholder": "सत्र शीर्षक खोजें...",
@@ -1026,6 +1026,7 @@
   },
   "config": {
     "clickToCopy": "कॉपी करने के लिए क्लिक करें",
+    "officialDocs": "आधिकारिक दस्तावेज़",
     "switch": "स्विच",
     "switchProvider": "प्रदाता स्विच करें",
     "runtimeProvider": {
@@ -1382,7 +1383,9 @@
     "keepAllConfirmMessage": "वर्तमान परिवर्तनों को आधार के रूप में स्वीकार करें। भविष्य के परिवर्तन शून्य से ट्रैक किए जाएंगे।",
     "discardAllSuccess": "सभी परिवर्तन हटा दिए गए",
     "discardAllFailed": "हटाना विफल: {{error}}",
-    "keepAllSuccess": "सभी परिवर्तन रखे गए, ट्रैकिंग रीसेट"
+    "keepAllSuccess": "सभी परिवर्तन रखे गए, ट्रैकिंग रीसेट",
+    "multiAgentBadge": "मल्टी-एजेंट",
+    "multiAgentEdited": "इस सत्र में {{count}} एजेंटों ने इस फ़ाइल को संपादित किया — सावधानी से देखें"
   },
   "skills": {
     "title": "Skills",
@@ -1538,11 +1541,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 का अपग्रेड मॉडल"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · डिफ़ॉल्ट अनुशंसित मॉडल"
+        "description": "Sonnet 5 · डिफ़ॉल्ट अनुशंसित मॉडल"
       },
       "opus5": {
         "label": "Opus 5",
@@ -1619,7 +1618,7 @@
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
-      "tooltip": "Codex approval_policy=untrusted – prompts before editing files or running shell commands.",
+      "tooltip": "Codex approval_policy=on-request – prompts before editing files or running shell commands.",
       "description": "Safest option. Every write or command requires your approval."
     },
     "plan": {

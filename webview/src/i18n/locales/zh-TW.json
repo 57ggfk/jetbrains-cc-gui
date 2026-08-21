@@ -862,6 +862,10 @@
         "pi": {
           "name": "PI CLI",
           "description": "極簡終端編碼代理，支援多提供商模型"
+        },
+        "dsh": {
+          "name": "DeepSeek Harness",
+          "description": "DeepSeek 終端智慧體宿主（常駐 dsh web）"
         }
       },
       "installDialog": {
@@ -879,7 +883,23 @@
       "listTitle": "本機 CLI 工具",
       "summary": "{{installed}} / {{total}} 已安裝",
       "moreComingSoon": "即將支援更多",
-      "copyPath": "複製路徑"
+      "copyPath": "複製路徑",
+      "dsh": {
+        "cardTitle": "DeepSeek Harness (DSH)",
+        "hint": "DSH 由本機一個常駐 dsh web 宿主承載所有工作階段；外掛會接管已在執行的宿主，而不會重複啟動。",
+        "state": {
+          "checking": "檢測中…",
+          "notInstalled": "未安裝",
+          "notRunning": "未執行",
+          "connected": "已連線"
+        },
+        "adopted": "已接管",
+        "adoptedHint": "已接管正在執行的宿主；外掛不會停止它。",
+        "openWebUi": "開啟 DSH Web UI",
+        "startHost": "立即啟動",
+        "stopHost": "關閉（僅限外掛啟動的宿主）",
+        "autoStart": "需要時自動啟動"
+      }
     }
   },
   "history": {
@@ -908,7 +928,7 @@
     "loading": "載入歷史記錄中...",
     "loadFailed": "載入失敗",
     "noSessions": "暫無歷史會話",
-    "noSessionsDesc": "目前專案下沒有找到 Claude 會話記錄",
+    "noSessionsDesc": "目前專案下沒有找到會話記錄",
     "totalSessions": "共 {{count}} 個會話 · {{total}} 條訊息",
     "messageCount": "{{count}} 條訊息",
     "searchPlaceholder": "搜尋會話標題...",
@@ -1031,6 +1051,7 @@
   },
   "config": {
     "clickToCopy": "點選複製",
+    "officialDocs": "官方文件",
     "switch": "切換",
     "switchProvider": "切換供應商",
     "runtimeProvider": {
@@ -1388,7 +1409,9 @@
     "keepAllConfirmMessage": "將當前改動作為新基準，後續改動從零開始記錄。",
     "discardAllSuccess": "已撤銷所有檔案更改",
     "discardAllFailed": "撤銷失敗: {{error}}",
-    "keepAllSuccess": "已保存全部，改動記錄已重置"
+    "keepAllSuccess": "已保存全部，改動記錄已重置",
+    "multiAgentBadge": "多 Agent",
+    "multiAgentEdited": "本會話有 {{count}} 個 Agent 修改過此檔案，請留意合併衝突"
   },
   "skills": {
     "title": "Skills",
@@ -1544,11 +1567,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 升級模型"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · 預設推薦模型"
+        "description": "Sonnet 5 · 預設推薦模型"
       },
       "opus5": {
         "label": "Opus 5",
@@ -1625,7 +1644,7 @@
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
-      "tooltip": "Codex approval_policy=untrusted – prompts before editing files or running shell commands.",
+      "tooltip": "Codex approval_policy=on-request – prompts before editing files or running shell commands.",
       "description": "Safest option. Every write or command requires your approval."
     },
     "plan": {
@@ -1670,6 +1689,9 @@
       "badge": "Beta",
       "title": "Beta 功能",
       "message": "此功能仍處於 Beta 階段。如果遇到使用 Bug，請及時回饋給作者。"
+    },
+    "dsh": {
+      "label": "DeepSeek Harness"
     }
   },
   "promptEnhancer": {

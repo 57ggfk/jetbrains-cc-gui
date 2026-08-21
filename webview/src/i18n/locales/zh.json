@@ -579,6 +579,10 @@
         "pi": {
           "name": "PI CLI",
           "description": "极简终端编码代理，支持多提供商模型"
+        },
+        "dsh": {
+          "name": "DeepSeek Harness",
+          "description": "DeepSeek 终端智能体宿主（常驻 dsh web）"
         }
       },
       "installDialog": {
@@ -596,7 +600,23 @@
       "listTitle": "本地 CLI 工具",
       "summary": "{{installed}} / {{total}} 已安装",
       "moreComingSoon": "即将支持更多",
-      "copyPath": "复制路径"
+      "copyPath": "复制路径",
+      "dsh": {
+        "cardTitle": "DeepSeek Harness (DSH)",
+        "hint": "DSH 由本机一个常驻 dsh web 宿主承载所有会话；插件会接管已在运行的宿主，而不会重复启动。",
+        "state": {
+          "checking": "检测中…",
+          "notInstalled": "未安装",
+          "notRunning": "未运行",
+          "connected": "已连接"
+        },
+        "adopted": "已接管",
+        "adoptedHint": "已接管正在运行的宿主；插件不会停止它。",
+        "openWebUi": "打开 DSH Web UI",
+        "startHost": "立即启动",
+        "stopHost": "关闭（仅限插件启动的宿主）",
+        "autoStart": "需要时自动启动"
+      }
     },
     "pluginModels": {
       "title": "自定义模型",
@@ -1236,7 +1256,7 @@
     "loading": "加载历史记录中...",
     "loadFailed": "加载失败",
     "noSessions": "暂无历史会话",
-    "noSessionsDesc": "当前项目下没有找到 Claude 会话记录",
+    "noSessionsDesc": "当前项目下没有找到会话记录",
     "totalSessions": "共 {{count}} 个会话 · {{total}} 条消息",
     "messageCount": "{{count}} 条消息",
     "searchPlaceholder": "搜索会话标题...",
@@ -1360,6 +1380,7 @@
   },
   "config": {
     "clickToCopy": "点击复制",
+    "officialDocs": "官方文档",
     "switch": "切换",
     "switchProvider": "切换供应商",
     "runtimeProvider": {
@@ -1735,7 +1756,9 @@
     "keepAllConfirmMessage": "将当前改动作为新基准，后续改动从零开始记录。",
     "discardAllSuccess": "已撤销所有文件更改",
     "discardAllFailed": "撤销失败: {{error}}",
-    "keepAllSuccess": "已保存全部，改动记录已重置"
+    "keepAllSuccess": "已保存全部，改动记录已重置",
+    "multiAgentBadge": "多 Agent",
+    "multiAgentEdited": "本会话有 {{count}} 个 Agent 修改过此文件，请留意合并冲突"
   },
   "skills": {
     "title": "Skills",
@@ -1920,11 +1943,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 升级模型"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · 默认推荐模型"
+        "description": "Sonnet 5 · 默认推荐模型"
       },
       "opus5": {
         "label": "Opus 5",
@@ -2001,7 +2020,7 @@
   "codexModes": {
     "default": {
       "label": "建议模式",
-      "tooltip": "Codex approval_policy=untrusted：执行命令或写文件前都会弹窗确认。",
+      "tooltip": "Codex approval_policy=on-request：执行命令或写文件前都会弹窗确认。",
       "description": "最安全的选择，每一步都需要你亲自批准。"
     },
     "plan": {
@@ -2046,6 +2065,9 @@
       "badge": "Beta",
       "title": "Beta 功能",
       "message": "此功能仍处于 Beta 阶段。如果遇到使用 Bug，请及时反馈给作者。"
+    },
+    "dsh": {
+      "label": "DeepSeek Harness"
     }
   },
   "promptEnhancer": {

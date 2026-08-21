@@ -10,6 +10,7 @@ import com.github.claudecodegui.handler.CodexMcpServerHandler;
 import com.github.claudecodegui.handler.CodexPetHandler;
 import com.github.claudecodegui.handler.CliModelsHandler;
 import com.github.claudecodegui.handler.CliStatusHandler;
+import com.github.claudecodegui.handler.DshHostHandler;
 import com.github.claudecodegui.handler.DependencyHandler;
 import com.github.claudecodegui.handler.DiffHandler;
 import com.github.claudecodegui.handler.core.HandlerContext;
@@ -239,17 +240,17 @@ public class ChatWindowDelegate {
         }
     }
 
+    /**
+     * Intentionally a no-op for startup.
+     * <p>
+     * vscode-cc-gui only writes {@code ~/.claude/settings.json} when the user
+     * switches/saves a provider — never when the chat window opens. Auto-sync on
+     * open risked overwriting user/cc-switch credentials with an incomplete
+     * (empty env) provider payload. Provider switch still calls
+     * {@link CodemossSettingsService#applyActiveProviderToClaudeSettings()}.
+     */
     public void syncActiveProvider() {
-        try {
-            CodemossSettingsService settingsService = host.getSettingsService();
-            if (settingsService.isLocalProviderActive()) {
-                LOG.info("[ClaudeSDKToolWindow] Local provider active, skipping startup sync");
-                return;
-            }
-            settingsService.applyActiveProviderToClaudeSettings();
-        } catch (Exception e) {
-            LOG.warn("Failed to sync active provider on startup: " + e.getMessage());
-        }
+        LOG.info("[ClaudeSDKToolWindow] Skip startup settings.json sync (provider switch/save only; empty-env protected)");
     }
 
     public String setupPermissionService() {
@@ -360,6 +361,7 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(new DependencyHandler(handlerContext));
         messageDispatcher.registerHandler(new CliModelsHandler(handlerContext));
         messageDispatcher.registerHandler(new CliStatusHandler(handlerContext));
+        messageDispatcher.registerHandler(new DshHostHandler(handlerContext));
         messageDispatcher.registerHandler(new ClipboardHandler(handlerContext));
         messageDispatcher.registerHandler(new NodeProcessHandler(handlerContext));
 
@@ -440,7 +442,7 @@ public class ChatWindowDelegate {
             String mode = session != null ? session.getPermissionMode() : "default";
             com.github.claudecodegui.notifications.ClaudeNotifier.setMode(project, mode);
 
-            String model = session != null ? session.getModel() : "claude-sonnet-4-7";
+            String model = session != null ? session.getModel() : "claude-sonnet-5";
             com.github.claudecodegui.notifications.ClaudeNotifier.setModel(project, model);
 
             try {

@@ -21,10 +21,12 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     setSelectedKimiModel: vi.fn(),
     setSelectedOpenCodeModel: vi.fn(),
     setSelectedPiModel: vi.fn(),
+    setSelectedDshModel: vi.fn(),
     setGrokPermissionMode: vi.fn(),
     setKimiPermissionMode: vi.fn(),
     setOpenCodePermissionMode: vi.fn(),
     setPiPermissionMode: vi.fn(),
+    setDshPermissionMode: vi.fn(),
     setPermissionMode: vi.fn(),
     setLongContextEnabled: vi.fn(),
     setReasoningEffort: vi.fn(),
@@ -38,10 +40,12 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     selectedKimiModel: 'auto',
     selectedOpenCodeModel: 'opencode-default',
     selectedPiModel: 'auto',
+    selectedDshModel: 'auto',
     grokPermissionMode: 'default' as PermissionMode,
     kimiPermissionMode: 'default' as PermissionMode,
     openCodePermissionMode: 'default' as PermissionMode,
     piPermissionMode: 'default' as PermissionMode,
+    dshPermissionMode: 'default' as PermissionMode,
     longContextEnabled: false,
     reasoningEffort: 'medium',
     codexFastMode: 'normal',
@@ -207,9 +211,9 @@ describe('useModelStatePersistence — retired model migration', () => {
     renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
     vi.advanceTimersByTime(200);
 
-    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-4-7');
+    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-5');
     expect(setSelectedClaudeModel).not.toHaveBeenCalledWith('claude-fable-5');
-    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-4-7']]);
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-5']]);
   });
 
   it('migrates a backend-supplied retired model via __INITIAL_TAB_MODEL__', () => {
@@ -225,8 +229,8 @@ describe('useModelStatePersistence — retired model migration', () => {
     renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
     vi.advanceTimersByTime(200);
 
-    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-4-7');
-    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-4-7']]);
+    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-5');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-5']]);
   });
 
   it('falls back to the default model (not the list head) for unrecognized saved models', () => {
