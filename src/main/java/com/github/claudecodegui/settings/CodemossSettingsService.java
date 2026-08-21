@@ -7,6 +7,7 @@ import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.model.ConflictStrategy;
 import com.github.claudecodegui.model.DeleteResult;
 import com.github.claudecodegui.model.PromptScope;
+import com.github.claudecodegui.session.SessionState;
 import com.github.claudecodegui.dependency.DependencyManager;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -352,9 +353,10 @@ public class CodemossSettingsService {
     private static final String AI_FEATURE_RESOLUTION_MANUAL = "manual";
     private static final String AI_FEATURE_RESOLUTION_AUTO = "auto";
     private static final String AI_FEATURE_RESOLUTION_UNAVAILABLE = "unavailable";
-    private static final String DEFAULT_PROMPT_ENHANCER_CLAUDE_MODEL = "claude-sonnet-4-6";
+    // claude-sonnet-4-6/4-7 are retired - defaults must stay on live models (#1678, #1693).
+    private static final String DEFAULT_PROMPT_ENHANCER_CLAUDE_MODEL = "claude-sonnet-5";
     private static final String DEFAULT_PROMPT_ENHANCER_CODEX_MODEL = "gpt-5.5";
-    private static final String DEFAULT_COMMIT_AI_CLAUDE_MODEL = "claude-sonnet-4-6";
+    private static final String DEFAULT_COMMIT_AI_CLAUDE_MODEL = "claude-sonnet-5";
     private static final String DEFAULT_COMMIT_AI_CODEX_MODEL = "gpt-5.5";
     private static final String DEFAULT_AI_FEATURE_GROK_MODEL = "grok";
     private static final String DEFAULT_AI_FEATURE_KIMI_MODEL = "auto";
@@ -2301,6 +2303,12 @@ public class CodemossSettingsService {
                 } catch (Exception ignored) {
                     raw = null;
                 }
+            }
+            // Self-heal persisted retired Claude model ids (e.g. a config saved while
+            // the default was claude-sonnet-4-6 keeps that dead id forever; every
+            // generation then fails with an empty/failed response - #1693, see #1678).
+            if (AI_FEATURE_PROVIDER_CLAUDE.equals(provider)) {
+                raw = SessionState.normalizeRetiredModelId(raw);
             }
             models.addProperty(provider, normalizeAiFeatureModel(raw, fallback));
         }

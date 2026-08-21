@@ -230,7 +230,7 @@ public class SessionState {
      * @return the model id to store - retired ids mapped to their live replacement,
      *         anything else (including non-Claude ids) passed through unchanged
      */
-    static String normalizeRetiredModelId(String model) {
+    public static String normalizeRetiredModelId(String model) {
         if (model == null) {
             return null;
         }
