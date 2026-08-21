@@ -84,6 +84,9 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        default com.github.claudecodegui.provider.grok.GrokSDKBridge getGrokSDKBridge() {
+            return null;
+        }
         Map<String, MarkerCliBridge> getCliBridges();
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
@@ -330,6 +333,7 @@ public class ChatWindowDelegate {
                 project,
                 claudeSDKBridge,
                 codexSDKBridge,
+                host.getGrokSDKBridge(),
                 settingsService,
                 jsCallback,
                 host::isActiveContent,

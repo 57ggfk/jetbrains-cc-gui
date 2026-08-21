@@ -154,6 +154,32 @@ public class CodemossSettingsService {
         LOG.info("[CodemossSettingsService] Set grok.oauthBaseUrl=" + redactUrl(url));
     }
 
+    public JsonObject getGrokEnv() throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has("grok") || config.get("grok").isJsonNull()) {
+            return new JsonObject();
+        }
+        JsonObject grok = config.getAsJsonObject("grok");
+        if (grok.has("env") && grok.get("env").isJsonObject()) {
+            return grok.getAsJsonObject("env");
+        }
+        return new JsonObject();
+    }
+
+    public void setGrokEnv(JsonObject env) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject grok = config.has("grok") && !config.get("grok").isJsonNull()
+                ? config.getAsJsonObject("grok")
+                : new JsonObject();
+        if (env == null || env.size() == 0) {
+            grok.remove("env");
+        } else {
+            grok.add("env", env);
+        }
+        config.add("grok", grok);
+        writeConfig(config);
+    }
+
     public String getGrokGatewayOrigin() throws IOException {
         return getGrokStringSetting("gatewayOrigin");
     }
