@@ -315,18 +315,11 @@ public class OmpHistoryReader {
                 }
                 try (DirectoryStream<Path> files = Files.newDirectoryStream(cwdDir, "*.jsonl")) {
                     for (Path file : files) {
-                        String fileName = file.getFileName().toString();
-                        boolean nameHint = fileName.endsWith("_" + id + ".jsonl") || fileName.contains(id);
                         SessionHeader header = readSessionHeader(file);
                         if (header == null) {
                             header = headerFromFileName(file);
                         }
                         if (header == null || !id.equals(header.sessionId)) {
-                            // Cheap name match only if header missing/mismatched
-                            if (!nameHint) {
-                                continue;
-                            }
-                            // Name looks right but header id differs — skip for safety.
                             continue;
                         }
                         if (cwd != null && !cwd.trim().isEmpty() && header.cwd != null
