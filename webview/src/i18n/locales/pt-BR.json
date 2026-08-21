@@ -1769,7 +1769,7 @@
   "codexModes": {
     "default": {
       "label": "Sugerir (aprovação)",
-      "tooltip": "Codex approval_policy=untrusted – solicita antes de editar arquivos ou executar comandos shell.",
+      "tooltip": "Codex approval_policy=on-request – solicita antes de editar arquivos ou executar comandos shell.",
       "description": "Opção mais segura. Cada escrita ou comando requer sua aprovação."
     },
     "plan": {
