@@ -36,6 +36,8 @@ function logDebug(...args) {
 }
 
 const MUX_OPEN_TIMEOUT_MS = 15_000;
+const SILENCE_TIMEOUT_MS = 15 * 60_000;
+const BRIDGE_DRAIN_TIMEOUT_MS = 5_000;
 
 function isImageAttachment(attachment) {
   const mediaType = attachment && typeof attachment.mediaType === 'string'
@@ -44,7 +46,7 @@ function isImageAttachment(attachment) {
   return mediaType.startsWith('image/');
 }
 
-function splitModelTuple(model) {
+export function splitModelTuple(model) {
   const trimmed = String(model || '').trim();
   if (!trimmed || trimmed === 'auto' || trimmed === 'default' || trimmed === 'dsh-default') {
     return null;
@@ -57,6 +59,269 @@ function splitModelTuple(model) {
     provider: trimmed.slice(0, slash),
     model: trimmed.slice(slash + 1),
   };
+}
+
+/**
+ * ensure host (adopt or spawn) → workspace.create → session id (create or
+ * reuse). Returns null after emitting the send error when any step fails.
+ */
+async function ensureSession(settings, workCwd, incomingSessionId) {
+  let hostHandle;
+  try {
+    hostHandle = await ensureHost(settings);
+  } catch (error) {
+    emitSendError(error.message, 'DSH');
+    return null;
+  }
+  const { client } = hostHandle;
+  logDebug(`host ${hostHandle.origin} (${hostHandle.ownership})`);
+
+  // Workspace binding — never let the session fall into the host cwd.
+  let workspaceId;
+  try {
+    const workspace = await dshSession.createWorkspace(client, workCwd);
+    workspaceId = dshSession.workspaceIdFromCreate(workspace);
+  } catch (error) {
+    emitSendError(`dsh workspace.create failed: ${error.message}`, 'DSH');
+    return null;
+  }
+
+  // Session identity: DSH returns the real id immediately; never mint a local UUID.
+  let sessionId = dshSession.sessionIdFromThread(incomingSessionId);
+  if (!sessionId) {
+    try {
+      sessionId = await dshSession.createSession(client, workspaceId);
+    } catch (error) {
+      emitSendError(`dsh session.create failed: ${error.message}`, 'DSH');
+      return null;
+    }
+  }
+  return { client, sessionId };
+}
+
+/** Model selection — only when the composer picked an explicit tuple. */
+async function applyModelSelection(client, sessionId, model, reasoningEffort) {
+  const tuple = splitModelTuple(model);
+  if (!tuple || !tuple.provider || !tuple.model) {
+    return;
+  }
+  try {
+    await dshSession.selectModel(
+      client,
+      sessionId,
+      tuple.provider,
+      tuple.model,
+      reasoningEffort || undefined
+    );
+  } catch (error) {
+    logDebug(`selectModel failed (continuing with session model): ${error.message}`);
+  }
+}
+
+/**
+ * Attachments: images become DSH image parts; everything else degrades to a
+ * path note so the model still knows the file exists.
+ */
+function buildTurnContent(message, attachments) {
+  const images = [];
+  const nonImageNotes = [];
+  for (const attachment of Array.isArray(attachments) ? attachments : []) {
+    if (!attachment || !attachment.data) {
+      continue;
+    }
+    if (isImageAttachment(attachment)) {
+      images.push({
+        mediaType: attachment.mediaType,
+        data: attachment.data,
+        name: attachment.fileName || undefined,
+      });
+    } else if (attachment.fileName) {
+      nonImageNotes.push(attachment.fileName);
+    }
+  }
+  let text = String(message ?? '');
+  if (nonImageNotes.length > 0) {
+    text += `\n\n[Attached non-image files not sent inline: ${nonImageNotes.join(', ')}]`;
+  }
+  return { text, images };
+}
+
+function createTurnState() {
+  return {
+    settlement: new DshGoalSettlement(),
+    settled: false,
+    settleError: null,
+    sawTurnStart: false,
+    lastActivityAt: Date.now(),
+    pendingBridges: new Set(),
+  };
+}
+
+/** Marker emissions for stream events; returns false for non-stream kinds. */
+function emitStreamEvent(event) {
+  switch (event.kind) {
+    case 'text-delta':
+      emitJsonStringMarker('[CONTENT_DELTA]', event.text);
+      return true;
+    case 'reasoning-delta':
+      emitJsonStringMarker('[THINKING_DELTA]', event.text);
+      return true;
+    case 'tool-call':
+      emitToolUseMessage({ id: event.toolId, name: event.toolName, input: event.input });
+      return true;
+    case 'tool-result':
+      emitToolResultMessage({
+        toolUseId: event.toolId,
+        content: typeof event.output === 'string' ? event.output : JSON.stringify(event.output ?? ''),
+        isError: event.isError,
+      });
+      return true;
+    case 'usage':
+      emitUsage({
+        input_tokens: event.inputTokens ?? 0,
+        output_tokens: event.outputTokens ?? 0,
+        cache_read_input_tokens: event.cachedTokens ?? 0,
+      });
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Track an in-flight approval/question bridge so settlement can wait for it. */
+function trackBridge(turn, bridge, label) {
+  const tracked = bridge.catch((error) => logDebug(`${label} bridge failed: ${error.message}`));
+  turn.pendingBridges.add(tracked);
+  tracked.finally(() => turn.pendingBridges.delete(tracked));
+}
+
+function handleTurnEvent(client, sessionId, turn, event) {
+  if (emitStreamEvent(event)) {
+    return;
+  }
+  switch (event.kind) {
+    case 'turn-start':
+      turn.sawTurnStart = true;
+      turn.settlement.feed('turn-start');
+      break;
+    case 'turn-completed':
+      if (turn.settlement.feed('turn-completed') === 'settle') {
+        turn.settled = true;
+      }
+      break;
+    case 'turn-error':
+      turn.settlement.feed('turn-error');
+      turn.settleError = event.error || 'DSH turn failed';
+      turn.settled = true;
+      break;
+    case 'goal-change':
+      if (turn.settlement.feed('goal-change', event.data) === 'settle') {
+        turn.settled = true;
+      }
+      break;
+    case 'approval-request':
+      trackBridge(turn, bridgeDshApproval(client, event, sessionId, logDebug), 'approval');
+      break;
+    case 'question-request':
+      trackBridge(turn, bridgeDshQuestion(client, event, sessionId, logDebug), 'question');
+      break;
+    default:
+      break;
+  }
+}
+
+function createMuxHandler(client, sessionId, turn) {
+  return (frame, rpcId, raw) => {
+    const frameSessionId = peekMuxSessionId(raw);
+    if (!frameSessionId || frameSessionId !== sessionId) {
+      return;
+    }
+    turn.lastActivityAt = Date.now();
+    const frameType = typeof frame.type === 'string' ? frame.type : '';
+    const events = projectMuxFrame(frameType, frame, rpcId);
+    for (const event of events) {
+      handleTurnEvent(client, sessionId, turn, event);
+    }
+  };
+}
+
+/** Resolve true once the mux socket is open, false on timeout. */
+function awaitMuxOpen(mux) {
+  let timer = null;
+  return Promise.race([
+    mux.whenOpen().then(() => true),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), MUX_OPEN_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/** Best-effort cancel on interrupt (SIGTERM from Java process manager). */
+function registerShutdownCancel(client, sessionId, mux) {
+  const onShutdownSignal = () => {
+    dshSession.cancel(client, sessionId).catch(() => {});
+    mux.close();
+    process.exit(143);
+  };
+  process.once('SIGTERM', onShutdownSignal);
+  process.once('SIGINT', onShutdownSignal);
+}
+
+/** Queue the user turn; returns false after emitting the send error on failure. */
+async function promptTurn(client, sessionId, mux, text, images) {
+  beginStream();
+  try {
+    const ack = await dshSession.prompt(client, sessionId, text, images);
+    if (ack && ack.accepted === false) {
+      throw new Error(`prompt rejected by host (${ack.reason || 'unknown reason'})`);
+    }
+    return true;
+  } catch (error) {
+    endStream();
+    mux.close();
+    emitSendError(`dsh session.prompt failed: ${error.message}`, 'DSH');
+    return false;
+  }
+}
+
+/**
+ * Wait for Goal-aware settlement. Silence watchdog: no frames for this
+ * session and no in-flight approval/question for a long stretch means the
+ * turn terminal was lost (e.g. mux reconnect gap) — fail instead of hanging.
+ */
+function awaitSettlement(turn) {
+  return new Promise((resolve) => {
+    const poll = setInterval(() => {
+      if (turn.settled) {
+        clearInterval(poll);
+        resolve();
+        return;
+      }
+      if (
+        turn.pendingBridges.size === 0 &&
+        Date.now() - turn.lastActivityAt > SILENCE_TIMEOUT_MS
+      ) {
+        clearInterval(poll);
+        turn.settleError = 'DSH turn went silent — the host stopped streaming for this session';
+        turn.settled = true;
+        resolve();
+      }
+    }, 100);
+  });
+}
+
+/** Let in-flight approval/question bridges finish their respond RPC. */
+function settlePendingBridges(pendingBridges) {
+  if (pendingBridges.size === 0) {
+    return Promise.resolve();
+  }
+  let timer = null;
+  return Promise.race([
+    Promise.allSettled([...pendingBridges]),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, BRIDGE_DRAIN_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -81,229 +346,42 @@ export async function sendMessage(options = {}) {
   const settings = runtimeSettingsFromEnv();
   const workCwd = cwd && cwd !== 'undefined' && cwd !== 'null' ? cwd : process.cwd();
 
-  let hostHandle;
-  try {
-    hostHandle = await ensureHost(settings);
-  } catch (error) {
-    emitSendError(error.message, 'DSH');
+  const session = await ensureSession(settings, workCwd, incomingSessionId);
+  if (!session) {
     return;
   }
-  const { client } = hostHandle;
-  logDebug(`host ${hostHandle.origin} (${hostHandle.ownership})`);
-
-  // Workspace binding — never let the session fall into the host cwd.
-  let workspaceId;
-  try {
-    const workspace = await dshSession.createWorkspace(client, workCwd);
-    workspaceId = dshSession.workspaceIdFromCreate(workspace);
-  } catch (error) {
-    emitSendError(`dsh workspace.create failed: ${error.message}`, 'DSH');
-    return;
-  }
-
-  // Session identity: DSH returns the real id immediately; never mint a local UUID.
-  let sessionId = dshSession.sessionIdFromThread(incomingSessionId);
-  if (!sessionId) {
-    try {
-      sessionId = await dshSession.createSession(client, workspaceId);
-    } catch (error) {
-      emitSendError(`dsh session.create failed: ${error.message}`, 'DSH');
-      return;
-    }
-  }
+  const { client, sessionId } = session;
   emitSessionId(sessionId);
-
-  // Model selection — only when the composer picked an explicit tuple.
-  const tuple = splitModelTuple(model);
-  if (tuple && tuple.provider && tuple.model) {
-    try {
-      await dshSession.selectModel(
-        client,
-        sessionId,
-        tuple.provider,
-        tuple.model,
-        reasoningEffort || undefined
-      );
-    } catch (error) {
-      logDebug(`selectModel failed (continuing with session model): ${error.message}`);
-    }
-  }
-
-  // Attachments: images become DSH image parts; everything else degrades to a
-  // path note so the model still knows the file exists.
-  const images = [];
-  const nonImageNotes = [];
-  for (const attachment of Array.isArray(attachments) ? attachments : []) {
-    if (!attachment || !attachment.data) {
-      continue;
-    }
-    if (isImageAttachment(attachment)) {
-      images.push({
-        mediaType: attachment.mediaType,
-        data: attachment.data,
-        name: attachment.fileName || undefined,
-      });
-    } else if (attachment.fileName) {
-      nonImageNotes.push(attachment.fileName);
-    }
-  }
-  let text = String(message ?? '');
-  if (nonImageNotes.length > 0) {
-    text += `\n\n[Attached non-image files not sent inline: ${nonImageNotes.join(', ')}]`;
-  }
+  await applyModelSelection(client, sessionId, model, reasoningEffort);
+  const { text, images } = buildTurnContent(message, attachments);
 
   // Mux subscription must be live before prompt, or early frames are lost.
-  const settlement = new DshGoalSettlement();
-  let settled = false;
-  let settleError = null;
-  let sawTurnStart = false;
-  let lastActivityAt = Date.now();
-  const pendingBridges = new Set();
-
-  const mux = new DshMuxConnection(client.muxUrl(), (frame, rpcId, raw) => {
-    const frameSessionId = peekMuxSessionId(raw);
-    if (!frameSessionId || frameSessionId !== sessionId) {
-      return;
-    }
-    lastActivityAt = Date.now();
-    const frameType = typeof frame.type === 'string' ? frame.type : '';
-    const events = projectMuxFrame(frameType, frame, rpcId);
-    for (const event of events) {
-      switch (event.kind) {
-        case 'text-delta':
-          emitJsonStringMarker('[CONTENT_DELTA]', event.text);
-          break;
-        case 'reasoning-delta':
-          emitJsonStringMarker('[THINKING_DELTA]', event.text);
-          break;
-        case 'tool-call':
-          emitToolUseMessage({ id: event.toolId, name: event.toolName, input: event.input });
-          break;
-        case 'tool-result':
-          emitToolResultMessage({
-            toolUseId: event.toolId,
-            content: typeof event.output === 'string' ? event.output : JSON.stringify(event.output ?? ''),
-            isError: event.isError,
-          });
-          break;
-        case 'usage':
-          emitUsage({
-            input_tokens: event.inputTokens ?? 0,
-            output_tokens: event.outputTokens ?? 0,
-            cache_read_input_tokens: event.cachedTokens ?? 0,
-          });
-          break;
-        case 'turn-start':
-          sawTurnStart = true;
-          settlement.feed('turn-start');
-          break;
-        case 'turn-completed':
-          if (settlement.feed('turn-completed') === 'settle') {
-            settled = true;
-          }
-          break;
-        case 'turn-error':
-          settlement.feed('turn-error');
-          settleError = event.error || 'DSH turn failed';
-          settled = true;
-          break;
-        case 'goal-change':
-          if (settlement.feed('goal-change', event.data) === 'settle') {
-            settled = true;
-          }
-          break;
-        case 'approval-request': {
-          const bridge = bridgeDshApproval(client, event, sessionId, logDebug)
-            .catch((error) => logDebug(`approval bridge failed: ${error.message}`));
-          pendingBridges.add(bridge);
-          bridge.finally(() => pendingBridges.delete(bridge));
-          break;
-        }
-        case 'question-request': {
-          const bridge = bridgeDshQuestion(client, event, sessionId, logDebug)
-            .catch((error) => logDebug(`question bridge failed: ${error.message}`));
-          pendingBridges.add(bridge);
-          bridge.finally(() => pendingBridges.delete(bridge));
-          break;
-        }
-        default:
-          break;
-      }
-    }
-  }, logDebug);
-
+  const turn = createTurnState();
+  const mux = new DshMuxConnection(client.muxUrl(), createMuxHandler(client, sessionId, turn), logDebug);
   mux.connect();
-  const opened = await Promise.race([
-    mux.whenOpen().then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), MUX_OPEN_TIMEOUT_MS)),
-  ]);
+  const opened = await awaitMuxOpen(mux);
   if (!opened) {
     mux.close();
     emitSendError('dsh mux WebSocket did not open in time', 'DSH');
     return;
   }
 
-  // Best-effort cancel on interrupt (SIGTERM from Java process manager).
-  const onShutdownSignal = () => {
-    dshSession.cancel(client, sessionId).catch(() => {});
-    mux.close();
-    process.exit(143);
-  };
-  process.once('SIGTERM', onShutdownSignal);
-  process.once('SIGINT', onShutdownSignal);
-
-  beginStream();
-  try {
-    const ack = await dshSession.prompt(client, sessionId, text, images);
-    if (ack && ack.accepted === false) {
-      throw new Error(`prompt rejected by host (${ack.reason || 'unknown reason'})`);
-    }
-  } catch (error) {
-    endStream();
-    mux.close();
-    emitSendError(`dsh session.prompt failed: ${error.message}`, 'DSH');
+  registerShutdownCancel(client, sessionId, mux);
+  if (!(await promptTurn(client, sessionId, mux, text, images))) {
     return;
   }
 
-  // Wait for Goal-aware settlement. Silence watchdog: no frames for this
-  // session and no in-flight approval/question for a long stretch means the
-  // turn terminal was lost (e.g. mux reconnect gap) — fail instead of hanging.
-  const SILENCE_TIMEOUT_MS = 15 * 60_000;
-  await new Promise((resolve) => {
-    const poll = setInterval(() => {
-      if (settled) {
-        clearInterval(poll);
-        resolve();
-        return;
-      }
-      if (
-        pendingBridges.size === 0 &&
-        Date.now() - lastActivityAt > SILENCE_TIMEOUT_MS
-      ) {
-        clearInterval(poll);
-        settleError = 'DSH turn went silent — the host stopped streaming for this session';
-        settled = true;
-        resolve();
-      }
-    }, 100);
-  });
-
-  // Let in-flight approval/question bridges finish their respond RPC.
-  if (pendingBridges.size > 0) {
-    await Promise.race([
-      Promise.allSettled([...pendingBridges]),
-      new Promise((resolve) => setTimeout(resolve, 5_000)),
-    ]);
-  }
+  await awaitSettlement(turn);
+  await settlePendingBridges(turn.pendingBridges);
 
   endStream();
   mux.close();
 
-  if (settleError) {
-    emitSendError(settleError, 'DSH');
+  if (turn.settleError) {
+    emitSendError(turn.settleError, 'DSH');
     return;
   }
-  if (!sawTurnStart) {
+  if (!turn.sawTurnStart) {
     logDebug('turn settled without turn/start (queued turn may have been coalesced)');
   }
 }

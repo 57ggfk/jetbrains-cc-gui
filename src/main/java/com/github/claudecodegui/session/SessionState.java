@@ -236,7 +236,8 @@ public class SessionState {
         }
         String trimmed = model.trim();
         if (trimmed.isEmpty()) {
-            return model;
+            // Blank input normalizes to "" like every other path returns trimmed.
+            return trimmed;
         }
         String base = trimmed;
         boolean oneM = false;

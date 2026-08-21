@@ -4,7 +4,7 @@
  */
 
 import { spawnSync } from 'child_process';
-import { readFileSync, unlinkSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -82,7 +82,11 @@ export function parseOpenCodeModelsOutput(stdout) {
  * @returns {string} raw file content, '' on any failure
  */
 export function runModelsViaTempRedirect(bin, env) {
-  const tmpFile = join(tmpdir(), `cc-gui-opencode-models-${process.pid}.txt`);
+  // mkdtemp gives an unpredictable, exclusively-owned directory (CWE-377): a
+  // predictable tmpdir path would let another local process pre-create or
+  // symlink the redirect target.
+  const tmpDir = mkdtempSync(join(tmpdir(), 'cc-gui-opencode-models-'));
+  const tmpFile = join(tmpDir, 'models.txt');
   try {
     const invocation = resolveCliSpawn(bin, ['models'], {
       env,
@@ -95,7 +99,7 @@ export function runModelsViaTempRedirect(bin, env) {
   } catch {
     return '';
   } finally {
-    try { unlinkSync(tmpFile); } catch { /* best effort */ }
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 

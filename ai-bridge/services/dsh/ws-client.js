@@ -35,6 +35,7 @@ export class DshWebSocket extends EventEmitter {
   #buffer = Buffer.alloc(0);
   #fragments = [];
   #fragmentOpcode = 0;
+  #fragmentBytes = 0;
   #handshakeDone = false;
   #handshakeBuffer = Buffer.alloc(0);
   #closed = false;
@@ -200,18 +201,36 @@ export class DshWebSocket extends EventEmitter {
     switch (frame.opcode) {
       case OPCODES.TEXT:
       case OPCODES.BINARY:
+        if (this.#fragmentOpcode !== 0) {
+          this.#fail(new Error('dsh mux new data frame during fragmented message'));
+          return;
+        }
         if (frame.fin) {
           this.emit('message', frame.payload.toString('utf8'));
         } else {
           this.#fragments = [frame.payload];
+          this.#fragmentBytes = frame.payload.length;
           this.#fragmentOpcode = frame.opcode;
         }
         break;
       case OPCODES.CONTINUATION:
+        if (this.#fragmentOpcode === 0) {
+          this.#fail(new Error('dsh mux unexpected continuation frame'));
+          return;
+        }
+        // Per-frame caps alone don't bound a never-finished fragmented
+        // message — cap the aggregate too.
+        this.#fragmentBytes += frame.payload.length;
+        if (this.#fragmentBytes > MAX_FRAME_BYTES) {
+          this.#fail(new Error('dsh mux fragmented message too large'));
+          return;
+        }
         this.#fragments.push(frame.payload);
         if (frame.fin) {
           const full = Buffer.concat(this.#fragments);
           this.#fragments = [];
+          this.#fragmentBytes = 0;
+          this.#fragmentOpcode = 0;
           this.emit('message', full.toString('utf8'));
         }
         break;

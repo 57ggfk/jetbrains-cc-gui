@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOpenCodeModelsOutput } from './models-service.js';
+import { readdirSync } from 'fs';
+import { tmpdir } from 'os';
+import { parseOpenCodeModelsOutput, runModelsViaTempRedirect } from './models-service.js';
 
 test('parses provider/model lines and dedups', () => {
   const out = 'opencode/big-pickle\nanthropic/claude-fable-5\nopencode/big-pickle\n';
@@ -36,4 +38,18 @@ test('rejects Windows paths, URLs and UNC-ish tokens', () => {
 test('returns empty list for empty or unparseable output', () => {
   assert.deepEqual(parseOpenCodeModelsOutput(''), []);
   assert.deepEqual(parseOpenCodeModelsOutput('No providers configured.\nRun `opencode auth login`.'), []);
+});
+
+test('runModelsViaTempRedirect uses a private mkdtemp directory and cleans it up', () => {
+  // CWE-377 regression: the redirect target must live in an unpredictable,
+  // exclusively-owned temp directory, and that directory must not be left
+  // behind — even when the spawn fails (bogus bin here).
+  const leftoversBefore = readdirSync(tmpdir())
+    .filter((name) => name.startsWith('cc-gui-opencode-models-'));
+  const result = runModelsViaTempRedirect('/nonexistent/opencode-bin', { ...process.env });
+  assert.equal(result, '', 'a failed spawn must yield empty output');
+  const leftoversAfter = readdirSync(tmpdir())
+    .filter((name) => name.startsWith('cc-gui-opencode-models-'));
+  assert.deepEqual(leftoversAfter, leftoversBefore,
+    'the private temp directory must be removed after use');
 });

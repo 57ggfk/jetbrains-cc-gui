@@ -194,10 +194,14 @@ const DshConnectionCard = () => {
           )}
         </div>
 
-        <label className={styles.dshAutoStart}>
+        <label
+          className={styles.dshAutoStart}
+          title={status ? undefined : t('settings.cli.dsh.state.checking')}
+        >
           <input
             type="checkbox"
             checked={status?.settings?.autoStart !== false}
+            disabled={!status}
             onChange={(e) => toggleAutoStart(e.target.checked)}
           />
           <span>{t('settings.cli.dsh.autoStart')}</span>

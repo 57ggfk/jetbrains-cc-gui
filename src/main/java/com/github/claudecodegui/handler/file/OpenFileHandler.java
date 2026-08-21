@@ -34,6 +34,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -234,6 +235,13 @@ class OpenFileHandler {
         // Extract path suffix for matching
         String pathSuffix = extractPathSuffix(pathHint);
 
+        // FileEditorManager.getOpenFiles() is EDT-only — collect the open file
+        // paths before entering the background read action below (calling it
+        // from a read action on a pooled thread would also risk a deadlock:
+        // the pooled thread waits for the EDT while holding the read lock the
+        // EDT may be waiting on).
+        List<String> recentOpenPaths = collectRecentOpenPaths(project);
+
         // FilenameIndex requires read access
         return ApplicationManager.getApplication().runReadAction((Computable<VirtualFile>) () -> {
             // Search for files with matching name in project scope
@@ -252,7 +260,7 @@ class OpenFileHandler {
             for (VirtualFile match : matches) {
                 matchesByPath.put(match.getPath(), match);
             }
-            String bestPath = pickBestFuzzyMatchPath(matchesByPath.keySet(), pathSuffix, collectRecentOpenPaths(project));
+            String bestPath = pickBestFuzzyMatchPath(matchesByPath.keySet(), pathSuffix, recentOpenPaths);
             return bestPath != null ? matchesByPath.get(bestPath) : null;
         });
     }
@@ -261,10 +269,23 @@ class OpenFileHandler {
      * Collect the paths of files currently open in the editor, most recent first.
      * Used to disambiguate fuzzy matches: the file under discussion in the chat is
      * very likely one the user (or the AI tool window) has open right now.
+     *
+     * <p>{@link FileEditorManager#getOpenFiles()} must run on the EDT; callers on
+     * a background thread are bounced via {@code invokeAndWait}.</p>
      */
     private List<String> collectRecentOpenPaths(Project project) {
         try {
-            VirtualFile[] openFiles = FileEditorManager.getInstance(project).getOpenFiles();
+            AtomicReference<VirtualFile[]> openFilesRef = new AtomicReference<>();
+            if (ApplicationManager.getApplication().isDispatchThread()) {
+                openFilesRef.set(FileEditorManager.getInstance(project).getOpenFiles());
+            } else {
+                ApplicationManager.getApplication().invokeAndWait(
+                        () -> openFilesRef.set(FileEditorManager.getInstance(project).getOpenFiles()));
+            }
+            VirtualFile[] openFiles = openFilesRef.get();
+            if (openFiles == null) {
+                return Collections.emptyList();
+            }
             List<String> paths = new ArrayList<>(openFiles.length);
             for (VirtualFile openFile : openFiles) {
                 paths.add(openFile.getPath());

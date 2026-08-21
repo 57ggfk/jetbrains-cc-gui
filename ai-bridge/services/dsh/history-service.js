@@ -177,6 +177,106 @@ function flushAssistant(messages, bufs) {
   }
 }
 
+function foldUserMessage(messages, bufs, data) {
+  flushAssistant(messages, bufs);
+  let text = asString(data.text);
+  if (!text && Array.isArray(data.content)) {
+    text = data.content
+      .map((block) => (block && asString(block.text)) || '')
+      .join('');
+  }
+  if (text && !isDshInjectedUserMessage(data, text)) {
+    bufs.index += 1;
+    messages.push({
+      id: `dsh-user-${bufs.index}`,
+      role: 'user',
+      text,
+      kind: 'message',
+      sourceKind: dshSourceKind(data),
+    });
+  }
+}
+
+function foldAssistantChunk(bufs, data) {
+  const chunk = data.chunk && typeof data.chunk === 'object' ? data.chunk : data;
+  const chunkType = asString(chunk.type);
+  if (chunkType === 'text-delta') {
+    bufs.assistant += asString(chunk.text);
+  } else if (chunkType === 'reasoning-delta') {
+    bufs.reasoning += asString(chunk.text);
+  }
+}
+
+function foldAssistantMessage(messages, bufs, data) {
+  if (!bufs.assistant && asString(data.text)) {
+    bufs.assistant = asString(data.text);
+  }
+  flushAssistant(messages, bufs);
+}
+
+function foldToolCall(messages, bufs, data) {
+  bufs.index += 1;
+  // Prefer durable callId so a later tool/result pairs by id.
+  const callId =
+    asString(data.callId) ||
+    asString(data.id) ||
+    `dsh-tool-${bufs.index}`;
+  messages.push({
+    id: callId,
+    role: 'assistant',
+    text: '',
+    kind: 'tool',
+    toolType: asString(data.name) || null,
+    title: asString(data.name) || null,
+    toolInput: normalizeDshToolArguments(data.arguments ?? data.args),
+    toolOutput: null,
+    isError: false,
+  });
+}
+
+function foldToolResult(messages, data) {
+  const callId =
+    asString(data.callId) ||
+    asString(data.id) ||
+    asString(data.toolCallId) ||
+    asString(data.message && data.message.source && data.message.source.callId) ||
+    asString(
+      data.message &&
+        Array.isArray(data.message.content) &&
+        data.message.content[0] &&
+        data.message.content[0].toolCallId
+    ) ||
+    null;
+  const output = data.result ?? data.output ?? extractHistoryToolOutput(data);
+  // Mirror the live path (events.js): history must not lose tool failures.
+  const firstBlock =
+    data.message && Array.isArray(data.message.content) && data.message.content.length > 0
+      ? data.message.content[0]
+      : null;
+  const isError =
+    Boolean(data.error) ||
+    (firstBlock && typeof firstBlock === 'object' && firstBlock.isError === true);
+  let finalOutput = output;
+  if (data.error && finalOutput == null) {
+    finalOutput = typeof data.error === 'string'
+      ? data.error
+      : asString(data.error.message) || asString(data.error.code) || JSON.stringify(data.error);
+  }
+  if (callId) {
+    const target = [...messages].reverse().find((row) => row.kind === 'tool' && row.id === callId);
+    if (target) {
+      target.toolOutput = finalOutput;
+      target.isError = isError;
+      return;
+    }
+  }
+  const last = [...messages].reverse().find((row) => row.kind === 'tool' && row.toolOutput == null);
+  if (last) {
+    last.toolOutput = finalOutput;
+    last.isError = isError;
+  }
+}
+
 export function foldHistoryEvents(entries) {
   const messages = [];
   const bufs = { assistant: '', reasoning: '', index: 0 };
@@ -190,106 +290,21 @@ export function foldHistoryEvents(entries) {
     const type = asString(event.type);
     const data = event.data && typeof event.data === 'object' ? event.data : {};
     switch (type) {
-      case 'user/message': {
-        flushAssistant(messages, bufs);
-        let text = asString(data.text);
-        if (!text && Array.isArray(data.content)) {
-          text = data.content
-            .map((block) => (block && asString(block.text)) || '')
-            .join('');
-        }
-        if (text && !isDshInjectedUserMessage(data, text)) {
-          bufs.index += 1;
-          messages.push({
-            id: `dsh-user-${bufs.index}`,
-            role: 'user',
-            text,
-            kind: 'message',
-            sourceKind: dshSourceKind(data),
-          });
-        }
+      case 'user/message':
+        foldUserMessage(messages, bufs, data);
         break;
-      }
-      case 'assistant/chunk': {
-        const chunk = data.chunk && typeof data.chunk === 'object' ? data.chunk : data;
-        const chunkType = asString(chunk.type);
-        if (chunkType === 'text-delta') {
-          bufs.assistant += asString(chunk.text);
-        } else if (chunkType === 'reasoning-delta') {
-          bufs.reasoning += asString(chunk.text);
-        }
+      case 'assistant/chunk':
+        foldAssistantChunk(bufs, data);
         break;
-      }
-      case 'assistant/message': {
-        if (!bufs.assistant && asString(data.text)) {
-          bufs.assistant = asString(data.text);
-        }
-        flushAssistant(messages, bufs);
+      case 'assistant/message':
+        foldAssistantMessage(messages, bufs, data);
         break;
-      }
-      case 'tool/call': {
-        bufs.index += 1;
-        // Prefer durable callId so a later tool/result pairs by id.
-        const callId =
-          asString(data.callId) ||
-          asString(data.id) ||
-          `dsh-tool-${bufs.index}`;
-        messages.push({
-          id: callId,
-          role: 'assistant',
-          text: '',
-          kind: 'tool',
-          toolType: asString(data.name) || null,
-          title: asString(data.name) || null,
-          toolInput: normalizeDshToolArguments(data.arguments ?? data.args),
-          toolOutput: null,
-          isError: false,
-        });
+      case 'tool/call':
+        foldToolCall(messages, bufs, data);
         break;
-      }
-      case 'tool/result': {
-        const callId =
-          asString(data.callId) ||
-          asString(data.id) ||
-          asString(data.toolCallId) ||
-          asString(data.message && data.message.source && data.message.source.callId) ||
-          asString(
-            data.message &&
-              Array.isArray(data.message.content) &&
-              data.message.content[0] &&
-              data.message.content[0].toolCallId
-          ) ||
-          null;
-        const output = data.result ?? data.output ?? extractHistoryToolOutput(data);
-        // Mirror the live path (events.js): history must not lose tool failures.
-        const firstBlock =
-          data.message && Array.isArray(data.message.content) && data.message.content.length > 0
-            ? data.message.content[0]
-            : null;
-        const isError =
-          Boolean(data.error) ||
-          (firstBlock && typeof firstBlock === 'object' && firstBlock.isError === true);
-        let finalOutput = output;
-        if (data.error && finalOutput == null) {
-          finalOutput = typeof data.error === 'string'
-            ? data.error
-            : asString(data.error.message) || asString(data.error.code) || JSON.stringify(data.error);
-        }
-        if (callId) {
-          const target = [...messages].reverse().find((row) => row.kind === 'tool' && row.id === callId);
-          if (target) {
-            target.toolOutput = finalOutput;
-            target.isError = isError;
-            continue;
-          }
-        }
-        const last = [...messages].reverse().find((row) => row.kind === 'tool' && row.toolOutput == null);
-        if (last) {
-          last.toolOutput = finalOutput;
-          last.isError = isError;
-        }
+      case 'tool/result':
+        foldToolResult(messages, data);
         break;
-      }
       case 'turn/end':
         flushAssistant(messages, bufs);
         break;

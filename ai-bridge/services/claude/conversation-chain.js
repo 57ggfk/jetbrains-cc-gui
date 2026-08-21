@@ -26,8 +26,13 @@
  *   would collapse every message into isolated leaves)
  */
 export function selectConversationChain(entries, options = {}) {
-  if (!Array.isArray(entries) || entries.length === 0) {
-    return entries ?? [];
+  // Always return an array: callers chain .filter/.map onto the result, so a
+  // truthy non-array input must not pass through.
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  if (entries.length === 0) {
+    return entries;
   }
 
   const includePreCompactHistory = options.includePreCompactHistory !== false;
@@ -61,8 +66,15 @@ export function selectConversationChain(entries, options = {}) {
   // key inherits the previous uuid-carrying row as its parent so a hybrid
   // transcript keeps its line-order continuity instead of collapsing the
   // walk at the first such row.
+  //
+  // prevUuid tracks MAINLINE rows only. A sidechain (subagent) row's parent
+  // chain runs into the sidechain branch, so letting it become the implicit
+  // parent would hang the next keyless mainline row off that branch.
   let prevUuid = null;
   for (const entry of byUuid.values()) {
+    if (entry.isSidechain) {
+      continue;
+    }
     if (!('parentUuid' in entry) && prevUuid !== null) {
       byUuid.set(entry.uuid, { ...entry, parentUuid: prevUuid });
     }

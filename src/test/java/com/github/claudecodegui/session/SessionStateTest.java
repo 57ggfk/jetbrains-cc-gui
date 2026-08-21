@@ -62,8 +62,9 @@ public class SessionStateTest {
         SessionState state = new SessionState();
         state.setModel(null);
         Assert.assertNull(state.getModel());
+        // Blank input is trimmed like every other normalizeRetiredModelId path.
         state.setModel("  ");
-        Assert.assertEquals("  ", state.getModel());
+        Assert.assertEquals("", state.getModel());
     }
 
     @Test

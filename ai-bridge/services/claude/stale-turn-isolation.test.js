@@ -297,6 +297,124 @@ test('an error result as the first message of a turn still fails the turn (not t
   );
 });
 
+test('a skipped foreign result arms an idle backstop that settles a silent turn instead of hanging', async () => {
+  // The foreign-result skip assumes a real run always emits output before its
+  // result. A turn that legitimately produces zero messages breaks that
+  // assumption: its own result is skipped as foreign and, without a backstop,
+  // the take() loop parks forever. The idle backstop must settle the turn
+  // empty (with a warn) once no turn output arrives within the window.
+  const turn1 = [messageStart(), streamTextDelta('answer one'), assistantText('answer one'), RESULT_OK];
+
+  let query;
+  __testing.setQueryFn((args) => {
+    query = createScriptedQuery(args, [turn1]);
+    return query;
+  });
+
+  __testing.setForeignResultIdleBackstopMs(50);
+  try {
+    const params = baseParams('idle-backstop');
+    const ctx1 = await __testing.buildRequestContext({ ...params, message: 'q1' }, false, OVERRIDES);
+    const runtime = await __testing.acquireRuntime(ctx1);
+    await __testing.executeTurn(runtime, ctx1, { state: null });
+    await settleReader();
+
+    const ctx2 = await __testing.buildRequestContext({ ...params, message: 'q2' }, false, OVERRIDES);
+    const meta2 = { state: null };
+    const turn2Promise = __testing.executeTurn(runtime, ctx2, meta2);
+    await settleReader();
+    assert.equal(query.inputs.length, 2, 'gate must not trigger: the CLI was quiet at turn start');
+
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => { warnings.push(args.map(String).join(' ')); };
+    try {
+      // A foreign bare-success result lands first and is skipped; nothing
+      // belonging to this turn ever follows. Without the backstop this
+      // executeTurn would never resolve.
+      query.channel.enqueue({ type: 'result', is_error: false });
+      await turn2Promise;
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    assert.equal(meta2.state.lastAssistantContent, '',
+      'the backstop-settled turn must end with empty output');
+    assert.ok(
+      warnings.some((line) => line.includes('idle backstop') && line.includes('epoch-idle-backstop')),
+      'the backstop must log a warn with session/epoch context'
+    );
+
+    // The runtime must stay usable: a follow-up turn runs normally.
+    const turn3 = [messageStart(), streamTextDelta('answer three'), assistantText('answer three'), RESULT_OK];
+    const ctx3 = await __testing.buildRequestContext({ ...params, message: 'q3' }, false, OVERRIDES);
+    const meta3 = { state: null };
+    const turn3Promise = __testing.executeTurn(runtime, ctx3, meta3);
+    await query.waitForInput(); // consume turn 1's tracked input (FIFO)
+    await query.waitForInput(); // consume turn 2's tracked input
+    await query.waitForInput(); // resolves once turn 3's user message lands
+    // NOTE: enqueue takes a single event per call — a spread would silently
+    // drop all but the first event.
+    for (const event of turn3) {
+      query.channel.enqueue(event);
+    }
+    await turn3Promise;
+    assert.equal(meta3.state.lastAssistantContent, 'answer three');
+  } finally {
+    __testing.setForeignResultIdleBackstopMs();
+  }
+});
+
+test('turn output arriving after a skipped foreign result disarms the idle backstop', async () => {
+  // The normal path must be unaffected: output that arrives within the
+  // backstop window disarms it, and no synthetic empty settlement occurs.
+  const turn1 = [messageStart(), streamTextDelta('answer one'), assistantText('answer one'), RESULT_OK];
+
+  let query;
+  __testing.setQueryFn((args) => {
+    query = createScriptedQuery(args, [turn1]);
+    return query;
+  });
+
+  __testing.setForeignResultIdleBackstopMs(80);
+  try {
+    const params = baseParams('backstop-disarm');
+    const ctx1 = await __testing.buildRequestContext({ ...params, message: 'q1' }, false, OVERRIDES);
+    const runtime = await __testing.acquireRuntime(ctx1);
+    await __testing.executeTurn(runtime, ctx1, { state: null });
+    await settleReader();
+
+    const ctx2 = await __testing.buildRequestContext({ ...params, message: 'q2' }, false, OVERRIDES);
+    const meta2 = { state: null };
+    const turn2Promise = __testing.executeTurn(runtime, ctx2, meta2);
+    await settleReader();
+
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => { warnings.push(args.map(String).join(' ')); };
+    try {
+      query.channel.enqueue({ type: 'result', is_error: false }); // foreign, skipped
+      await settleReader();
+      // Real turn output arrives within the window and disarms the backstop.
+      query.channel.enqueue(messageStart());
+      query.channel.enqueue(streamTextDelta('real answer'));
+      query.channel.enqueue(assistantText('real answer'));
+      query.channel.enqueue(RESULT_OK);
+      await turn2Promise;
+      // Outlive the backstop window: no late synthetic settlement may fire.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    assert.equal(meta2.state.lastAssistantContent, 'real answer');
+    assert.ok(!warnings.some((line) => line.includes('idle backstop')),
+      'the backstop must not fire once real turn output arrived');
+  } finally {
+    __testing.setForeignResultIdleBackstopMs();
+  }
+});
+
 test('abort while gated on an in-flight CLI turn fails the turn instead of hanging', async () => {
   const turn1 = [messageStart(), assistantText('answer one'), RESULT_OK];
 

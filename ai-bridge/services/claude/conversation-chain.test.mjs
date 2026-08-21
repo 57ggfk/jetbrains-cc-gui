@@ -604,3 +604,46 @@ test('returns line order for empty or uuid-less input', () => {
   ];
   assert.equal(selectConversationChain(entries).length, 2);
 });
+
+test('always returns an array for non-array input', () => {
+  // Callers chain .filter/.map onto the result; a truthy non-array must not
+  // pass through or the downstream call throws.
+  assert.deepEqual(selectConversationChain(null), []);
+  assert.deepEqual(selectConversationChain(undefined), []);
+  assert.deepEqual(selectConversationChain('not-an-array'), []);
+  assert.deepEqual(selectConversationChain({ length: 2 }), []);
+  assert.deepEqual(selectConversationChain(42), []);
+});
+
+test('keyless mainline rows after a sidechain row inherit the mainline parent, not the sidechain tip', () => {
+  // Hybrid transcript: CLI rows carry parentUuid, a subagent (sidechain) row
+  // sits between them, then the plugin's direct-API fallback appends mainline
+  // rows without the parentUuid key. The keyless row must continue the MAIN
+  // branch — inheriting the sidechain row would hang the rest of the
+  // transcript off the subagent branch and drop it from the walk.
+  const root = userEntry(null, 'root', '2026-01-01T10:00:00Z');
+  const answer = assistantEntry(root.uuid, 'answer', '2026-01-01T10:00:05Z', 'm1');
+  const sidechainRow = {
+    type: 'assistant',
+    uuid: uuid('a'),
+    parentUuid: answer.uuid,
+    isSidechain: true,
+    timestamp: '2026-01-01T10:00:06Z',
+    message: { id: 'm-side', role: 'assistant', content: [{ type: 'text', text: 'subagent work' }] },
+  };
+  const fallbackUser = {
+    type: 'user',
+    uuid: uuid('u'),
+    timestamp: '2026-01-01T10:01:00Z',
+    message: { role: 'user', content: 'mainline after subagent' },
+  };
+  const fallbackAssistant = {
+    type: 'assistant',
+    uuid: uuid('a'),
+    timestamp: '2026-01-01T10:01:05Z',
+    message: { id: 'm2', role: 'assistant', content: [{ type: 'text', text: 'mainline reply' }] },
+  };
+
+  const chain = selectConversationChain([root, answer, sidechainRow, fallbackUser, fallbackAssistant]);
+  assert.deepEqual(chainTexts(chain), ['root', 'answer', 'mainline after subagent', 'mainline reply']);
+});

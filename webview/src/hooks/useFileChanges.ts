@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ClaudeMessage, ClaudeContentBlock, ToolResultBlock } from '../types';
 import type { FileChangeSummary } from '../types/fileChanges';
 import type { SubagentHistoryResponse } from '../types/subagent';
@@ -139,6 +139,57 @@ function extractEditPairs(input: Record<string, unknown>): StringPair[] {
 
 function isSuccessfulResult(result?: ToolResultBlock | null): boolean {
   return result !== undefined && result !== null && result.is_error !== true;
+}
+
+/**
+ * Content equality for summaries. The enrich effect stores derived state; callers
+ * may pass unstable function props (new identity per render), which would otherwise
+ * retrigger the effect forever — bailing out on equal content breaks that cycle.
+ */
+function sameFileChangeSummaries(a: FileChangeSummary[], b: FileChangeSummary[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.filePath !== y.filePath
+      || x.fileName !== y.fileName
+      || x.status !== y.status
+      || x.additions !== y.additions
+      || x.deletions !== y.deletions
+      || x.multiAgent !== y.multiAgent
+      || x.lineStart !== y.lineStart
+      || x.lineEnd !== y.lineEnd
+    ) {
+      return false;
+    }
+    const xAgents = x.agentIds ?? [];
+    const yAgents = y.agentIds ?? [];
+    if (xAgents.length !== yAgents.length || xAgents.some((id, j) => id !== yAgents[j])) {
+      return false;
+    }
+    const xOps = x.operations;
+    const yOps = y.operations;
+    if (xOps.length !== yOps.length) return false;
+    for (let k = 0; k < xOps.length; k += 1) {
+      const p = xOps[k];
+      const q = yOps[k];
+      if (
+        p.toolName !== q.toolName
+        || p.oldString !== q.oldString
+        || p.newString !== q.newString
+        || p.additions !== q.additions
+        || p.deletions !== q.deletions
+        || p.replaceAll !== q.replaceAll
+        || p.lineStart !== q.lineStart
+        || p.lineEnd !== q.lineEnd
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function collectLedgerOpsFromToolUse(params: {
@@ -332,7 +383,10 @@ export function useFileChanges({
   subagentHistories,
   currentSessionId = null,
 }: UseFileChangesParams): FileChangeSummary[] {
-  return useMemo(() => {
+  // Pure derivation: messages → ledger entries → summaries. No side effects in
+  // this memo (localStorage touch recording lives in the effect below), so
+  // StrictMode double-invocation and per-message streaming renders stay cheap.
+  const base = useMemo(() => {
     const ops: LedgerOp[] = [];
     const agentKeysAfterBase = new Set<string>();
 
@@ -385,36 +439,49 @@ export function useFileChanges({
     }
 
     const entries = buildSessionFileLedger(ops);
-    let summaries = ledgerEntriesToSummaries(entries);
+    const summaries = ledgerEntriesToSummaries(entries);
+    return { entries, summaries };
+  }, [messages, getContentBlocks, findToolResult, startFromIndex, subagentHistories]);
 
-    // Cross-tab / multi-agent: persist who touched each path, then enrich badges.
-    if (currentSessionId && summaries.length > 0) {
-      const agentsByPath = new Map<string, string[]>();
-      for (const e of entries) {
-        agentsByPath.set(e.filePath, e.agentIds.length > 0 ? e.agentIds : ['main']);
-      }
-      // Snapshot BEFORE recording this session so "outside session" still sees others
-      const priorMap = loadFileTouchMap();
-      recordFileTouches(
-        summaries.map((s) => s.filePath),
-        currentSessionId,
-        agentsByPath,
-      );
-      const mapAfter = loadFileTouchMap();
+  const [enriched, setEnriched] = useState<FileChangeSummary[]>(base.summaries);
 
-      summaries = summaries.map((s) => {
-        const crossMulti = isMultiActorPath(s.filePath, mapAfter);
-        const outside = wasTouchedOutsideSession(s.filePath, currentSessionId, priorMap);
-        return {
-          ...s,
-          multiAgent: s.multiAgent === true || crossMulti,
-          // Write overwrote a file another tab already touched → show M not A
-          status: outside && s.status === 'A' ? 'M' : s.status,
-          agentIds: s.agentIds,
-        };
-      });
+  // Cross-tab / multi-agent: persist who touched each path, then enrich badges.
+  // Recording is idempotent per actor key, so re-runs on new entries are safe;
+  // setEnriched bails out when content is unchanged so unstable caller props
+  // (new function identity per render) cannot loop effect → state → render.
+  useEffect(() => {
+    const { entries, summaries } = base;
+    if (!currentSessionId || summaries.length === 0) {
+      setEnriched((prev) => (sameFileChangeSummaries(prev, summaries) ? prev : summaries));
+      return;
     }
 
-    return summaries;
-  }, [messages, getContentBlocks, findToolResult, startFromIndex, subagentHistories, currentSessionId]);
+    const agentsByPath = new Map<string, string[]>();
+    for (const e of entries) {
+      agentsByPath.set(e.filePath, e.agentIds.length > 0 ? e.agentIds : ['main']);
+    }
+    // Snapshot BEFORE recording this session so "outside session" still sees others
+    const priorMap = loadFileTouchMap();
+    recordFileTouches(
+      summaries.map((s) => s.filePath),
+      currentSessionId,
+      agentsByPath,
+    );
+    const mapAfter = loadFileTouchMap();
+
+    const next = summaries.map((s) => {
+      const crossMulti = isMultiActorPath(s.filePath, mapAfter);
+      const outside = wasTouchedOutsideSession(s.filePath, currentSessionId, priorMap);
+      return {
+        ...s,
+        multiAgent: s.multiAgent === true || crossMulti,
+        // Write overwrote a file another tab already touched → show M not A
+        status: outside && s.status === 'A' ? 'M' : s.status,
+        agentIds: s.agentIds,
+      };
+    });
+    setEnriched((prev) => (sameFileChangeSummaries(prev, next) ? prev : next));
+  }, [base, currentSessionId]);
+
+  return enriched;
 }

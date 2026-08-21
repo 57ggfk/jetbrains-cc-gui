@@ -1,9 +1,13 @@
 /**
- * Project-scoped registry of which sessions/agents recently touched a file.
+ * Registry of which sessions/agents recently touched a file.
  * Used so StatusPanel can mark "multi-agent" when AI1 + AI2 (or main + subagent)
  * both edited the same path — even across chat tabs.
  *
  * Stored in localStorage (no full file content — only path + actor keys).
+ * The webview has no reliable per-project identifier at this layer, so the
+ * registry is global; to stop stale cross-project / ancient history from
+ * permanently flipping Write status A→M or lighting multi-agent badges,
+ * entries expire after ENTRY_TTL_MS and are lazily pruned on read.
  */
 
 export interface FileTouchActor {
@@ -19,18 +23,43 @@ export type FileTouchMap = Record<string, FileTouchActor[]>;
 const STORAGE_KEY = 'ccgui-file-touch-registry-v1';
 const MAX_ACTORS_PER_FILE = 12;
 const MAX_FILES = 400;
+/** Entries older than this are stale and lazily dropped on read. */
+const ENTRY_TTL_MS = 24 * 60 * 60 * 1000;
 
 function actorKey(a: Pick<FileTouchActor, 'sessionId' | 'agentId'>): string {
   return `${a.sessionId}::${a.agentId || 'main'}`;
 }
 
-export function loadFileTouchMap(): FileTouchMap {
+/** Drop expired / malformed actors; reports whether anything was removed. */
+function pruneExpired(map: FileTouchMap, now: number): { pruned: FileTouchMap; changed: boolean } {
+  let changed = false;
+  const pruned: FileTouchMap = {};
+  for (const [path, actors] of Object.entries(map)) {
+    if (!Array.isArray(actors)) {
+      changed = true;
+      continue;
+    }
+    const fresh = actors.filter(
+      (a) => a && typeof a.updatedAt === 'number' && now - a.updatedAt <= ENTRY_TTL_MS,
+    );
+    if (fresh.length !== actors.length) changed = true;
+    if (fresh.length > 0) {
+      pruned[path] = fresh;
+    }
+  }
+  return { pruned, changed };
+}
+
+export function loadFileTouchMap(now = Date.now()): FileTouchMap {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as FileTouchMap;
-    if (!parsed || typeof parsed !== 'object') return {};
-    return parsed;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const { pruned, changed } = pruneExpired(parsed, now);
+    // Lazy cleanup so stale entries don't accumulate in storage
+    if (changed) saveFileTouchMap(pruned);
+    return pruned;
   } catch {
     return {};
   }

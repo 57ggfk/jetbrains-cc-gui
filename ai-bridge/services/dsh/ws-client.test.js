@@ -153,3 +153,120 @@ test('DshWebSocket rejects a non-101 handshake', async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+/** Build an unmasked server frame (FIN configurable). */
+function serverFrame(opcode, payload, fin = true) {
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+  let header;
+  if (body.length < 126) {
+    header = Buffer.alloc(2);
+    header[1] = body.length;
+  } else if (body.length < 65536) {
+    header = Buffer.alloc(4);
+    header[1] = 126;
+    header.writeUInt16BE(body.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(body.length), 2);
+  }
+  header[0] = (fin ? 0x80 : 0) | opcode;
+  return Buffer.concat([header, body]);
+}
+
+/** Handshake-answering test server; `onReady(socket)` runs post-upgrade. */
+async function startMuxServer(onReady) {
+  const server = createServer();
+  const sockets = new Set();
+  server.on('upgrade', (req, socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    const key = req.headers['sec-websocket-key'];
+    const accept = createHash('sha1').update(key + WS_GUID).digest('base64');
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
+    );
+    onReady(socket);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const stop = async () => {
+    // Upgrade sockets are not tracked by server.close() — destroy them first.
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    await new Promise((resolve) => server.close(resolve));
+  };
+  return { port: server.address().port, stop };
+}
+
+function connectExpectingError(port) {
+  const ws = new DshWebSocket();
+  const failed = new Promise((resolve, reject) => {
+    ws.on('error', resolve);
+    ws.on('close', () => reject(new Error('closed without error')));
+  });
+  ws.connect(`ws://127.0.0.1:${port}/api/events.mux`);
+  return failed;
+}
+
+test('DshWebSocket reassembles a valid fragmented message', async () => {
+  const { port, stop } = await startMuxServer((socket) => {
+    socket.write(serverFrame(0x1, 'hello ', false));
+    socket.write(serverFrame(0x0, 'world', true));
+  });
+  try {
+    const ws = new DshWebSocket();
+    const errors = [];
+    ws.on('error', (error) => errors.push(error));
+    const received = new Promise((resolve) => ws.on('message', resolve));
+    ws.connect(`ws://127.0.0.1:${port}/api/events.mux`);
+    assert.equal(await received, 'hello world');
+    assert.deepEqual(errors, []);
+    ws.close();
+  } finally {
+    await stop();
+  }
+});
+
+test('DshWebSocket fails on a continuation frame with no fragmented message', async () => {
+  const { port, stop } = await startMuxServer((socket) => {
+    socket.write(serverFrame(0x0, 'orphan', true));
+  });
+  try {
+    const error = await connectExpectingError(port);
+    assert.match(error.message, /unexpected continuation frame/);
+  } finally {
+    await stop();
+  }
+});
+
+test('DshWebSocket fails when a data frame interrupts a fragmented message', async () => {
+  const { port, stop } = await startMuxServer((socket) => {
+    socket.write(serverFrame(0x1, 'partial', false));
+    socket.write(serverFrame(0x1, 'interloper', true));
+  });
+  try {
+    const error = await connectExpectingError(port);
+    assert.match(error.message, /new data frame during fragmented message/);
+  } finally {
+    await stop();
+  }
+});
+
+test('DshWebSocket fails when aggregated fragments exceed the 64MB cap', async () => {
+  // Each frame stays under the per-frame cap; the aggregate must still fail.
+  const chunk = Buffer.alloc(33 * 1024 * 1024, 0x61);
+  const { port, stop } = await startMuxServer((socket) => {
+    socket.write(serverFrame(0x1, chunk, false));
+    socket.write(serverFrame(0x0, chunk, false));
+  });
+  try {
+    const error = await connectExpectingError(port);
+    assert.match(error.message, /fragmented message too large/);
+  } finally {
+    await stop();
+  }
+});

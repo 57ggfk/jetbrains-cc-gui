@@ -35,6 +35,9 @@ public class DshHistoryReader {
     private static final String CHANNEL_SCRIPT = "channel-manager.js";
     private static final long TIMEOUT_SECONDS = 45L;
     private static final int MAX_OUTPUT_CHARS = 4_000_000;
+    // stderr is drained on its own thread and only the tail is kept, for
+    // diagnostics on timeout/failure — it must never block the child process.
+    private static final int MAX_STDERR_CHARS = 8_192;
 
     private final Gson gson = new Gson();
     private final NodeDetector nodeDetector = NodeDetector.getInstance();
@@ -150,6 +153,7 @@ public class DshHistoryReader {
             }
 
             StringBuilder output = new StringBuilder();
+            StringBuilder stderrTail = new StringBuilder();
             Process finalProcess = process;
             Thread readerThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
@@ -162,21 +166,28 @@ public class DshHistoryReader {
                             }
                         }
                     }
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    LOG.debug("[DSH] stdout reader stopped: " + e.getMessage());
                 }
-            });
+            }, "dsh-history-stdout-reader");
             readerThread.setDaemon(true);
             readerThread.start();
+            Thread stderrDrainer = startStderrDrainer(process, stderrTail);
 
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                LOG.warn("[DSH] " + command + " timed out");
+                LOG.warn("[DSH] " + command + " timed out" + stderrSuffix(stderrTail));
                 return null;
             }
             readerThread.join(2000L);
+            stderrDrainer.join(2000L);
 
-            return extractJsonObject(output.toString());
+            JsonObject payload = extractJsonObject(output.toString());
+            if (payload == null) {
+                LOG.warn("[DSH] no JSON output from " + command + stderrSuffix(stderrTail));
+            }
+            return payload;
         } catch (Exception e) {
             LOG.warn("[DSH] " + command + " failed: " + e.getMessage());
             return null;
@@ -184,6 +195,45 @@ public class DshHistoryReader {
             if (process != null && process.isAlive()) {
                 process.destroyForcibly();
             }
+        }
+    }
+
+    /**
+     * Drain the child stderr on a named daemon thread, keeping only the last
+     * {@link #MAX_STDERR_CHARS} chars. Without this the child blocks once its
+     * stderr pipe buffer fills (~64KB), which previously looked like a timeout
+     * and swallowed all failure diagnostics.
+     */
+    private Thread startStderrDrainer(Process process, StringBuilder stderrTail) {
+        Thread thread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    synchronized (stderrTail) {
+                        stderrTail.append(line).append('\n');
+                        if (stderrTail.length() > MAX_STDERR_CHARS) {
+                            stderrTail.delete(0, stderrTail.length() - MAX_STDERR_CHARS);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debug("[DSH] stderr drainer stopped: " + e.getMessage());
+            }
+        }, "dsh-history-stderr-drainer");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    /**
+     * Render the captured stderr tail as a log suffix, or an empty string when
+     * the child wrote nothing to stderr.
+     */
+    private String stderrSuffix(StringBuilder stderrTail) {
+        synchronized (stderrTail) {
+            String tail = stderrTail.toString().trim();
+            return tail.isEmpty() ? "" : " (stderr: " + tail + ")";
         }
     }
 
@@ -202,7 +252,8 @@ public class DshHistoryReader {
                 if (obj != null && (obj.has("success") || obj.has("sessions") || obj.has("messages"))) {
                     return obj;
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                LOG.debug("[DSH] skipping non-JSON output line: " + e.getMessage());
             }
         }
         return null;

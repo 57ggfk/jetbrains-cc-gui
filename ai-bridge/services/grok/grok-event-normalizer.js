@@ -118,9 +118,12 @@ export class GrokEventNormalizer {
   }
 
   finishError(error) {
-    // Still flush booked edits so a failed turn that already wrote files is counted
+    // Still flush booked edits so a failed turn that already wrote files is
+    // counted — but only entries with execution evidence (an observed fs_write
+    // or an explicit permission allow). Pending entries (permission requested,
+    // user never decided, turn died) must not be assumed successful.
     try {
-      this.#flushFileEditLedger({ assumeSuccess: true });
+      this.#flushFileEditLedger({ assumeSuccess: false });
     } catch {
       // ignore
     }
@@ -251,7 +254,13 @@ export class GrokEventNormalizer {
     if (method) this.#emitStatus(`ACP request: ${method}`);
     if (!isPermissionMethod(method)) return;
 
-    const info = extractPermissionEditInfo(payload?.params || {});
+    const info = extractPermissionEditInfo(
+      payload?.params || {},
+      // Unique ledger key when the permission params carry no toolCallId;
+      // the shared editSeq counter avoids same-millisecond Date.now() key
+      // collisions between concurrent permission requests.
+      `perm-edit-${++this.editSeq}`,
+    );
     if (!info) return;
 
     this.#bookFileEdit(info.toolCallId, {
@@ -403,6 +412,11 @@ export class GrokEventNormalizer {
   /**
    * End-of-turn settlement. Any booked file edit that still lacks tool_use /
    * tool_result is emitted now so frontend useFileChanges sees a complete pair.
+   * With assumeSuccess, undecided entries (no terminal status, no explicit
+   * allow/deny) are settled as completed — valid at finishSuccess, where the
+   * turn ended normally. On the error path (assumeSuccess: false) such entries
+   * have no execution evidence, so they are settled as cancelled/failed rather
+   * than counted as successful edits that never ran.
    */
   #flushFileEditLedger({ assumeSuccess = true } = {}) {
     for (const [id, tc] of this.toolCalls.entries()) {
@@ -410,8 +424,12 @@ export class GrokEventNormalizer {
       const input = normalizeEditToolInput(tc.input || {}, []);
       if (!toolPath(input) && !hasUsableEditPayload(input)) continue;
 
-      if (assumeSuccess && tc.allowed === undefined && !isTerminalToolStatus(tc.status)) {
-        this.toolCalls.set(id, { ...tc, status: 'completed', allowed: true, input });
+      if (tc.allowed === undefined && !isTerminalToolStatus(tc.status)) {
+        if (assumeSuccess) {
+          this.toolCalls.set(id, { ...tc, status: 'completed', allowed: true, input });
+        } else {
+          this.toolCalls.set(id, { ...tc, status: 'cancelled', allowed: false, input });
+        }
       } else {
         this.toolCalls.set(id, { ...tc, input });
       }
@@ -523,12 +541,12 @@ export function isFileEditTool(name) {
 export function isPermissionMethod(method) {
   if (!method) return false;
   const m = String(method);
-  return (
-    m === 'session/request_permission' ||
-    m === 'request_permission' ||
-    m.includes('permission') ||
-    m.includes('Permission')
-  );
+  // The ACP protocol (and Grok CLI 0.2.x, see grok-acp-client.js) defines
+  // exactly one permission request method: session/request_permission. The
+  // bare 'request_permission' alias is kept for older Grok builds. Substring
+  // matching (m.includes('permission')) was too broad — e.g. a notification
+  // like session/permission_update would be misrouted into edit bookkeeping.
+  return m === 'session/request_permission' || m === 'request_permission';
 }
 
 export function isTerminalToolStatus(status) {
@@ -715,8 +733,12 @@ function canonicalEditName(name, input) {
 
 /**
  * Pull path/content from ACP permission params (same shape as extractPermissionToolInfo).
+ * @param {object} params ACP permission request params
+ * @param {string} [fallbackId] ledger key to use when the params carry no
+ *   toolCallId; callers pass a counter-based id (Date.now() can collide
+ *   within the same millisecond). Falls back to a timestamp when omitted.
  */
-export function extractPermissionEditInfo(params = {}) {
+export function extractPermissionEditInfo(params = {}, fallbackId) {
   const toolCall = params.toolCall || params.tool_call || params.tool || {};
   const rawInput =
     toolCall.rawInput ||
@@ -754,7 +776,7 @@ export function extractPermissionEditInfo(params = {}) {
     if (!toolPath(input)) return null;
   }
 
-  const id = toolCallId || `perm-edit-${Date.now()}`;
+  const id = toolCallId || fallbackId || `perm-edit-${Date.now()}`;
   return {
     toolCallId: String(id),
     name: isFileEditTool(name) ? name : normalizeEditToolName('', kind || 'edit', title || 'Edit'),

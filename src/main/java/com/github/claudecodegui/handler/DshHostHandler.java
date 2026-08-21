@@ -16,6 +16,7 @@ import com.intellij.util.concurrency.AppExecutorUtil;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * DSH host lifecycle + connection settings for the Settings CLI card.
@@ -46,6 +48,9 @@ public class DshHostHandler extends BaseMessageHandler {
     private static final long STATUS_TIMEOUT_SECONDS = 30L;
     private static final long LIFECYCLE_TIMEOUT_SECONDS = 60L;
     private static final int MAX_OUTPUT_CHARS = 64_000;
+    // stderr is drained on its own thread and only the tail is kept, for
+    // diagnostics on timeout/failure — it must never block the child process.
+    private static final int MAX_STDERR_CHARS = 8_192;
 
     private static final String[] SUPPORTED_TYPES = {
             "get_dsh_status",
@@ -58,6 +63,8 @@ public class DshHostHandler extends BaseMessageHandler {
     private final NodeDetector nodeDetector = NodeDetector.getInstance();
     private final EnvironmentConfigurator envConfigurator = new EnvironmentConfigurator();
     private final CodemossSettingsService settingsService = new CodemossSettingsService();
+    // Re-entry guard for start/stop (double clicks); status polls stay unrestricted.
+    private final AtomicBoolean lifecycleInProgress = new AtomicBoolean(false);
 
     public DshHostHandler(HandlerContext context) {
         super(context);
@@ -77,14 +84,10 @@ public class DshHostHandler extends BaseMessageHandler {
                         AppExecutorUtil.getAppExecutorService());
                 return true;
             case "start_dsh_host":
-                CompletableFuture.runAsync(
-                        () -> pushStatus(runDshCommand("ensureHost", null, LIFECYCLE_TIMEOUT_SECONDS)),
-                        AppExecutorUtil.getAppExecutorService());
+                runLifecycleCommand("ensureHost", LIFECYCLE_TIMEOUT_SECONDS);
                 return true;
             case "stop_dsh_host":
-                CompletableFuture.runAsync(
-                        () -> pushStatus(runDshCommand("stopHost", null, STATUS_TIMEOUT_SECONDS)),
-                        AppExecutorUtil.getAppExecutorService());
+                runLifecycleCommand("stopHost", STATUS_TIMEOUT_SECONDS);
                 return true;
             case "save_dsh_settings":
                 saveSettings(content);
@@ -97,27 +100,123 @@ public class DshHostHandler extends BaseMessageHandler {
         }
     }
 
+    /**
+     * Guard start/stop against re-entry: while one lifecycle command runs,
+     * further start/stop requests get an explicit "in progress" error instead
+     * of racing it. Status polls are not guarded.
+     */
+    private void runLifecycleCommand(String command, long timeoutSeconds) {
+        if (!lifecycleInProgress.compareAndSet(false, true)) {
+            pushStatus(errorPayload("DSH host operation already in progress"));
+            return;
+        }
+        CompletableFuture.runAsync(() -> {
+            try {
+                pushStatus(runDshCommand(command, null, timeoutSeconds));
+            } finally {
+                lifecycleInProgress.set(false);
+            }
+        }, AppExecutorUtil.getAppExecutorService());
+    }
+
     private void saveSettings(String content) {
         try {
             if (content == null || content.isBlank()) {
                 return;
             }
             JsonObject payload = JsonParser.parseString(content).getAsJsonObject();
+
+            // Parse and validate every field first, then persist in one pass —
+            // a failure must never leave the dsh section half-written.
+            String bin = null;
             if (payload.has("bin")) {
-                settingsService.setDshBin(payload.get("bin").isJsonNull() ? "" : payload.get("bin").getAsString());
+                bin = payload.get("bin").isJsonNull() ? "" : payload.get("bin").getAsString().trim();
+                String binError = validateDshBin(bin);
+                if (binError != null) {
+                    pushStatus(errorPayload(binError));
+                    return;
+                }
             }
+            String host = null;
             if (payload.has("host")) {
-                settingsService.setDshHost(payload.get("host").isJsonNull() ? "" : payload.get("host").getAsString());
+                host = payload.get("host").isJsonNull() ? "" : payload.get("host").getAsString().trim();
+                String hostError = validateDshHost(host);
+                if (hostError != null) {
+                    pushStatus(errorPayload(hostError));
+                    return;
+                }
             }
+            Integer port = null;
             if (payload.has("port") && !payload.get("port").isJsonNull()) {
-                settingsService.setDshPort(payload.get("port").getAsInt());
+                port = payload.get("port").getAsInt();
             }
+            Boolean autoStart = null;
             if (payload.has("autoStart") && !payload.get("autoStart").isJsonNull()) {
-                settingsService.setDshAutoStart(payload.get("autoStart").getAsBoolean());
+                autoStart = payload.get("autoStart").getAsBoolean();
+            }
+
+            if (bin != null) {
+                settingsService.setDshBin(bin);
+            }
+            if (host != null) {
+                settingsService.setDshHost(host);
+            }
+            if (port != null) {
+                settingsService.setDshPort(port);
+            }
+            if (autoStart != null) {
+                settingsService.setDshAutoStart(autoStart);
             }
         } catch (Exception e) {
             LOG.warn("[DshHost] Failed to save settings: " + e.getMessage());
+            pushStatus(errorPayload("Invalid DSH settings: "
+                    + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName())));
         }
+    }
+
+    /**
+     * Validate a DSH host value: host name or IP only — no whitespace, scheme
+     * or port ({@code :}), and no path separators. Empty clears the override
+     * (the default host applies).
+     *
+     * @return an error message when invalid, null when acceptable
+     */
+    // VisibleForTesting
+    static String validateDshHost(String host) {
+        if (host == null || host.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < host.length(); i++) {
+            char c = host.charAt(i);
+            if (Character.isWhitespace(c) || c == '/' || c == '\\' || c == ':') {
+                return "Invalid DSH host (host name or IP only, no scheme or port): " + host;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Validate a DSH bin path: reject control characters/newlines and, when the
+     * path exists, anything that is not a regular file. Empty clears the
+     * override (PATH lookup applies).
+     *
+     * @return an error message when invalid, null when acceptable
+     */
+    // VisibleForTesting
+    static String validateDshBin(String bin) {
+        if (bin == null || bin.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < bin.length(); i++) {
+            if (Character.isISOControl(bin.charAt(i))) {
+                return "Invalid DSH bin path (contains control characters)";
+            }
+        }
+        File candidate = new File(bin);
+        if (candidate.exists() && !candidate.isFile()) {
+            return "Invalid DSH bin path (not a regular file): " + bin;
+        }
+        return null;
     }
 
     private JsonObject runDshCommand(String command, JsonObject stdinPayload, long timeoutSeconds) {
@@ -149,43 +248,28 @@ public class DshHostHandler extends BaseMessageHandler {
             }
 
             process = pb.start();
-            if (stdinPayload != null) {
-                try (OutputStream stdin = process.getOutputStream()) {
-                    stdin.write((gson.toJson(stdinPayload) + "\n").getBytes(StandardCharsets.UTF_8));
-                    stdin.flush();
-                }
-            } else {
-                process.getOutputStream().close();
-            }
+            writeStdin(process, stdinPayload);
 
             StringBuilder output = new StringBuilder();
-            Process finalProcess = process;
-            Thread readerThread = new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(finalProcess.getInputStream(), StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        synchronized (output) {
-                            if (output.length() < MAX_OUTPUT_CHARS) {
-                                output.append(line).append('\n');
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-            });
-            readerThread.setDaemon(true);
-            readerThread.start();
+            StringBuilder stderrTail = new StringBuilder();
+            Thread stdoutReader = drainStdout(process, output);
+            Thread stderrDrainer = drainStderr(process, stderrTail);
 
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                return errorPayload("Timed out running dsh " + command);
+                LOG.warn("[DshHost] dsh " + command + " timed out" + stderrSuffix(stderrTail));
+                return errorPayload("Timed out running dsh " + command + stderrSuffix(stderrTail));
             }
-            readerThread.join(2000L);
+            stdoutReader.join(2000L);
+            stderrDrainer.join(2000L);
 
             JsonObject payload = extractJsonObject(output.toString());
-            return payload != null ? payload : errorPayload("No JSON output from dsh " + command);
+            if (payload == null) {
+                LOG.warn("[DshHost] no JSON output from dsh " + command + stderrSuffix(stderrTail));
+                return errorPayload("No JSON output from dsh " + command + stderrSuffix(stderrTail));
+            }
+            return payload;
         } catch (Exception e) {
             LOG.warn("[DshHost] " + command + " failed: " + e.getMessage());
             return errorPayload(e.getMessage() != null ? e.getMessage() : "dsh " + command + " failed");
@@ -193,6 +277,85 @@ public class DshHostHandler extends BaseMessageHandler {
             if (process != null && process.isAlive()) {
                 process.destroyForcibly();
             }
+        }
+    }
+
+    /**
+     * Write the optional JSON payload to the child stdin and close it, so the
+     * Node side never waits on an open stream.
+     */
+    private void writeStdin(Process process, JsonObject stdinPayload) throws IOException {
+        if (stdinPayload != null) {
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write((gson.toJson(stdinPayload) + "\n").getBytes(StandardCharsets.UTF_8));
+                stdin.flush();
+            }
+        } else {
+            process.getOutputStream().close();
+        }
+    }
+
+    /**
+     * Drain the child stdout into {@code output} (bounded at
+     * {@link #MAX_OUTPUT_CHARS}) on a named daemon thread.
+     */
+    private Thread drainStdout(Process process, StringBuilder output) {
+        Thread thread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    synchronized (output) {
+                        if (output.length() < MAX_OUTPUT_CHARS) {
+                            output.append(line).append('\n');
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debug("[DshHost] stdout reader stopped: " + e.getMessage());
+            }
+        }, "dsh-host-stdout-reader");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    /**
+     * Drain the child stderr on a named daemon thread, keeping only the last
+     * {@link #MAX_STDERR_CHARS} chars. Without this the child blocks once its
+     * stderr pipe buffer fills (~64KB), which previously looked like a timeout
+     * and swallowed all failure diagnostics.
+     */
+    private Thread drainStderr(Process process, StringBuilder stderrTail) {
+        Thread thread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    synchronized (stderrTail) {
+                        stderrTail.append(line).append('\n');
+                        if (stderrTail.length() > MAX_STDERR_CHARS) {
+                            stderrTail.delete(0, stderrTail.length() - MAX_STDERR_CHARS);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debug("[DshHost] stderr drainer stopped: " + e.getMessage());
+            }
+        }, "dsh-host-stderr-drainer");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    /**
+     * Render the captured stderr tail as a log/error-message suffix, or an
+     * empty string when the child wrote nothing to stderr.
+     */
+    private String stderrSuffix(StringBuilder stderrTail) {
+        synchronized (stderrTail) {
+            String tail = stderrTail.toString().trim();
+            return tail.isEmpty() ? "" : " (stderr: " + tail + ")";
         }
     }
 
@@ -219,7 +382,8 @@ public class DshHostHandler extends BaseMessageHandler {
                 if (obj != null) {
                     return obj;
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                LOG.debug("[DshHost] skipping non-JSON output line: " + e.getMessage());
             }
         }
         return null;
@@ -237,7 +401,8 @@ public class DshHostHandler extends BaseMessageHandler {
             settings.addProperty("port", settingsService.getDshPort());
             settings.addProperty("autoStart", settingsService.getDshAutoStart());
             payload.add("settings", settings);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOG.debug("[DshHost] failed to attach settings echo: " + e.getMessage());
         }
         callJavaScript("window.updateDshStatus", escapeJs(gson.toJson(payload)));
     }

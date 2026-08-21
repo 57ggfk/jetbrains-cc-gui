@@ -415,6 +415,16 @@ export async function bridgeDshApproval(client, event, sessionId, log = () => {}
     return true;
   } catch (error) {
     log(`[dsh] approval respond failed: ${error.message}`);
+    // Best-effort rejection so the host request is not parked until the watchdog.
+    try {
+      await client.respond(event.rpcId, {
+        sessionId,
+        approvalId: event.approvalId,
+        outcome: 'rejected',
+      });
+    } catch {
+      // secondary failure — the host-side watchdog will settle it
+    }
     return false;
   }
 }
@@ -433,6 +443,15 @@ export async function bridgeDshQuestion(client, event, sessionId, log = () => {}
     return true;
   } catch (error) {
     log(`[dsh] question respond failed: ${error.message}`);
+    // Best-effort empty answer so the host request is not parked until the watchdog.
+    try {
+      await client.respond(event.rpcId, {
+        sessionId,
+        answer: { answers: [] },
+      });
+    } catch {
+      // secondary failure — the host-side watchdog will settle it
+    }
     return false;
   }
 }

@@ -103,19 +103,42 @@ function processCommandLine(pid) {
 }
 
 /**
+ * A dsh-looking executable token: `dsh`, `dsh.cmd`, `dsh.exe`, `dsh.js`, …
+ * Anchored to a path/whitespace boundary so `notes-dsh.txt` or `adsh` (PID
+ * reuse) never match.
+ */
+const DSH_BIN_TOKEN = /(^|[\s/\\"'])dsh([.\-_]\w+)*\b/;
+
+/**
+ * Whether a command line looks like our `dsh web` host. A bare substring
+ * match on "dsh" is too loose (PID reuse could hand us an unrelated process
+ * whose cmdline happens to contain "dsh"), so require the recorded bin path /
+ * basename, or at least a dsh-looking executable token.
+ */
+export function looksLikeDshHostCommand(commandLine, bin) {
+  if (!commandLine) {
+    return false;
+  }
+  if (typeof bin === 'string' && bin) {
+    if (commandLine.includes(bin)) {
+      return true;
+    }
+    // argv may show a shim/basename rather than the recorded absolute path.
+    const base = bin.split(/[\\/]/).pop() || '';
+    if (base && base !== 'dsh' && commandLine.includes(base)) {
+      return true;
+    }
+  }
+  return DSH_BIN_TOKEN.test(commandLine);
+}
+
+/**
  * Guard against PID reuse: the recorded pid may now belong to an unrelated
  * process. Only treat it as our host when the command line mentions the dsh
  * binary (spawned as `dsh web …` or `node …/dsh …`).
  */
 function isDshHostProcess(pid, bin) {
-  const commandLine = processCommandLine(pid);
-  if (!commandLine) {
-    return false;
-  }
-  if (typeof bin === 'string' && bin && commandLine.includes(bin)) {
-    return true;
-  }
-  return commandLine.includes('dsh');
+  return looksLikeDshHostCommand(processCommandLine(pid), bin);
 }
 
 /**
