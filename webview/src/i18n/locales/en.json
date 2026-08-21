@@ -479,7 +479,8 @@
           "grok": "Grok CLI",
           "kimi": "Kimi CLI",
           "opencode": "OpenCode",
-          "pi": "PI CLI"
+          "pi": "PI CLI",
+          "omp": "OMP CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -650,6 +651,10 @@
         "pi": {
           "name": "PI CLI",
           "description": "Minimal terminal coding agent with multi-provider model support"
+        },
+        "omp": {
+          "name": "OMP CLI",
+          "description": "Oh My Pi terminal coding agent with multi-provider model support"
         },
         "dsh": {
           "name": "DeepSeek Harness",
@@ -2105,6 +2110,28 @@
       "description": "Hands-off mode. Codex executes edits and shell commands immediately."
     }
   },
+  "ompModes": {
+    "default": {
+      "label": "Default",
+      "tooltip": "Use the selected model (or OMP auto)",
+      "description": "Uses the model chosen in the model dropdown, or the OMP CLI default when set to Auto."
+    },
+    "smol": {
+      "label": "Smol",
+      "tooltip": "Fast model role (omp --model smol)",
+      "description": "Runs this conversation with the model configured for omp's smol role. Overrides the model dropdown."
+    },
+    "slow": {
+      "label": "Slow",
+      "tooltip": "Reasoning model role (omp --model slow)",
+      "description": "Runs this conversation with the model configured for omp's slow role. Overrides the model dropdown."
+    },
+    "plan": {
+      "label": "Plan",
+      "tooltip": "Planning model role (omp --model plan)",
+      "description": "Runs this conversation with the model configured for omp's plan role. Overrides the model dropdown."
+    }
+  },
   "providers": {
     "claude": {
       "label": "Claude Code"
@@ -2126,6 +2153,9 @@
     },
     "pi": {
       "label": "PI CLI"
+    },
+    "omp": {
+      "label": "OMP CLI"
     },
     "beta": {
       "badge": "Beta",

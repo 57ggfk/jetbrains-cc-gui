@@ -50,10 +50,12 @@ public class CodemossSettingsServicePromptEnhancerConfigTest {
         assertEquals("auto", config.getAsJsonObject("models").get("kimi").getAsString());
         assertEquals("opencode-default", config.getAsJsonObject("models").get("opencode").getAsString());
         assertEquals("auto", config.getAsJsonObject("models").get("pi").getAsString());
+        assertEquals("auto", config.getAsJsonObject("models").get("omp").getAsString());
         assertTrue(config.getAsJsonObject("availability").has("grok"));
         assertTrue(config.getAsJsonObject("availability").has("kimi"));
         assertTrue(config.getAsJsonObject("availability").has("opencode"));
         assertTrue(config.getAsJsonObject("availability").has("pi"));
+        assertTrue(config.getAsJsonObject("availability").has("omp"));
     }
 
     @Test

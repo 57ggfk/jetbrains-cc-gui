@@ -176,9 +176,23 @@ export interface SelectedAgent {
 // ============================================================
 
 /**
- * Permission mode for conversations
+ * Permission mode for conversations.
+ *
+ * The union literals are the static modes known to the Java backend
+ * (SessionState.VALID_PERMISSION_MODES). The `(string & {})` tail keeps
+ * literal autocomplete while allowing dynamic OMP model-role ids (e.g.
+ * 'designer') discovered at runtime via the listModels payload — those are
+ * NEVER sent as `set_mode` (use isValidPermissionMode to gate that); the
+ * role travels via `set_model` instead.
  */
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+export type PermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'plan'
+  | 'bypassPermissions'
+  | 'smol'
+  | 'slow'
+  | (string & {});
 
 /**
  * Mode information
@@ -223,6 +237,20 @@ export const AVAILABLE_MODES: ModeInfo[] = [
     icon: 'codicon-zap',
     tooltip: 'Bypass all permission checks',
     description: 'Fully automated, bypasses all permission checks [use with caution]',
+  },
+  {
+    id: 'smol',
+    label: 'Smol Mode',
+    icon: 'codicon-zap',
+    tooltip: 'Fast model role (OMP only)',
+    description: 'Runs with the model configured for omp\'s smol role',
+  },
+  {
+    id: 'slow',
+    label: 'Slow Mode',
+    icon: 'codicon-lightbulb',
+    tooltip: 'Reasoning model role (OMP only)',
+    description: 'Runs with the model configured for omp\'s slow role',
   },
 ];
 
@@ -472,6 +500,40 @@ export const PI_MODELS: ModelInfo[] = [
   },
 ];
 
+/** OMP default: omit `--model` so CLI resolves its own default. */
+export const OMP_DEFAULT_MODEL_ID = 'auto';
+
+export const OMP_MODELS: ModelInfo[] = [
+  {
+    id: OMP_DEFAULT_MODEL_ID,
+    label: 'OMP Auto',
+    description: 'Use OMP CLI default model',
+  },
+];
+
+/**
+ * OMP model roles — `omp --model <role>` resolves role names natively.
+ * These always appear in the omp model dropdown; the mode selector is a
+ * shortcut that sets the model to the same role id.
+ */
+export const OMP_ROLE_MODELS: ModelInfo[] = [
+  {
+    id: 'smol',
+    label: 'Smol (role)',
+    description: 'Fast model role — resolved by OMP CLI (--model smol)',
+  },
+  {
+    id: 'slow',
+    label: 'Slow (role)',
+    description: 'Reasoning model role — resolved by OMP CLI (--model slow)',
+  },
+  {
+    id: 'plan',
+    label: 'Plan (role)',
+    description: 'Planning model role — resolved by OMP CLI (--model plan)',
+  },
+];
+
 /**
  * DSH default: skip `session.selectModel` so the host serves whatever the DSH
  * Web UI configured. The runtime catalog (`provider/model` ids) is fetched
@@ -514,6 +576,7 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'kimi', label: 'Kimi CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'omp', label: 'OMP CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'dsh', label: 'DeepSeek Harness', icon: 'codicon-terminal', enabled: true, beta: true },
 ];
 

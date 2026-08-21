@@ -1157,6 +1157,8 @@ interface Window {
           success?: boolean;
           provider?: string;
           models?: Array<{ id?: string; label?: string; description?: string }>;
+          /** Dynamic model roles (omp); description = resolved model selector. */
+          roles?: Array<{ id?: string; label?: string; description?: string }>;
           error?: string;
           defaultModel?: string;
         }

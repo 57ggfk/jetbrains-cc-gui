@@ -6,7 +6,7 @@ import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSel
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
-import { useCliModels } from '../../hooks/providers/useCliModels';
+import { useCliModels, useOmpRoles } from '../../hooks/providers/useCliModels';
 import { useToolbarSelectorCompact } from './hooks/useToolbarSelectorCompact';
 import { resolveProviderModels } from './resolveProviderModels';
 
@@ -101,6 +101,8 @@ export const ButtonArea = ({
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
   const { cliModels, cliModelsLoading, cliModelsError, cliDefaultModel, cliCatalogHasEntries, refreshCliModels } = useCliModels(currentProvider);
+  // Dynamic omp roles (static smol/slow/plan fallback until loaded).
+  const ompRoles = useOmpRoles();
 
   // Track changes to custom models in localStorage
   // When localStorage changes, updating this version number triggers useMemo recalculation
@@ -144,19 +146,21 @@ export const ButtonArea = ({
       provider: currentProvider,
       cliModels,
       cliCatalogHasEntries,
+      cliRoles: ompRoles,
       claudeCustomModels: getCustomClaudeModels(),
       codexCustomModels: getCustomCodexModels(),
       claudeMapping,
     });
     // customModelsVersion intentionally forces re-read of localStorage customs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProvider, customModelsVersion, cliModels, cliCatalogHasEntries]);
+  }, [currentProvider, customModelsVersion, cliModels, cliCatalogHasEntries, ompRoles]);
 
   // When a dynamic model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
     const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
       || currentProvider === 'pi' || currentProvider === 'codex'
-      || currentProvider === 'grok' || currentProvider === 'dsh';
+      || currentProvider === 'grok' || currentProvider === 'omp'
+      || currentProvider === 'dsh';
     if (!isDynamicProvider) return;
     // Only correct once a *real* catalog arrived. Static fallback lists
     // (OPENCODE_MODELS = just "opencode-default", CODEX built-ins, …) must not

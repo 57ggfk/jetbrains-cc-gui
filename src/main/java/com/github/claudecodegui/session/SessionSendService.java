@@ -199,8 +199,11 @@ public class SessionSendService {
             resolvedMode = "default";
         }
 
-        // Codex + headless CLI providers have no plan mode equivalent.
-        if (("codex".equals(provider) || SessionProviderRouter.isCliProvider(provider)) && "plan".equals(resolvedMode)) {
+        // Codex + headless CLI providers have no plan mode equivalent — EXCEPT omp,
+        // where "plan" is a model role (`omp --model plan`), not Claude plan mode.
+        if (("codex".equals(provider)
+                || (SessionProviderRouter.isCliProvider(provider) && !"omp".equals(provider)))
+                && "plan".equals(resolvedMode)) {
             return "default";
         }
         return resolvedMode;

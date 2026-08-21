@@ -56,8 +56,8 @@ test('resolvePromptEnhancerRuntimeConfig accepts Grok when effectiveProvider is 
   assert.equal(resolved.model, 'grok');
 });
 
-test('resolvePromptEnhancerRuntimeConfig accepts Kimi / OpenCode / PI CLI providers', () => {
-  for (const provider of ['kimi', 'opencode', 'pi']) {
+test('resolvePromptEnhancerRuntimeConfig accepts Kimi / OpenCode / PI / OMP CLI providers', () => {
+  for (const provider of ['kimi', 'opencode', 'pi', 'omp']) {
     const resolved = resolvePromptEnhancerRuntimeConfig({
       promptEnhancerConfig: {
         provider,
@@ -69,6 +69,7 @@ test('resolvePromptEnhancerRuntimeConfig accepts Kimi / OpenCode / PI CLI provid
           kimi: 'kimi-k2',
           opencode: 'opencode/gpt',
           pi: 'pi-fast',
+          omp: 'omp-fast',
         },
         availability: {
           claude: true,
@@ -76,6 +77,7 @@ test('resolvePromptEnhancerRuntimeConfig accepts Kimi / OpenCode / PI CLI provid
           kimi: true,
           opencode: true,
           pi: true,
+          omp: true,
         },
       },
     });
