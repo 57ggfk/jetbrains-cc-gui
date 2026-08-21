@@ -27,6 +27,8 @@ const translations: Record<string, string> = {
   'settings.cli.tools.opencode.description': 'OpenCode desc',
   'settings.cli.tools.pi.name': 'PI CLI',
   'settings.cli.tools.pi.description': 'PI desc',
+  'settings.cli.tools.dsh.name': 'DeepSeek Harness',
+  'settings.cli.tools.dsh.description': 'DSH desc',
   'settings.cli.installDialog.title': 'Install {{name}}',
   'settings.cli.installDialog.lead': 'Lead {{name}} {{binary}}',
   'settings.cli.installDialog.stepOpenTerminal': 'Open terminal',
@@ -56,6 +58,10 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../shared/ProviderModelIcon', () => ({
   ProviderModelIcon: () => <span data-testid="provider-icon" />,
+}));
+
+vi.mock('./DshConnectionCard', () => ({
+  default: () => <div data-testid="dsh-connection-card">DSH connection</div>,
 }));
 
 describe('CliSection', () => {
@@ -110,6 +116,14 @@ describe('CliSection', () => {
           binaryName: 'pi',
           installed: false,
         },
+        dsh: {
+          id: 'dsh',
+          name: 'DeepSeek Harness',
+          binaryName: 'dsh',
+          installed: true,
+          version: '0.1',
+          path: '/usr/local/bin/dsh',
+        },
       }));
     });
 
@@ -117,9 +131,15 @@ describe('CliSection', () => {
     expect(screen.getByText('Kimi CLI')).toBeTruthy();
     expect(screen.getByText('OpenCode')).toBeTruthy();
     expect(screen.getByText('PI CLI')).toBeTruthy();
+    expect(screen.getByText('DeepSeek Harness')).toBeTruthy();
     expect(screen.getByText('v1.2.3')).toBeTruthy();
     expect(screen.getByText('/Users/test/.grok/bin/grok')).toBeTruthy();
     expect(screen.getByText('More coming soon')).toBeTruthy();
+
+    const harness = screen.getByText('DeepSeek Harness');
+    const connection = screen.getByTestId('dsh-connection-card');
+    expect(harness.compareDocumentPosition(connection) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('opens install guide dialog without auto-installing', async () => {
