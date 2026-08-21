@@ -168,8 +168,46 @@ public class CodexSubagentHistoryLoaderTest {
         assertEquals("Codex subagent activity not found yet", results.get(0).error());
     }
 
-    private static void writeRollout(Path path, JsonObject... records) throws IOException {
-        String content = String.join(System.lineSeparator(),
+    @Test
+    public void unreadableChildMetadataRemainsPendingInsteadOfPermanentError() throws Exception {
+        // Regression test: a child rollout that exists but has no readable
+        // session_meta yet (slow disk, file mid-write) must stay retryable.
+        // Previously this surfaced as a terminal "does not belong to parent
+        // session" error, which the frontend then locked in forever.
+        Path sessionsDir = temporaryFolder.newFolder("unreadable-meta-sessions").toPath();
+        String parentId = "019fa70f-0653-73e2-a613-1fb0a9e83a2b";
+        String childId = "019fb0fe-c344-7da0-9d10-20659f884100";
+        writeRollout(sessionsDir.resolve("rollout-parent-" + parentId + ".jsonl"), event("noop"));
+        writeRollout(sessionsDir.resolve("rollout-child-" + childId + ".jsonl"),
+                event("task_started", "turn_id", "child-turn"),
+                turnContext("child-turn"));
+
+        List<CodexSubagentHistoryLoader.StatusResult> results =
+                new CodexSubagentHistoryLoader(sessionsDir).loadStatuses(parentId, List.of(
+                        new CodexSubagentHistoryLoader.StatusRequest(null, null, childId)
+                ));
+
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).success());
+        assertEquals("running", results.get(0).status());
+        assertFalse(results.get(0).completed());
+    }
+
+    @Test
+    public void rejectsAgentPathWithDotDotSegment() throws Exception {
+        Path sessionsDir = temporaryFolder.newFolder("traversal-sessions").toPath();
+        String parentId = "019fa70f-0653-73e2-a613-1fb0a9e83a2b";
+        try {
+            new CodexSubagentHistoryLoader(sessionsDir).loadStatuses(parentId, List.of(
+                    new CodexSubagentHistoryLoader.StatusRequest(null, "/root/../evil", null)
+            ));
+            org.junit.Assert.fail("Expected IllegalArgumentException for .. agentPath segment");
+        } catch (IllegalArgumentException expected) {
+            assertEquals("Invalid agentPath", expected.getMessage());
+        }
+    }
+
+    private static void writeRollout(Path path, JsonObject... records) throws IOException {    String content = String.join(System.lineSeparator(),
                 java.util.Arrays.stream(records).map(JsonObject::toString).toList());
         Files.writeString(path, content, StandardCharsets.UTF_8);
     }

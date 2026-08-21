@@ -42,8 +42,42 @@ describe('subagentHistoryMerge', () => {
     });
   });
 
-  it('rejects responses from an inactive session or provider', () => {
-    expect(isCurrentSubagentResponse(
+  it('keeps an authoritatively failed sidechain terminal', () => {
+    expect(mergeSubagentHistory(
+      { success: true, completed: false, status: 'error', error: 'Codex subagent turn was aborted' },
+      { success: false, completed: false, status: 'running', error: 'not found yet' },
+    )).toEqual({
+      success: true,
+      completed: false,
+      status: 'error',
+      error: 'Codex subagent turn was aborted',
+    });
+  });
+
+  it('lets a later running snapshot correct a transient resolution error', () => {
+    // success === false means the backend never read the sidechain (transient
+    // IO / resolution failure), so the error must NOT be treated as terminal.
+    expect(mergeSubagentHistory(
+      { success: false, completed: false, status: 'error', error: 'Read timed out' },
+      { success: true, completed: false, status: 'running' },
+    )).toMatchObject({
+      success: true,
+      status: 'running',
+    });
+  });
+
+  it('lets a later completed snapshot correct a transient resolution error', () => {
+    expect(mergeSubagentHistory(
+      { success: false, completed: false, status: 'error', error: 'Read timed out' },
+      { success: true, completed: true, status: 'completed' },
+    )).toMatchObject({
+      success: true,
+      completed: true,
+      status: 'completed',
+    });
+  });
+
+  it('rejects responses from an inactive session or provider', () => {expect(isCurrentSubagentResponse(
       { sessionId: 'old-session', provider: 'codex' },
       'current-session',
       'codex',

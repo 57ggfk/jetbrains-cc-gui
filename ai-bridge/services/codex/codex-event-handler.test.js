@@ -192,6 +192,43 @@ test('custom_tool_call exec update_plan treats array script failure output as an
   });
 });
 
+test('custom_tool_call exec apply_patch ignores exit-code noise inside successful output', async () => {
+  // Regression test: apply_patch output may echo command output containing
+  // phrases like "exit code: 1" even when the patch itself succeeded. Only
+  // start-of-output error prefixes (or an explicit error status) may fail it.
+  const emittedMessages = [];
+  const state = createInitialEventState((message) => emittedMessages.push(message));
+
+  await captureStdout(async () => {
+    await processCodexEventStream(
+      eventsFrom([
+        {
+          type: 'response_item',
+          payload: { type: 'custom_tool_call', call_id: 'patch-noisy', name: 'exec', input: CUSTOM_EXEC_SOURCE },
+        },
+        {
+          type: 'response_item',
+          payload: {
+            type: 'custom_tool_call_output',
+            call_id: 'patch-noisy',
+            output: 'Applied patch cleanly.\nVerification script reported exit code: 1 but was non-blocking.',
+          },
+        },
+      ]),
+      state,
+      makeConfig(),
+    );
+  });
+
+  assert.equal(emittedMessages.length, 2);
+  assert.deepEqual(emittedMessages[1].message.content[0], {
+    type: 'tool_result',
+    tool_use_id: 'codex_patch_patch-noisy_0',
+    is_error: false,
+    content: 'Patch applied',
+  });
+});
+
 test('current-turn session replay emits custom_tool_call exec plans found only in JSONL', async () => {
   const tempDirectory = await mkdtemp(join(tmpdir(), 'codex-custom-plan-replay-'));
   const tempSessionPath = join(tempDirectory, 'fixture-session.jsonl');

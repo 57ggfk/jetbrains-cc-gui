@@ -5,7 +5,12 @@ import type {
 } from '../../types';
 
 function isTerminal(history: SubagentHistoryResponse | undefined): boolean {
-  return history?.completed === true || history?.status === 'completed' || history?.status === 'error';
+  if (history?.completed === true || history?.status === 'completed') return true;
+  // An error status is only terminal when the backend actually read the
+  // sidechain and observed a failed turn (success === true). Errors with
+  // success === false are resolution/read failures (e.g. transient IO) and
+  // must stay retryable so the next poll can correct them.
+  return history?.success === true && history?.status === 'error';
 }
 
 export function mergeSubagentHistory(

@@ -18,6 +18,7 @@ import type {
 } from '../../types';
 import { parseTaskNotification } from '../../utils/taskEventParser';
 import { deepEqual } from '../../utils/deepEqual';
+import { isLatestCodexStatusRequest } from '../../utils/codexStatusRequestTracker';
 import {
   setupSlashCommandsCallback,
   resetSlashCommandsState,
@@ -143,6 +144,9 @@ export function registerWindowCallbacks(
         options.currentSessionIdRef.current,
         options.currentProviderRef.current,
       ) || !Array.isArray(result.statuses)) return;
+      // Drop late/out-of-order poll responses: only the answer to the latest
+      // request the frontend sent may be merged.
+      if (!isLatestCodexStatusRequest(result.requestId)) return;
 
       options.setSubagentHistories((prev) => {
         let next = prev;

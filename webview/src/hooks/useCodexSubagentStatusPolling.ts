@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { SubagentInfo } from '../types';
 import { sendBridgeEvent } from '../utils/bridge';
+import { trackCodexStatusRequest } from '../utils/codexStatusRequestTracker';
 
 const STATUS_POLL_INTERVAL_MS = 2_000;
 export const MAX_CODEX_SUBAGENT_STATUS_TARGETS = 64;
@@ -40,10 +41,12 @@ export function useCodexSubagentStatusPolling({
 
     const requestStatuses = () => {
       requestSequenceRef.current += 1;
+      const requestId = `${currentSessionId}:${requestSequenceRef.current}`;
+      trackCodexStatusRequest(requestId);
       sendBridgeEvent('load_subagent_statuses', JSON.stringify({
         sessionId: currentSessionId,
         provider: currentProvider,
-        requestId: `${currentSessionId}:${requestSequenceRef.current}`,
+        requestId,
         agents,
       }));
     };

@@ -271,13 +271,18 @@ function handleCustomToolCallOutputPayload(payload, state) {
 
   const callId = getResponseItemCallId(payload);
   const output = extractCustomToolOutputText(payload.output);
-  const errorOutput = /(?:^|\n)\s*(?:error:|failed to parse|permission denied|command denied|script failed\b|script error:|exit code:\s*[1-9]\d*)/i;
-  const isError = payload.status === 'error' || payload.is_error === true || errorOutput.test(output);
+  // Plan outputs are short status texts, so an any-line match is safe here.
+  const planErrorOutput = /(?:^|\n)\s*(?:error:|failed to parse|permission denied|command denied|script failed\b|script error:|exit code:\s*[1-9]\d*)/i;
+  // apply_patch output can echo command output containing e.g. "exit code: 1"
+  // even when the patch itself succeeded, so keep the original strict
+  // start-of-output prefixes for the patch path.
+  const patchErrorOutput = /^(?:error:|failed to parse|permission denied|command denied)/i;
   let handled = false;
   const planToolUseId = callId ? state.pendingCustomPlanToolUseIds.get(callId) : null;
   if (planToolUseId) {
+    const isPlanError = payload.status === 'error' || payload.is_error === true || planErrorOutput.test(output);
     if (!state.emittedToolResultIds.has(planToolUseId)) {
-      state.emitMessage(toolResultMsg(planToolUseId, isError, isError ? 'Plan update failed' : 'Plan updated'));
+      state.emitMessage(toolResultMsg(planToolUseId, isPlanError, isPlanError ? 'Plan update failed' : 'Plan updated'));
       state.emittedToolResultIds.add(planToolUseId);
     }
     state.pendingCustomPlanToolUseIds.delete(callId);
@@ -287,7 +292,8 @@ function handleCustomToolCallOutputPayload(payload, state) {
   const batch = callId ? state.pendingCustomPatchBatches.get(callId) : null;
   if (!batch) return handled;
 
-  emitSyntheticPatchToolResults(state, batch, isError);
+  const isPatchError = payload.status === 'error' || payload.is_error === true || patchErrorOutput.test(output);
+  emitSyntheticPatchToolResults(state, batch, isPatchError);
   state.pendingCustomPatchBatches.delete(callId);
   return true;
 }

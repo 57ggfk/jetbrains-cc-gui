@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -33,6 +34,11 @@ final class CodexSubagentHistoryLoader {
             Pattern.compile("/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*");
     private static final int MAX_CACHE_ENTRIES = 256;
     static final int MAX_STATUS_REQUESTS = 64;
+    /**
+     * Status polling runs on a fixed two-second cadence, so directory scans
+     * younger than this are reused instead of walking the sessions tree again.
+     */
+    private static final long SESSION_SCAN_TTL_MS = 2_000;
 
     private final Path sessionsDir;
     private final Map<LookupKey, Location> locationCache =
@@ -42,6 +48,14 @@ final class CodexSubagentHistoryLoader {
                     return size() > MAX_CACHE_ENTRIES;
                 }
             });
+    private final Map<String, CachedSessionFile> sessionFileCache =
+            Collections.synchronizedMap(new LinkedHashMap<String, CachedSessionFile>(32, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, CachedSessionFile> eldest) {
+                    return size() > MAX_CACHE_ENTRIES;
+                }
+            });
+    private volatile CachedSessionIndex sessionIndexCache;
 
     CodexSubagentHistoryLoader(Path sessionsDir) {
         this.sessionsDir = sessionsDir;
@@ -125,6 +139,10 @@ final class CodexSubagentHistoryLoader {
                 activities = findActivityLocations(findExactSessionFile(parentSessionId), requestedToolUseIds);
             } catch (PendingException e) {
                 activityPendingError = e.getMessage();
+            } catch (IOException e) {
+                // Transient read failure (slow disk, file mid-write): stay
+                // retryable instead of failing the whole batch permanently.
+                activityPendingError = errorMessage(e);
             } catch (Exception e) {
                 activityFailure = errorMessage(e);
             }
@@ -134,7 +152,9 @@ final class CodexSubagentHistoryLoader {
         boolean needsLegacyLookup = false;
         for (int index : unresolvedIndexes) {
             StatusRequest request = requests.get(index);
-            Location activity = activities.locations().get(request.toolUseId());
+            Location activity = request.toolUseId() != null
+                    ? activities.locations().get(request.toolUseId())
+                    : null;
             if (activity != null) {
                 requiredThreadIds.add(activity.agentThreadId());
             }
@@ -238,14 +258,22 @@ final class CodexSubagentHistoryLoader {
             ActivityLookup activities,
             SessionIndex sessionIndex
     ) {
-        Location activity = activities.locations().get(request.toolUseId());
+        Location activity = request.toolUseId() != null
+                ? activities.locations().get(request.toolUseId())
+                : null;
         if (activity != null) {
             return exactLocation(activity.agentThreadId(), activity.agentPath(), sessionIndex);
         }
         if (request.agentId() != null && !request.agentId().isBlank()) {
             Location direct = exactLocation(request.agentId(), request.agentPath(), sessionIndex);
             JsonObject meta = readSessionMeta(direct.file());
-            if (meta == null || !parentSessionId.equals(getParentThreadId(meta))) {
+            if (meta == null) {
+                // Null means the file is unreadable or not fully written yet.
+                // Retry on the next poll instead of misreporting a transient
+                // read failure as a permanent ownership error.
+                throw new PendingException("Codex subagent metadata not readable yet: " + request.agentId());
+            }
+            if (!parentSessionId.equals(getParentThreadId(meta))) {
                 throw new IllegalStateException("Codex subagent does not belong to parent session");
             }
             return new Location(direct.file(), request.agentId(), getAgentPath(meta));
@@ -315,6 +343,25 @@ final class CodexSubagentHistoryLoader {
             Set<String> requiredThreadIds,
             boolean needsLegacyLookup
     ) throws IOException {
+        String cacheKey = parentSessionId + "\n" + String.join(",", new TreeSet<>(requiredThreadIds))
+                + "\n" + needsLegacyLookup;
+        CachedSessionIndex cached = sessionIndexCache;
+        long now = System.currentTimeMillis();
+        if (cached != null
+                && cached.key().equals(cacheKey)
+                && now - cached.timestamp() < SESSION_SCAN_TTL_MS) {
+            return cached.index();
+        }
+        SessionIndex index = scanSessionIndex(parentSessionId, requiredThreadIds, needsLegacyLookup);
+        sessionIndexCache = new CachedSessionIndex(now, cacheKey, index);
+        return index;
+    }
+
+    private SessionIndex scanSessionIndex(
+            String parentSessionId,
+            Set<String> requiredThreadIds,
+            boolean needsLegacyLookup
+    ) throws IOException {
         if (!Files.isDirectory(sessionsDir)) {
             throw new PendingException("Codex sessions directory not found yet");
         }
@@ -361,6 +408,10 @@ final class CodexSubagentHistoryLoader {
             );
         } catch (PendingException e) {
             return pendingStatus(request, e.getMessage());
+        } catch (IOException e) {
+            // Transient read failure (slow disk, file mid-write): stay
+            // retryable instead of locking the agent into a terminal error.
+            return pendingStatus(request, errorMessage(e));
         } catch (Exception e) {
             return failedStatus(request, errorMessage(e));
         }
@@ -519,6 +570,19 @@ final class CodexSubagentHistoryLoader {
     }
 
     private Path findExactSessionFile(String sessionId) throws IOException {
+        CachedSessionFile cached = sessionFileCache.get(sessionId);
+        long now = System.currentTimeMillis();
+        if (cached != null
+                && now - cached.timestamp() < SESSION_SCAN_TTL_MS
+                && Files.isRegularFile(cached.file())) {
+            return cached.file();
+        }
+        Path resolved = scanExactSessionFile(sessionId);
+        sessionFileCache.put(sessionId, new CachedSessionFile(now, resolved));
+        return resolved;
+    }
+
+    private Path scanExactSessionFile(String sessionId) throws IOException {
         if (!Files.isDirectory(sessionsDir)) {
             throw new PendingException("Codex sessions directory not found yet");
         }
@@ -736,6 +800,14 @@ final class CodexSubagentHistoryLoader {
                 || (!SAFE_AGENT_PATH.matcher(value).matches() && !SAFE_ID.matcher(value).matches())) {
             throw new IllegalArgumentException("Invalid agentPath");
         }
+        // The SAFE_AGENT_PATH alphabet technically matches ".." segments.
+        // Reject them explicitly so a future path-concatenation sink can never
+        // turn an agentPath into a traversal.
+        for (String segment : value.split("/")) {
+            if ("..".equals(segment)) {
+                throw new IllegalArgumentException("Invalid agentPath");
+            }
+        }
     }
 
     private static boolean matchesAgentPath(String requested, String candidate) {
@@ -796,6 +868,12 @@ final class CodexSubagentHistoryLoader {
         private static ActivityLookup empty() {
             return new ActivityLookup(Map.of(), Set.of());
         }
+    }
+
+    private record CachedSessionFile(long timestamp, Path file) {
+    }
+
+    private record CachedSessionIndex(long timestamp, String key, SessionIndex index) {
     }
 
     private record SessionIndex(Map<String, List<Path>> filesByThreadId, List<Location> legacyLocations) {

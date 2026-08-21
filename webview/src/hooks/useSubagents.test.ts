@@ -356,8 +356,25 @@ describe('extractSubagentsFromMessages', () => {
     })[0].status).toBe('completed');
   });
 
-  it('does not overwrite a task_notification error with sidechain completion', () => {
-    const messages = [assistantWithAsyncAgent('tu_spawn')];
+  it('flips to error only on an authoritatively observed sidechain failure', () => {
+    const messages = [assistantWithAsyncAgent('tu_spawn'), launchAckResult('tu_spawn')];
+    const extracted = extractSubagentsFromMessages(
+      messages, getContentBlocks, findToolResult(messages), getToolResultRaw(messages), {},
+    );
+
+    // Transient resolution/read failures (success === false) must keep the
+    // agent running so polling can correct them.
+    expect(applySubagentHistoryCompletion(extracted, {
+      tu_spawn: { success: false, status: 'error', error: 'Read timed out' },
+    })[0].status).toBe('running');
+
+    // The backend read the sidechain and saw the turn abort: terminal error.
+    expect(applySubagentHistoryCompletion(extracted, {
+      tu_spawn: { success: true, status: 'error', error: 'Codex subagent turn was aborted' },
+    })[0].status).toBe('error');
+  });
+
+  it('does not overwrite a task_notification error with sidechain completion', () => {const messages = [assistantWithAsyncAgent('tu_spawn')];
     const taskEvents = {
       tu_spawn: { toolUseId: 'tu_spawn', status: 'failed' as const },
     };

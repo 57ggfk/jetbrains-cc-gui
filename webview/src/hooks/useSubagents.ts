@@ -174,7 +174,12 @@ export function applySubagentHistoryCompletion(
     if (!subagent.isAsync || subagent.status !== 'running') return subagent;
     const history = subagentHistories[subagent.id]
       ?? (subagent.agentId ? subagentHistories[subagent.agentId] : undefined);
-    if (history?.status === 'error') return { ...subagent, status: 'error' as const };
+    // Only an authoritatively-observed failure (the backend read the sidechain
+    // and saw the turn abort) may flip the agent to error. Resolution/read
+    // failures come back with success === false and must keep polling.
+    if (history?.status === 'error' && history.success === true) {
+      return { ...subagent, status: 'error' as const };
+    }
     return history?.completed ? { ...subagent, status: 'completed' as const } : subagent;
   });
 }
