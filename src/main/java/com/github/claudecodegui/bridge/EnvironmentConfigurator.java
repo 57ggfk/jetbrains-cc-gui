@@ -129,6 +129,9 @@ public class EnvironmentConfigurator {
                     userHome + "/.pi/bin",
                     userHome + "/.omp/bin",
                     userHome + "/.claude/bin",
+                    // DeepSeek Harness (Hermes installer keeps node + dsh together)
+                    userHome + "/.hermes/node/bin",
+                    userHome + "/.dsh/bin",
             };
             for (String p : unixPaths) {
                 if (!pathContains(currentPath, p)) {

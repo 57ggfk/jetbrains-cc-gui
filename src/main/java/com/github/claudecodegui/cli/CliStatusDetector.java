@@ -201,6 +201,12 @@ public final class CliStatusDetector {
                 dirs.add(join(home, ".omp", "bin"));
                 dirs.add(join(home, ".local", "bin"));
                 break;
+            case DSH:
+                // Hermes (the DSH-native installer) keeps node + dsh together.
+                dirs.add(join(home, ".hermes", "node", "bin"));
+                dirs.add(join(home, ".dsh", "bin"));
+                dirs.add(join(home, ".local", "bin"));
+                break;
             default:
                 break;
         }
@@ -209,6 +215,14 @@ public final class CliStatusDetector {
             String appData = System.getenv("APPDATA");
             if (appData != null && !appData.isBlank()) {
                 dirs.add(join(appData, "npm"));
+            }
+            String programFiles = System.getenv("ProgramFiles");
+            if (programFiles != null && !programFiles.isBlank()) {
+                dirs.add(join(programFiles, "nodejs"));
+            }
+            String programFilesX86 = System.getenv("ProgramFiles(x86)");
+            if (programFilesX86 != null && !programFilesX86.isBlank()) {
+                dirs.add(join(programFilesX86, "nodejs"));
             }
         } else {
             dirs.add("/usr/local/bin");
@@ -228,6 +242,7 @@ public final class CliStatusDetector {
             case OPENCODE -> new String[]{"OPENCODE_BIN", "OPENCODE_PATH", "OPENCODE_CLI_PATH"};
             case PI -> new String[]{"PI_BIN", "PI_PATH", "PI_CLI_PATH"};
             case OMP -> new String[]{"OMP_BIN", "OMP_PATH", "OMP_CLI_PATH"};
+            case DSH -> new String[]{"DSH_BIN", "DSH_PATH", "DSH_CLI_PATH"};
         };
     }
 
@@ -418,7 +433,7 @@ public final class CliStatusDetector {
         String pathKey = PlatformUtils.isWindows() ? "Path" : "PATH";
         String current = env.getOrDefault(pathKey, env.getOrDefault("PATH", ""));
         String sep = PlatformUtils.isWindows() ? ";" : ":";
-        List<String> extras = List.of(
+        List<String> extras = new ArrayList<>(List.of(
                 join(home, ".kimi-code", "bin"),
                 join(home, ".kimi", "bin"),
                 join(home, ".opencode", "bin"),
@@ -429,7 +444,17 @@ public final class CliStatusDetector {
                 join(home, ".cargo", "bin"),
                 "/opt/homebrew/bin",
                 "/usr/local/bin"
-        );
+        ));
+        if (PlatformUtils.isWindows()) {
+            String appData = System.getenv("APPDATA");
+            if (appData != null && !appData.isBlank()) {
+                extras.add(join(appData, "npm"));
+            }
+            String programFiles = System.getenv("ProgramFiles");
+            if (programFiles != null && !programFiles.isBlank()) {
+                extras.add(join(programFiles, "nodejs"));
+            }
+        }
         StringBuilder next = new StringBuilder();
         for (String dir : extras) {
             if (dir != null && !dir.isBlank() && !current.contains(dir)) {

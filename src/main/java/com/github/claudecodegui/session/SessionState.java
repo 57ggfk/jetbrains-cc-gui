@@ -87,7 +87,7 @@ public class SessionState {
     // explicit, informed opt-in — see security remediation A: shipping bypass as the
     // out-of-the-box default removed the only confirmation gate for AI-issued commands.
     private volatile String permissionMode = "default";
-    private volatile String model = "claude-sonnet-4-7";
+    private volatile String model = "claude-sonnet-5";
     private volatile String provider = "claude";
     // Reasoning effort (thinking depth). Null means "do not override SDK/settings".
     private volatile String reasoningEffort = null;
@@ -217,7 +217,50 @@ public class SessionState {
     }
 
     public void setModel(String model) {
-        this.model = model;
+        this.model = normalizeRetiredModelId(model);
+    }
+
+    /**
+     * Migrate retired Claude model ids to their live replacement on write.
+     *
+     * <p>Persisted tab state (.idea/claudeCodeTabState.xml) and history sessions keep
+     * whatever model id was saved forever. When a model is retired from the API
+     * (sonnet-4-6, sonnet-4-7, ...), restoring such a tab would otherwise spawn a CLI
+     * pinned to a dead model that fails on every send ("It may not exist or you may
+     * not have access to it") - see #1678. Migrating here self-heals restored tabs
+     * without touching the persisted XML.</p>
+     *
+     * @param model raw model id (may be null, blank, carry a [1m] suffix, or be retired)
+     * @return the model id to store - retired ids mapped to their live replacement,
+     *         anything else (including non-Claude ids) passed through unchanged
+     */
+    public static String normalizeRetiredModelId(String model) {
+        if (model == null) {
+            return null;
+        }
+        String trimmed = model.trim();
+        if (trimmed.isEmpty()) {
+            // Blank input normalizes to "" like every other path returns trimmed.
+            return trimmed;
+        }
+        String base = trimmed;
+        boolean oneM = false;
+        if (base.endsWith("[1m]")) {
+            base = base.substring(0, base.length() - "[1m]".length());
+            oneM = true;
+        }
+        switch (base) {
+            case "claude-sonnet-4-6":
+            case "claude-sonnet-4-7":
+                base = "claude-sonnet-5";
+                break;
+            case "claude-opus-4-6":
+                base = "claude-opus-4-8";
+                break;
+            default:
+                return trimmed;
+        }
+        return oneM ? base + "[1m]" : base;
     }
 
     public void setProvider(String provider) {

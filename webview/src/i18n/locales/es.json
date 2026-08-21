@@ -908,7 +908,7 @@
     "loading": "Cargando historial...",
     "loadFailed": "Error al cargar",
     "noSessions": "Sin sesiones históricas",
-    "noSessionsDesc": "No se encontraron registros de sesión de Claude en el proyecto actual",
+    "noSessionsDesc": "No se encontraron registros de sesión en el proyecto actual",
     "totalSessions": "{{count}} sesiones · {{total}} mensajes",
     "messageCount": "{{count}} mensajes",
     "searchPlaceholder": "Buscar título de sesión...",
@@ -1031,6 +1031,7 @@
   },
   "config": {
     "clickToCopy": "Haz clic para copiar",
+    "officialDocs": "Documentación oficial",
     "switch": "Cambiar",
     "switchProvider": "Cambiar proveedor",
     "runtimeProvider": {
@@ -1388,7 +1389,9 @@
     "keepAllConfirmMessage": "Aceptar los cambios actuales como base. Los cambios futuros se rastrearán desde cero.",
     "discardAllSuccess": "Todos los cambios descartados",
     "discardAllFailed": "Error al descartar: {{error}}",
-    "keepAllSuccess": "Todos los cambios mantenidos, seguimiento reiniciado"
+    "keepAllSuccess": "Todos los cambios mantenidos, seguimiento reiniciado",
+    "multiAgentBadge": "Multi-agente",
+    "multiAgentEdited": "{{count}} agentes editaron este archivo en esta sesión — revísalo con cuidado"
   },
   "skills": {
     "title": "Skills",
@@ -1544,11 +1547,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Modelo mejorado de Sonnet 4.6"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · Modelo recomendado por defecto"
+        "description": "Sonnet 5 · Modelo recomendado por defecto"
       },
       "opus5": {
         "label": "Opus 5",
@@ -1625,7 +1624,7 @@
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
-      "tooltip": "Codex approval_policy=untrusted – prompts before editing files or running shell commands.",
+      "tooltip": "Codex approval_policy=on-request – prompts before editing files or running shell commands.",
       "description": "Safest option. Every write or command requires your approval."
     },
     "plan": {

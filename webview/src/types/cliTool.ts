@@ -3,7 +3,7 @@
  * Detection only — the plugin never auto-installs these binaries.
  */
 
-export type CliToolId = 'grok' | 'kimi' | 'opencode' | 'pi' | 'omp';
+export type CliToolId = 'grok' | 'kimi' | 'opencode' | 'pi' | 'dsh' | 'omp';
 
 export interface CliToolStatus {
   id: CliToolId;
@@ -75,6 +75,14 @@ export const CLI_TOOL_DEFINITIONS: CliToolDefinition[] = [
     docsUrl: 'https://pi.dev/',
     installCommand: 'curl -fsSL https://pi.dev/install.sh | sh',
     altInstallCommand: 'npm install -g @earendil-works/pi-coding-agent',
+  },
+  {
+    id: 'dsh',
+    nameKey: 'settings.cli.tools.dsh.name',
+    descriptionKey: 'settings.cli.tools.dsh.description',
+    binaryName: 'dsh',
+    docsUrl: 'https://github.com/deepseek-ai/dsh',
+    installCommand: 'npm i -g @deepseek-ai/dsh',
   },
   {
     id: 'omp',

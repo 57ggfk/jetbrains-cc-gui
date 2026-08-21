@@ -18,6 +18,7 @@ import { usePiProvider } from './providers/usePiProvider';
 import { useOmpProvider } from './providers/useOmpProvider';
 import { isCliOnlyProvider, normalizeCliPermissionMode, ompModeForModelId } from './providers/cliProviders';
 import { useOmpRoles } from './providers/useCliModels';
+import { useDshProvider } from './providers/useDshProvider';
 import { useUsageTracking } from './providers/useUsageTracking';
 import { useProviderSettings } from './providers/useProviderSettings';
 import { useModelStatePersistence } from './providers/useModelStatePersistence';
@@ -65,6 +66,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   // Dynamic omp model roles (listModels payload; static smol/slow/plan until
   // loaded) — drive mode⇔model unification for omp.
   const ompRoles = useOmpRoles();
+  const dsh = useDshProvider();
   const { isSdkInstalled, isSdkStatusKnown, sdkStatus, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
@@ -100,6 +102,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedOmpModel, setSelectedOmpModel,
     ompPermissionMode, setOmpPermissionMode,
   } = omp;
+  const {
+    selectedDshModel, setSelectedDshModel,
+    dshPermissionMode, setDshPermissionMode,
+  } = dsh;
 
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
@@ -113,11 +119,13 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedOpenCodeModel,
     setSelectedPiModel,
     setSelectedOmpModel,
+    setSelectedDshModel,
     setGrokPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
     setOmpPermissionMode,
+    setDshPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -132,11 +140,13 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedOpenCodeModel,
     selectedPiModel,
     selectedOmpModel,
+    selectedDshModel,
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
     ompPermissionMode,
+    dshPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -155,7 +165,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
             ? selectedPiModel
             : currentProvider === 'omp'
               ? selectedOmpModel
-              : selectedClaudeModel;
+              : currentProvider === 'dsh'
+                ? selectedDshModel
+                : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
@@ -202,6 +214,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
         }
         return;
       }
+      if (currentProvider === 'dsh') setDshPermissionMode(cliMode);
       sendBridgeEvent('set_mode', cliMode);
       return;
     }
@@ -218,6 +231,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setPiPermissionMode,
     setOmpPermissionMode,
     setSelectedOmpModel,
+    setDshPermissionMode,
   ]);
 
   const handleModelSelect = useCallback((modelId: string) => {
@@ -254,6 +268,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       if (isValidPermissionMode(ompMode)) {
         sendBridgeEvent('set_mode', ompMode);
       }
+    } else if (currentProvider === 'dsh') {
+      setSelectedDshModel(modelId);
+      sendBridgeEvent('set_model', modelId);
     }
   }, [
     currentProvider,
@@ -267,6 +284,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedPiModel,
     setSelectedOmpModel,
     setOmpPermissionMode,
+    setSelectedDshModel,
   ]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
@@ -286,6 +304,8 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       modeToSet = normalizeCliPermissionMode(piPermissionMode, providerId);
     } else if (providerId === 'omp') {
       modeToSet = normalizeCliPermissionMode(ompPermissionMode, providerId);
+    } else if (providerId === 'dsh') {
+      modeToSet = normalizeCliPermissionMode(dshPermissionMode, providerId);
     }
     setPermissionMode(modeToSet);
     // Dynamic omp roles are not in Java's static mode whitelist — the
@@ -301,6 +321,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     else if (providerId === 'opencode') newModel = selectedOpenCodeModel;
     else if (providerId === 'pi') newModel = selectedPiModel;
     else if (providerId === 'omp') newModel = selectedOmpModel;
+    else if (providerId === 'dsh') newModel = selectedDshModel;
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
@@ -310,6 +331,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     openCodePermissionMode,
     piPermissionMode,
     ompPermissionMode,
+    dshPermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
     selectedGrokModel,
@@ -317,6 +339,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedOpenCodeModel,
     selectedPiModel,
     selectedOmpModel,
+    selectedDshModel,
     longContextEnabled,
   ]);
 
@@ -374,6 +397,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...openCode,
     ...pi,
     ...omp,
+    ...dsh,
     ...usage,
     ...settings,
     sdkStatus,

@@ -7,6 +7,7 @@ import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.model.ConflictStrategy;
 import com.github.claudecodegui.model.DeleteResult;
 import com.github.claudecodegui.model.PromptScope;
+import com.github.claudecodegui.session.SessionState;
 import com.github.claudecodegui.dependency.DependencyManager;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -212,6 +213,121 @@ public class CodemossSettingsService {
         }
         return url.trim();
     }
+
+    // ============================================================================
+    // DSH (DeepSeek Harness) connection settings — thin connection only:
+    // bin / host / port / autoStart. Provider keys and model catalog stay in
+    // the DSH Web UI ($DSH_HOME); the plugin never writes them.
+    // ============================================================================
+
+    private static final String DSH_SECTION_KEY = "dsh";
+    private static final String DSH_DEFAULT_HOST = "127.0.0.1";
+    private static final int DSH_DEFAULT_PORT = 3080;
+
+    public String getDshBin() throws IOException {
+        return getDshStringSetting("bin");
+    }
+
+    public void setDshBin(String value) throws IOException {
+        setDshStringSetting("bin", value);
+    }
+
+    public String getDshHost() throws IOException {
+        String value = getDshStringSetting("host");
+        return value.isEmpty() ? DSH_DEFAULT_HOST : value;
+    }
+
+    public void setDshHost(String value) throws IOException {
+        setDshStringSetting("host", value);
+    }
+
+    public int getDshPort() throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has(DSH_SECTION_KEY) || config.get(DSH_SECTION_KEY).isJsonNull()) {
+            return DSH_DEFAULT_PORT;
+        }
+        JsonObject dsh = config.getAsJsonObject(DSH_SECTION_KEY);
+        if (!dsh.has("port") || dsh.get("port").isJsonNull()) {
+            return DSH_DEFAULT_PORT;
+        }
+        try {
+            int port = dsh.get("port").getAsInt();
+            return port > 0 && port <= 65535 ? port : DSH_DEFAULT_PORT;
+        } catch (Exception e) {
+            return DSH_DEFAULT_PORT;
+        }
+    }
+
+    public void setDshPort(int port) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject dsh = config.has(DSH_SECTION_KEY) && !config.get(DSH_SECTION_KEY).isJsonNull()
+                ? config.getAsJsonObject(DSH_SECTION_KEY)
+                : new JsonObject();
+        if (port > 0 && port <= 65535 && port != DSH_DEFAULT_PORT) {
+            dsh.addProperty("port", port);
+        } else {
+            dsh.remove("port");
+        }
+        config.add(DSH_SECTION_KEY, dsh);
+        writeConfig(config);
+    }
+
+    public boolean getDshAutoStart() throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has(DSH_SECTION_KEY) || config.get(DSH_SECTION_KEY).isJsonNull()) {
+            return true;
+        }
+        JsonObject dsh = config.getAsJsonObject(DSH_SECTION_KEY);
+        if (!dsh.has("autoStart") || dsh.get("autoStart").isJsonNull()) {
+            return true;
+        }
+        try {
+            return dsh.get("autoStart").getAsBoolean();
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    public void setDshAutoStart(boolean autoStart) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject dsh = config.has(DSH_SECTION_KEY) && !config.get(DSH_SECTION_KEY).isJsonNull()
+                ? config.getAsJsonObject(DSH_SECTION_KEY)
+                : new JsonObject();
+        if (autoStart) {
+            dsh.remove("autoStart");
+        } else {
+            dsh.addProperty("autoStart", false);
+        }
+        config.add(DSH_SECTION_KEY, dsh);
+        writeConfig(config);
+    }
+
+    private String getDshStringSetting(String field) throws IOException {
+        JsonObject config = readConfig();
+        if (!config.has(DSH_SECTION_KEY) || config.get(DSH_SECTION_KEY).isJsonNull()) {
+            return "";
+        }
+        JsonObject dsh = config.getAsJsonObject(DSH_SECTION_KEY);
+        if (!dsh.has(field) || dsh.get(field).isJsonNull()) {
+            return "";
+        }
+        return dsh.get(field).getAsString();
+    }
+
+    private void setDshStringSetting(String field, String value) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject dsh = config.has(DSH_SECTION_KEY) && !config.get(DSH_SECTION_KEY).isJsonNull()
+                ? config.getAsJsonObject(DSH_SECTION_KEY)
+                : new JsonObject();
+        String v = value != null ? value.trim() : "";
+        if (v.isEmpty()) {
+            dsh.remove(field);
+        } else {
+            dsh.addProperty(field, v);
+        }
+        config.add(DSH_SECTION_KEY, dsh);
+        writeConfig(config);
+    }
     private static final String COMMIT_AI_KEY = "commitAi";
     private static final String PROMPT_ENHANCER_KEY = "promptEnhancer";
     private static final String AI_FEATURE_PROVIDER_KEY = "provider";
@@ -239,9 +355,10 @@ public class CodemossSettingsService {
     private static final String AI_FEATURE_RESOLUTION_MANUAL = "manual";
     private static final String AI_FEATURE_RESOLUTION_AUTO = "auto";
     private static final String AI_FEATURE_RESOLUTION_UNAVAILABLE = "unavailable";
-    private static final String DEFAULT_PROMPT_ENHANCER_CLAUDE_MODEL = "claude-sonnet-4-6";
+    // claude-sonnet-4-6/4-7 are retired - defaults must stay on live models (#1678, #1693).
+    private static final String DEFAULT_PROMPT_ENHANCER_CLAUDE_MODEL = "claude-sonnet-5";
     private static final String DEFAULT_PROMPT_ENHANCER_CODEX_MODEL = "gpt-5.5";
-    private static final String DEFAULT_COMMIT_AI_CLAUDE_MODEL = "claude-sonnet-4-6";
+    private static final String DEFAULT_COMMIT_AI_CLAUDE_MODEL = "claude-sonnet-5";
     private static final String DEFAULT_COMMIT_AI_CODEX_MODEL = "gpt-5.5";
     private static final String DEFAULT_AI_FEATURE_GROK_MODEL = "grok";
     private static final String DEFAULT_AI_FEATURE_KIMI_MODEL = "auto";
@@ -2189,6 +2306,12 @@ public class CodemossSettingsService {
                 } catch (Exception ignored) {
                     raw = null;
                 }
+            }
+            // Self-heal persisted retired Claude model ids (e.g. a config saved while
+            // the default was claude-sonnet-4-6 keeps that dead id forever; every
+            // generation then fails with an empty/failed response - #1693, see #1678).
+            if (AI_FEATURE_PROVIDER_CLAUDE.equals(provider)) {
+                raw = SessionState.normalizeRetiredModelId(raw);
             }
             models.addProperty(provider, normalizeAiFeatureModel(raw, fallback));
         }

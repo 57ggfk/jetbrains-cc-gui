@@ -13,6 +13,44 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    version: '0.5.3',
+    date: '2026-08-21',
+    content: {
+      en: `✨ Features
+- Add **DeepSeek Harness (DSH) CLI Provider**: connect the DSH daemon through a WebSocket bridge with streaming text / thinking, tool calls and results, approval and question handling, model discovery, persistent multi-turn sessions, history list / load / delete, and provider-aware session routing (by @zhukunpenglinyutong)
+- Add **DSH settings and provider UI**: configure the DSH host and binary, start / stop the daemon, inspect status, select DSH models, and use DSH from the chat and history views with localized UI (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Improve **DSH bridge reliability and lifecycle management**: drain subprocess stderr, validate and atomically persist host settings, guard lifecycle re-entry, release finished-turn resources promptly, and return best-effort responses when approval or question forwarding fails (by @zhukunpenglinyutong)
+- Add **compact transcript restoration**: reopening a compacted conversation restores the full pre-compaction history instead of only the compact summary (by @Gadfly)
+- Improve **OpenCode model loading on Windows**: recover from empty model lists, use a private temporary directory for redirects, and avoid inlining file contents into model requests (by @zhukunpenglinyutong)
+- Restore the **Star History chart** and add the official documentation entry, with dashboard popovers rendered correctly in IDE themes (by @FaintFlower, @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **multi-tab webview rendering** so open tabs keep their content and render updates independently (by @Gadfly)
+- Fix **Codex approval policy compatibility**: stop passing the retired \`approval_policy=untrusted\` value to the Codex CLI (by @hebulin)
+- Fix **DSH protocol and process edge cases**: reject malformed fragmented WebSocket messages, cap aggregate frame sizes, guard against PID reuse, clear stale timers, handle foreign-turn idle backstops, and include useful stderr tails in failures (by @zhukunpenglinyutong)
+- Fix **conversation event attribution and history backfilling**: keep sidechain rows out of parent links, preserve parent conversation chains, and ensure turn results are not stranded when an event is skipped (by @zhukunpenglinyutong)
+- Harden **Grok permission and edit reporting** on error paths by requiring exact permission methods, sequence-safe ledger keys, and evidence-backed edit results (by @zhukunpenglinyutong)`,
+      zh: `✨ 新功能
+- 新增 **DeepSeek Harness（DSH）CLI Provider**：通过 WebSocket bridge 连接 DSH daemon，支持流式文本 / 思考、工具调用与结果、权限与提问处理、模型发现、持久化多轮会话，以及按 provider 路由的会话历史（列表 / 加载 / 删除）（by @zhukunpenglinyutong）
+- 新增 **DSH 设置与 Provider 界面**：可配置 DSH host 与 binary、启动 / 停止 daemon、查看状态、选择 DSH 模型，并在聊天与历史视图中使用 DSH；界面文案支持多语言（by @zhukunpenglinyutong）
+
+🔧 优化
+- 加固 **DSH bridge 可靠性与生命周期管理**：排空子进程 stderr、校验并原子化保存 host 设置、防止生命周期重复进入、及时释放已完成轮次资源；权限或提问转发失败时也会尽力返回响应，避免 host 长时间等待（by @zhukunpenglinyutong）
+- 新增 **紧凑会话记录恢复**：重新打开被压缩的对话时恢复压缩前的完整历史，而不再只显示压缩摘要（by @Gadfly）
+- 改进 **Windows 上的 OpenCode 模型加载**：修复模型列表为空时的恢复逻辑，重定向使用私有临时目录，并避免将文件内容直接内联到模型请求中（by @zhukunpenglinyutong）
+- 恢复 **Star History 图表**并新增官方文档入口，同时修复 dashboard 弹出层在 IDE 主题下的显示（by @FaintFlower、@zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **多 Tab webview 渲染**：打开的 Tab 能保留各自内容，并彼此独立接收渲染更新（by @Gadfly）
+- 修复 **Codex 权限策略兼容性**：不再向 Codex CLI 传递已废弃的 \`approval_policy=untrusted\` 值（by @hebulin）
+- 修复 **DSH 协议与进程边界问题**：拒绝格式错误的分片 WebSocket 消息、限制聚合帧大小、防止 PID 复用误判、清理过期定时器、为外部轮次增加空闲兜底，并在失败信息中携带有用的 stderr 尾部内容（by @zhukunpenglinyutong）
+- 修复 **会话事件归属与历史回填**：侧链记录不再错误建立父消息关联，父会话链保持完整；事件被跳过时，轮次结果也不会遗失（by @zhukunpenglinyutong）
+- 加固 **Grok 权限与编辑结果上报**：错误路径仅接受精确的权限方法，权限 ledger 使用序列安全的 key，编辑成功状态必须有实际证据支持（by @zhukunpenglinyutong）`,
+    },
+  },
+  {
     version: '0.5.2',
     date: '2026-08-12',
     content: {

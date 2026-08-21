@@ -25,11 +25,6 @@ public class ClaudeSession {
 
     private static final Logger LOG = Logger.getInstance(ClaudeSession.class);
 
-    /**
-     * Maximum file size for Codex context injection (100KB)
-     */
-    private static final int MAX_FILE_SIZE_BYTES = 100 * 1024;
-
     private final Gson gson = new Gson();
     private final Project project;
     /** Start time of the latest submitted turn, retained across Webview rebuilds. */
@@ -186,7 +181,7 @@ public class ClaudeSession {
         this.messageMerger = new com.github.claudecodegui.session.MessageMerger();
         this.contextCollector = new com.github.claudecodegui.session.EditorContextCollector(project);
         this.callbackFacade = new SessionCallbackFacade(project);
-        this.contextService = new SessionContextService(project, MAX_FILE_SIZE_BYTES);
+        this.contextService = new SessionContextService(project);
         this.providerRouter = new SessionProviderRouter(claudeSDKBridge, codexSDKBridge, cliBridges);
         this.sendService = new SessionSendService(
                 project,

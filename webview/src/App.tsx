@@ -168,7 +168,7 @@ const App = () => {
     setClaudePermissionMode, setCodexPermissionMode,
     setSelectedClaudeModel, setSelectedCodexModel,
     setSelectedGrokModel, setSelectedKimiModel,
-    setSelectedOpenCodeModel, setSelectedPiModel,
+    setSelectedOpenCodeModel, setSelectedPiModel, setSelectedDshModel,
     setSelectedOmpModel, setOmpPermissionMode,
     setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
@@ -351,6 +351,9 @@ const App = () => {
           if (isValidPermissionMode(ompMode)) {
             sendBridgeEvent('set_mode', ompMode);
           }
+        } else if (provider === 'dsh') {
+          setSelectedDshModel(model);
+          sendBridgeEvent('set_model', model);
         } else {
           // claude (or unrecognized): apply the claude model directly —
           // handleModelSelect reads currentProvider from a stale closure

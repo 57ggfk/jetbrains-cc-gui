@@ -27,6 +27,8 @@ public class GrokMessageHandler implements MessageCallback {
     private final SessionState state;
     private final CallbackHandler callbackHandler;
     private final Gson gson = new Gson();
+    /** Same merger as Claude: preserves mid-turn tool_use when final text snapshots arrive. */
+    private final MessageMerger messageMerger = new MessageMerger();
 
     private final StringBuilder assistantContent = new StringBuilder();
     private Message currentAssistantMessage = null;
@@ -164,9 +166,6 @@ public class GrokMessageHandler implements MessageCallback {
                 return;
             }
 
-            // tool_use blocks: keep raw structure for UI tool cards
-            boolean hasToolUse = hasToolUseBlocks(msgJson);
-
             Message parsed = parseAssistantMessage(msgJson);
             if (parsed == null) {
                 return;
@@ -176,9 +175,15 @@ public class GrokMessageHandler implements MessageCallback {
             // Preserve any usage already stamped by [USAGE] — final [MESSAGE] from the
             // normalizer historically had no usage and wiped the context-ring snapshot.
             JsonObject priorUsage = extractUsageFromAssistantRaw(target.raw);
-            // Merge raw when possible
-            if (hasToolUse && target.raw != null) {
-                target.raw = mergeAssistantRaw(target.raw, msgJson);
+            // Always merge into existing raw. Grok finishSuccess emits:
+            //   1) ledger flush: tool_use (+ tool_result as separate user msgs)
+            //   2) final [MESSAGE] with only thinking/text
+            // The old branch only merged when the *incoming* payload had tool_use,
+            // so step (2) replaced raw entirely and wiped tool cards + StatusPanel
+            // "编辑 +N -M". History reload rebuilds tools from chat_history.jsonl,
+            // which is why reopening the session showed edits again.
+            if (target.raw != null) {
+                target.raw = messageMerger.mergeAssistantMessage(target.raw, msgJson);
             } else {
                 target.raw = parsed.raw;
             }
@@ -481,25 +486,6 @@ public class GrokMessageHandler implements MessageCallback {
         return "";
     }
 
-    private boolean hasToolUseBlocks(JsonObject msg) {
-        try {
-            if (msg != null && msg.has("message") && msg.get("message").isJsonObject()) {
-                JsonObject message = msg.getAsJsonObject("message");
-                if (message.has("content") && message.get("content").isJsonArray()) {
-                    for (com.google.gson.JsonElement el : message.getAsJsonArray("content")) {
-                        if (el.isJsonObject() && el.getAsJsonObject().has("type")) {
-                            if ("tool_use".equals(el.getAsJsonObject().get("type").getAsString())) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
-    }
-
     private boolean hasToolResult(JsonObject msg) {
         try {
             if (msg != null && msg.has("message") && msg.get("message").isJsonObject()) {
@@ -517,32 +503,6 @@ public class GrokMessageHandler implements MessageCallback {
         } catch (Exception ignored) {
         }
         return false;
-    }
-
-    private JsonObject mergeAssistantRaw(JsonObject previous, JsonObject incoming) {
-        // Minimal merge: append content blocks from incoming into previous
-        try {
-            JsonObject prevMsg = previous.has("message") && previous.get("message").isJsonObject()
-                    ? previous.getAsJsonObject("message")
-                    : new JsonObject();
-            JsonArray prevContent = prevMsg.has("content") && prevMsg.get("content").isJsonArray()
-                    ? prevMsg.getAsJsonArray("content")
-                    : new JsonArray();
-
-            if (incoming.has("message") && incoming.get("message").isJsonObject()) {
-                JsonObject inMsg = incoming.getAsJsonObject("message");
-                if (inMsg.has("content") && inMsg.get("content").isJsonArray()) {
-                    for (com.google.gson.JsonElement el : inMsg.getAsJsonArray("content")) {
-                        prevContent.add(el.deepCopy());
-                    }
-                }
-            }
-            prevMsg.add("content", prevContent);
-            previous.add("message", prevMsg);
-            return previous;
-        } catch (Exception e) {
-            return incoming;
-        }
     }
 
     private void ensureAssistantRaw() {

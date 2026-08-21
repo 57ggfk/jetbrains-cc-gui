@@ -146,9 +146,6 @@ public class WebviewInitializer {
             return;
         }
 
-        JPanel mainPanel = host.getMainPanel();
-        JBCefBrowser browser = null;
-
         // Use the shared resolver from BridgePreloader for consistent state
         com.github.claudecodegui.bridge.BridgeDirectoryResolver sharedResolver = BridgePreloader.getSharedResolver();
 
@@ -174,28 +171,81 @@ public class WebviewInitializer {
 
         PropertiesComponent props = PropertiesComponent.getInstance();
         String savedNodePath = props.getValue(NODE_PATH_PROPERTY_KEY);
-        com.github.claudecodegui.model.NodeDetectionResult nodeResult = null;
 
         if (savedNodePath != null && !savedNodePath.trim().isEmpty()) {
             String trimmed = savedNodePath.trim();
             claudeSDKBridge.setNodeExecutable(trimmed);
             codexSDKBridge.setNodeExecutable(trimmed);
             applyNodePathToCliBridges(cliBridges, trimmed);
-            nodeResult = claudeSDKBridge.verifyAndCacheNodePath(trimmed);
+            NodeDetectionResult nodeResult = claudeSDKBridge.verifyAndCacheNodePath(trimmed);
             if (nodeResult == null || !nodeResult.isFound()) {
                 showInvalidNodePathPanel(trimmed, nodeResult != null ? nodeResult.getErrorMessage() : null);
                 return;
             }
-        } else {
-            nodeResult = claudeSDKBridge.detectNodeWithDetails();
-            if (nodeResult != null && nodeResult.isFound() && nodeResult.getNodePath() != null) {
-                props.setValue(NODE_PATH_PROPERTY_KEY, nodeResult.getNodePath());
-                claudeSDKBridge.setNodeExecutable(nodeResult.getNodePath());
-                codexSDKBridge.setNodeExecutable(nodeResult.getNodePath());
-                applyNodePathToCliBridges(cliBridges, nodeResult.getNodePath());
-                claudeSDKBridge.verifyAndCacheNodePath(nodeResult.getNodePath());
-            }
+            continueCreateUIComponentsAfterNodeSetup(nodeResult);
+            return;
         }
+
+        // No saved path: auto-detection spawns shell probes that block the calling
+        // thread for several seconds per attempt (and may hang instead of exiting in
+        // VM/container environments), so it must never run on the EDT. Detect on a
+        // pooled thread, then continue initialization back on the EDT.
+        LOG.info("No saved Node.js path found, scheduling auto-detection on background thread...");
+        showLoadingPanel();
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            NodeDetectionResult detected;
+            try {
+                detected = claudeSDKBridge.detectNodeWithDetails();
+            } catch (Exception e) {
+                LOG.error("Failed to auto-detect Node.js path: " + e.getMessage(), e);
+                detected = null;
+            }
+
+            if (detected != null && detected.isFound() && detected.getNodePath() != null) {
+                props.setValue(NODE_PATH_PROPERTY_KEY, detected.getNodePath());
+                claudeSDKBridge.setNodeExecutable(detected.getNodePath());
+                codexSDKBridge.setNodeExecutable(detected.getNodePath());
+                applyNodePathToCliBridges(cliBridges, detected.getNodePath());
+                claudeSDKBridge.verifyAndCacheNodePath(detected.getNodePath());
+                LOG.info("Auto-detected Node.js: " + detected.getNodePath()
+                    + " (" + detected.getNodeVersion() + ")");
+            } else {
+                // Fall back to invoking "node" by name (the same fallback
+                // NodeDetector.findNodeExecutable uses) so checkEnvironment can
+                // still pass when node is reachable on PATH but the probes failed.
+                LOG.warn("Failed to auto-detect Node.js path. Error: " +
+                    (detected != null ? detected.getErrorMessage() : "Unknown error"));
+                claudeSDKBridge.setNodeExecutable("node");
+                codexSDKBridge.setNodeExecutable("node");
+                applyNodePathToCliBridges(cliBridges, "node");
+            }
+
+            final NodeDetectionResult nodeResult = detected;
+            invokeLaterForToolWindow(() -> {
+                if (host.isDisposed()) {
+                    return;
+                }
+                continueCreateUIComponentsAfterNodeSetup(nodeResult);
+            });
+        });
+    }
+
+    /**
+     * Continue UI initialization once the Node.js path has been resolved: environment
+     * check, version gate, then browser creation. Must be called on the EDT.
+     */
+    private void continueCreateUIComponentsAfterNodeSetup(NodeDetectionResult nodeResult) {
+        ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
+        JPanel mainPanel = host.getMainPanel();
+        JBCefBrowser browser = null;
+
+        // The async detection path shows a loading panel while probing; clear it so
+        // it cannot linger next to the browser component added below (BorderLayout
+        // keeps only CENTER in its map, it does not remove stale children).
+        mainPanel.removeAll();
+
+        // Use the shared resolver from BridgePreloader for consistent state
+        com.github.claudecodegui.bridge.BridgeDirectoryResolver sharedResolver = BridgePreloader.getSharedResolver();
 
         if (!claudeSDKBridge.checkEnvironment()) {
             if (sharedResolver.isExtractionInProgress()) {
@@ -222,9 +272,8 @@ public class WebviewInitializer {
             return;
         }
 
-        if (nodeResult == null) {
-            nodeResult = claudeSDKBridge.detectNodeWithDetails();
-        }
+        // nodeResult is always the resolved verify/detection result here; a failure
+        // result (or null) simply skips the version gate, matching prior behavior.
         if (nodeResult != null && nodeResult.isFound() && nodeResult.getNodeVersion() != null) {
             if (!NodeDetector.isVersionSupported(nodeResult.getNodeVersion())) {
                 showVersionErrorPanel(nodeResult.getNodeVersion());
@@ -999,14 +1048,40 @@ public class WebviewInitializer {
 
     private void showJcefRemoteModeErrorPanel() {
         // Terminal state: the remote CefServer process is unhealthy, so every
-        // reload/recreate against it will keep throwing the same NPE. Stop the
-        // watchdog so it does not loop back into recreate every cooldown and
-        // re-flash this panel. Recovery requires an IDE restart.
+        // reload/recreate against it will keep throwing the same NPE (JBR-9234,
+        // out-of-process JCEF on IntelliJ 2025.2+ / JCEF 144). Stop the watchdog
+        // so it does not loop back into recreate every cooldown and re-flash this
+        // panel. The offered action disables out-of-process JCEF in the Registry
+        // — the documented workaround — after which an IDE restart initialises
+        // JCEF in-process and the message router stops throwing.
         host.getWebviewWatchdog().stop();
         JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
             "⚠️",
             ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteError"),
-            ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteSolution")
+            ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteSolution"),
+            ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteAction"),
+            this::disableOutOfProcessJcefAndShowRestartPanel
+        );
+        replaceMainContent(panel);
+    }
+
+    private void disableOutOfProcessJcefAndShowRestartPanel() {
+        if (!JBCefBrowserFactory.disableOutOfProcessJcefInRegistry()) {
+            LOG.warn("Could not disable out-of-process JCEF in the IDE registry");
+            // The button must not appear to do nothing: show the manual
+            // VM-option fallback so the user can still apply the workaround.
+            JPanel failedPanel = ErrorPanelBuilder.buildCenteredPanel(
+                    "⚠️",
+                    ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteActionFailedTitle"),
+                    ClaudeCodeGuiBundle.message("toolwindow.jcefRemoteActionFailed")
+            );
+            replaceMainContent(failedPanel);
+            return;
+        }
+        JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
+                "✓",
+                ClaudeCodeGuiBundle.message("toolwindow.jcefOutOfProcessDisabled"),
+                ClaudeCodeGuiBundle.message("toolwindow.jcefOutOfProcessDisabledSolution")
         );
         replaceMainContent(panel);
     }
@@ -1094,6 +1169,9 @@ public class WebviewInitializer {
 
     /**
      * Handle Node.js path save from the error panel input.
+     * Verification and auto-detection spawn subprocesses that can block for seconds
+     * (or hang in VM/container environments), so they run on a pooled thread; all
+     * UI updates are dispatched back to the EDT.
      */
     public void handleNodePathSave(String manualPath) {
         ClaudeSDKBridge claudeSDKBridge = this.host.getClaudeSDKBridge();
@@ -1101,27 +1179,37 @@ public class WebviewInitializer {
         Map<String, MarkerCliBridge> cliBridges = this.host.getCliBridges();
         JPanel mainPanel = this.host.getMainPanel();
 
-        try {
+        final boolean clearRequested = manualPath == null || manualPath.isEmpty();
+        if (clearRequested) {
+            // Clear the saved path up front so no bridge can use the stale path
+            // while detection runs, and show a loading panel in the meantime.
             PropertiesComponent props = PropertiesComponent.getInstance();
+            props.unsetValue(NODE_PATH_PROPERTY_KEY);
+            claudeSDKBridge.setNodeExecutable(null);
+            codexSDKBridge.setNodeExecutable(null);
+            applyNodePathToCliBridges(cliBridges, null);
+            LOG.info("Cleared manual Node.js path, scheduling auto-detection on background thread");
+            showLoadingPanel();
+        }
 
-            if (manualPath == null || manualPath.isEmpty()) {
-                // Clear saved path and trigger auto-detection
-                props.unsetValue(NODE_PATH_PROPERTY_KEY);
-                claudeSDKBridge.setNodeExecutable(null);
-                codexSDKBridge.setNodeExecutable(null);
-                applyNodePathToCliBridges(cliBridges, null);
-                LOG.info("Cleared manual Node.js path, triggering auto-detection");
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                PropertiesComponent props = PropertiesComponent.getInstance();
 
-                NodeDetectionResult detected = claudeSDKBridge.detectNodeWithDetails();
-                if (detected != null && detected.isFound() && detected.getNodePath() != null) {
-                    String detectedPath = detected.getNodePath();
-                    props.setValue(NODE_PATH_PROPERTY_KEY, detectedPath);
-                    claudeSDKBridge.verifyAndCacheNodePath(detectedPath);
-                    codexSDKBridge.setNodeExecutable(detectedPath);
-                    applyNodePathToCliBridges(cliBridges, detectedPath);
-                    LOG.info("Auto-detected and saved Node.js path: " + detectedPath);
+                if (clearRequested) {
+                    NodeDetectionResult detected = claudeSDKBridge.detectNodeWithDetails();
+                    if (detected != null && detected.isFound() && detected.getNodePath() != null) {
+                        String detectedPath = detected.getNodePath();
+                        props.setValue(NODE_PATH_PROPERTY_KEY, detectedPath);
+                        claudeSDKBridge.verifyAndCacheNodePath(detectedPath);
+                        codexSDKBridge.setNodeExecutable(detectedPath);
+                        applyNodePathToCliBridges(cliBridges, detectedPath);
+                        LOG.info("Auto-detected and saved Node.js path: " + detectedPath);
+                    }
+                    reinitializeUi(mainPanel);
+                    return;
                 }
-            } else {
+
                 // Verify before saving to avoid caching invalid path
                 NodeDetectionResult result = claudeSDKBridge.verifyAndCacheNodePath(manualPath);
                 if (result != null && result.isFound()) {
@@ -1131,29 +1219,37 @@ public class WebviewInitializer {
                     codexSDKBridge.setNodeExecutable(manualPath);
                     applyNodePathToCliBridges(cliBridges, manualPath);
                     LOG.info("Saved manual Node.js path: " + manualPath);
+                    reinitializeUi(mainPanel);
                 } else {
-                    // Verification failed, show error and don't save invalid path
+                    // Verification failed, show error and don't save invalid path.
+                    // Don't reinitialize UI, let user try again.
                     String errorMsg = result != null ? result.getErrorMessage() : "Unknown error";
                     LOG.warn("Node.js path verification failed: " + manualPath + " - " + errorMsg);
-                    JOptionPane.showMessageDialog(mainPanel,
-                        "Node.js path verification failed: " + errorMsg + "\n\nPath not saved.",
-                        "Invalid Node.js Path", JOptionPane.WARNING_MESSAGE);
-                    return; // Don't reinitialize UI, let user try again
+                    invokeLaterForToolWindow(() -> JOptionPane.showMessageDialog(mainPanel,
+                            "Node.js path verification failed: " + errorMsg + "\n\nPath not saved.",
+                            "Invalid Node.js Path", JOptionPane.WARNING_MESSAGE));
                 }
+            } catch (Exception ex) {
+                invokeLaterForToolWindow(() -> JOptionPane.showMessageDialog(mainPanel,
+                    "Error saving or applying Node.js path: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE));
             }
+        });
+    }
 
-            invokeLaterForToolWindow(() -> {
-                mainPanel.removeAll();
-                createUIComponents();
-                mainPanel.revalidate();
-                mainPanel.repaint();
-            });
-
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(mainPanel,
-                "Error saving or applying Node.js path: " + ex.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
-        }
+    /**
+     * Rebuild the tool window UI on the EDT after the Node.js path changed.
+     */
+    private void reinitializeUi(JPanel mainPanel) {
+        invokeLaterForToolWindow(() -> {
+            if (host.isDisposed()) {
+                return;
+            }
+            mainPanel.removeAll();
+            createUIComponents();
+            mainPanel.revalidate();
+            mainPanel.repaint();
+        });
     }
 
     /**

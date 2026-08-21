@@ -3,6 +3,7 @@ package com.github.claudecodegui.handler.history;
 import com.github.claudecodegui.bridge.NodeDetector;
 import com.github.claudecodegui.handler.NodeJsServiceCaller;
 import com.github.claudecodegui.handler.core.HandlerContext;
+import com.github.claudecodegui.provider.dsh.DshHistoryReader;
 
 import com.github.claudecodegui.cache.SessionIndexCache;
 import com.github.claudecodegui.cache.SessionIndexManager;
@@ -245,6 +246,9 @@ class HistoryDeleteService {
         if ("kimi".equals(currentProvider)) {
             return new DeleteResult(deleteKimiSession(sessionId), 0);
         }
+        if ("dsh".equals(currentProvider)) {
+            return new DeleteResult(deleteDshSession(sessionId), 0);
+        }
 
         String rawPath = context.resolveEffectiveWorkingDirectory();
         String nodePath = NodeDetector.getInstance().getCachedNodePath();
@@ -311,6 +315,17 @@ class HistoryDeleteService {
         boolean deleted = reader.deleteSession(sessionId, projectPath);
         LOG.info("[HistoryHandler] Delete Kimi session " + sessionId + ": " + (deleted ? "ok" : "not found"));
         return deleted;
+    }
+
+    private boolean deleteDshSession(String sessionId) throws java.io.IOException {
+        String rawPath = context.resolveEffectiveWorkingDirectory();
+        String nodePath = NodeDetector.getInstance().getCachedNodePath();
+        String projectPath = NodeDetector.isWslPath(nodePath) ? NodeDetector.convertToWslPath(rawPath) : rawPath;
+        DshHistoryReader reader = new DshHistoryReader();
+        // DSH "delete" is a host-side archive — the event log stays in $DSH_HOME.
+        boolean archived = reader.deleteSession(sessionId, projectPath);
+        LOG.info("[HistoryHandler] Archive DSH session " + sessionId + ": " + (archived ? "ok" : "failed"));
+        return archived;
     }
 
     private boolean deleteCodexSession(String sessionId) throws java.io.IOException {

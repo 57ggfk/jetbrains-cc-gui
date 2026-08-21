@@ -1055,7 +1055,7 @@
     "loading": "Carregando histórico...",
     "loadFailed": "Falha ao carregar",
     "noSessions": "Sem sessões no histórico",
-    "noSessionsDesc": "Nenhum registro de sessão do Claude encontrado no projeto atual",
+    "noSessionsDesc": "Nenhum registro de sessão encontrado no projeto atual",
     "totalSessions": "{{count}} sessões · {{total}} mensagens",
     "messageCount": "{{count}} mensagens",
     "searchPlaceholder": "Pesquisar títulos de sessão...",
@@ -1179,6 +1179,7 @@
   },
   "config": {
     "clickToCopy": "Clique para copiar",
+    "officialDocs": "Documentação oficial",
     "switch": "Alternar",
     "switchProvider": "Alternar provedor",
     "runtimeProvider": {
@@ -1538,7 +1539,9 @@
     "keepAllConfirmMessage": "Aceitar as alterações atuais como base. Alterações futuras serão rastreadas a partir do zero.",
     "discardAllSuccess": "Todas as alterações descartadas",
     "discardAllFailed": "Falha ao descartar: {{error}}",
-    "keepAllSuccess": "Todas as alterações mantidas, rastreamento redefinido"
+    "keepAllSuccess": "Todas as alterações mantidas, rastreamento redefinido",
+    "multiAgentBadge": "Multi-agente",
+    "multiAgentEdited": "{{count}} agentes editaram este arquivo nesta sessão — revise com cuidado"
   },
   "skills": {
     "title": "Skills",
@@ -1694,11 +1697,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Modelo aprimorado do Sonnet 4.6"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · Usar o modelo padrão"
+        "description": "Sonnet 5 · Usar o modelo padrão"
       },
       "opus5": {
         "label": "Opus 5",
@@ -1775,7 +1774,7 @@
   "codexModes": {
     "default": {
       "label": "Sugerir (aprovação)",
-      "tooltip": "Codex approval_policy=untrusted – solicita antes de editar arquivos ou executar comandos shell.",
+      "tooltip": "Codex approval_policy=on-request – solicita antes de editar arquivos ou executar comandos shell.",
       "description": "Opção mais segura. Cada escrita ou comando requer sua aprovação."
     },
     "plan": {

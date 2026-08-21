@@ -10,6 +10,7 @@ const STDIN_ENV_BY_PROVIDER = {
   opencode: 'OPENCODE_USE_STDIN',
   pi: 'PI_USE_STDIN',
   omp: 'OMP_USE_STDIN',
+  dsh: 'DSH_USE_STDIN',
 };
 
 /**

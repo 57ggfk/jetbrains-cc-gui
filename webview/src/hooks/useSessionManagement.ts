@@ -114,6 +114,8 @@ export function useSessionManagement({
   const beginSessionTransition = useCallback((nextSessionId: string | null, nextTitle: string | null) => {
     window.__sessionTransitioning = true;
     window.__sessionTransitionToken = createSessionTransitionToken();
+    // Discard any deferred snapshot from a prior transition / outgoing session.
+    window.__deferredTransitionUpdateMessages = null;
     // Clear expand/collapse cache on session switch to avoid unbounded growth
     clearAllPersistedExpanded();
     // Use the single cleanup entry point exposed by useWindowCallbacks.
@@ -166,6 +168,10 @@ export function useSessionManagement({
         console.warn('[SessionManagement] Transition guard timed out — auto-releasing');
         window.__sessionTransitioning = false;
         window.__sessionTransitionToken = null;
+        // Apply any history snapshot that arrived while the guard was stuck.
+        if (typeof window.__flushDeferredTransitionUpdateMessages === 'function') {
+          window.__flushDeferredTransitionUpdateMessages();
+        }
       }
     }, 15_000); // 15 seconds — generous enough for slow history loads
   }, [clearToasts, currentSessionIdRef, setStatus, setLoadingState, setIsThinking, setStreamingActive, setMessages, setCurrentSessionId, setCustomSessionTitle, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens, setTaskEvents, setSubagentHistories]);
@@ -270,15 +276,14 @@ export function useSessionManagement({
       applyHistoryModel(effectiveProvider, effectiveModel, effectiveAgent || null);
     }
 
-    // Re-opening the very session already active: don't interrupt the in-flight
-    // turn or wipe the view - just ask the backend to soft-reload the transcript
-    // from the server. The backend sessionLoadCallback detects the same-session
-    // case and routes through reloadActiveSessionMessages (reusing the
-    // session_updated reload path, never interrupting).
-    // Claude only: codex goes through loadCodexSession, which lacks streaming
-    // defer - skipping interrupt there would clearMessages mid-stream and
-    // disturb the live reply.
-    if (sessionId === currentSessionId && effectiveProvider === 'claude') {
+    // Re-opening the session already active: soft-reload only — do NOT
+    // beginSessionTransition (which clears messages and holds the transition
+    // guard). Backend routes same-session to reloadActiveSessionMessages.
+    // Codex still uses a full transition: its loadCodexSession path is separate
+    // and mid-stream soft-reload without interrupt can clearMessages under the
+    // live reply.
+    const isSameSession = sessionId === currentSessionId;
+    if (isSameSession && effectiveProvider !== 'codex') {
       sendBridgeEvent('load_session', JSON.stringify({
         sessionId,
         provider: effectiveProvider,
@@ -288,7 +293,7 @@ export function useSessionManagement({
       return;
     }
 
-    // Switching to a different session (or codex same-session): interrupt first
+    // Switching to a different session (or Codex same-session): interrupt first
     // if the AI is mid-reply, then do a full session swap.
     if (loading) {
       sendBridgeEvent('interrupt_session');

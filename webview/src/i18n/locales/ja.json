@@ -913,7 +913,7 @@
     "loading": "履歴を読み込み中...",
     "loadFailed": "読み込み失敗",
     "noSessions": "履歴セッションなし",
-    "noSessionsDesc": "現在のプロジェクトにClaudeセッション記録が見つかりません",
+    "noSessionsDesc": "現在のプロジェクトにセッション記録が見つかりません",
     "totalSessions": "{{count}}セッション · {{total}}メッセージ",
     "messageCount": "{{count}}メッセージ",
     "searchPlaceholder": "セッションタイトルを検索...",
@@ -1036,6 +1036,7 @@
   },
   "config": {
     "clickToCopy": "クリックしてコピー",
+    "officialDocs": "公式ドキュメント",
     "switch": "切り替え",
     "switchProvider": "プロバイダーを切り替え",
     "runtimeProvider": {
@@ -1393,7 +1394,9 @@
     "keepAllConfirmMessage": "現在の変更を新しい基準として保持します。今後の変更はゼロからカウントされます。",
     "discardAllSuccess": "すべての変更を元に戻しました",
     "discardAllFailed": "元に戻す失敗: {{error}}",
-    "keepAllSuccess": "すべて保持しました。変更記録をリセットしました"
+    "keepAllSuccess": "すべて保持しました。変更記録をリセットしました",
+    "multiAgentBadge": "複数エージェント",
+    "multiAgentEdited": "このセッションで {{count}} 個のエージェントがこのファイルを編集しました。ご注意ください"
   },
   "skills": {
     "title": "スキル",
@@ -1555,11 +1558,7 @@
       },
       "sonnet5": {
         "label": "Sonnet 5",
-        "description": "Sonnet 5 · Sonnet 4.6 のアップグレードモデル"
-      },
-      "sonnet47": {
-        "label": "Sonnet 4.7",
-        "description": "Sonnet 4.7 · デフォルトモデルを使用"
+        "description": "Sonnet 5 · デフォルトモデルを使用"
       },
       "opus5": {
         "label": "Opus 5",
@@ -1630,7 +1629,7 @@
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
-      "tooltip": "Codex approval_policy=untrusted – prompts before editing files or running shell commands.",
+      "tooltip": "Codex approval_policy=on-request – prompts before editing files or running shell commands.",
       "description": "Safest option. Every write or command requires your approval."
     },
     "plan": {

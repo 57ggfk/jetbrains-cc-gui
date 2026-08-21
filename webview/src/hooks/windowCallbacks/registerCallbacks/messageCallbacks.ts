@@ -21,7 +21,7 @@ import {
   preserveStreamingAssistantContent,
   stripDuplicateTrailingToolMessages,
 } from '../messageSync';
-import { releaseSessionTransition } from '../sessionTransition';
+import { clearDeferredTransitionUpdateMessages, releaseSessionTransition } from '../sessionTransition';
 import { parseSequence } from '../parseSequence';
 import { reconstructTurnMetadata } from '../../../utils/turnMetadataReconstruction';
 import { collectUnresolvedToolUseIds } from './streamingCallbacks';
@@ -188,6 +188,27 @@ export function registerMessageCallbacks(
     requestNativeHistoryRefresh();
   };
 
+  const stashDeferredTransitionUpdate = (json: string, sequence: number | null = null) => {
+    if (!json) return;
+    const minAcceptedSequence = window.__minAcceptedUpdateSequence ?? 0;
+    if (sequence != null && sequence < minAcceptedSequence) {
+      return;
+    }
+    // Keep only the latest snapshot for this transition (history load sends one authoritative list).
+    window.__deferredTransitionUpdateMessages = { json, sequence };
+  };
+
+  const flushDeferredTransitionUpdateMessages = () => {
+    const deferred = window.__deferredTransitionUpdateMessages;
+    window.__deferredTransitionUpdateMessages = null;
+    if (!deferred?.json) return;
+    // Guard must already be false (caller released transition first).
+    processUpdateMessages(deferred.json, deferred.sequence);
+  };
+
+  window.__stashDeferredTransitionUpdateMessages = stashDeferredTransitionUpdate;
+  window.__flushDeferredTransitionUpdateMessages = flushDeferredTransitionUpdateMessages;
+
   const processUpdateMessages = (json: string, sequence: number | null = null) => {
     // Re-check the session-transition guard inside processUpdateMessages so the
     // rAF-deferred path (window.updateMessages → setTimeout → processUpdateMessages)
@@ -196,7 +217,12 @@ export function registerMessageCallbacks(
     // callers that bypass the entry point — addHistoryMessage / addUserMessage
     // already guard, but processUpdateMessages is the canonical setter and
     // should be self-defending.
+    //
+    // FIX: Do not silently drop history snapshots. While transitioning, stash
+    // the latest payload and apply it when historyLoadComplete / setSessionId
+    // releases the guard (Grok full teardown races were losing the transcript).
     if (window.__sessionTransitioning) {
+      stashDeferredTransitionUpdate(json, sequence);
       return;
     }
     const minAcceptedSequence = window.__minAcceptedUpdateSequence ?? 0;
@@ -516,10 +542,15 @@ export function registerMessageCallbacks(
   };
 
   window.updateMessages = (json, sequenceArg) => {
-    // During session transition, ignore message updates from stale session
-    // callbacks to prevent cleared messages from being restored
-    if (window.__sessionTransitioning) return;
     const sequence = parseSequence(sequenceArg);
+    // During session transition, stash (do not apply) the latest snapshot so
+    // history load that finishes before the guard is released is not lost.
+    // Stale pre-transition snapshots are still rejected via sequence barrier
+    // after clearMessages advances __minAcceptedUpdateSequence.
+    if (window.__sessionTransitioning) {
+      stashDeferredTransitionUpdate(json, sequence);
+      return;
+    }
     const minAcceptedSequence = window.__minAcceptedUpdateSequence ?? 0;
     if (sequence != null && sequence < minAcceptedSequence) {
       return;
@@ -553,12 +584,8 @@ export function registerMessageCallbacks(
           window.__pendingUpdateJson = null;
           window.__pendingUpdateSequence = null;
           // A session transition may have begun while this frame was buffered.
-          // processUpdateMessages re-checks the transition guard itself now, so
-          // this early return is defense-in-depth — without either check, a
-          // stale snapshot deferred during the outgoing session's streaming
-          // would run down the non-streaming path (isStreamingRef was cleared
-          // by beginSessionTransition) and resurrect the cleared messages.
-          if (window.__sessionTransitioning) return;
+          // processUpdateMessages re-checks the transition guard and stashes
+          // when needed; do not drop the payload entirely.
           if (latestJson) {
             processUpdateMessages(latestJson, latestSequence);
           }
@@ -723,6 +750,20 @@ export function registerMessageCallbacks(
         window.__minAcceptedUpdateSequence ?? 0,
         barrierSequence,
       );
+    }
+    // Drop only STALE transition-stashed snapshots. A reordered clearMessages that
+    // arrives AFTER the history load already stashed a post-barrier snapshot must
+    // not wipe it — that was the "open history blank until switch away and back" bug.
+    const deferred = window.__deferredTransitionUpdateMessages;
+    if (deferred) {
+      const deferredSeq = deferred.sequence;
+      const isPostBarrier =
+        barrierSequence != null
+        && deferredSeq != null
+        && deferredSeq >= barrierSequence;
+      if (!isPostBarrier) {
+        clearDeferredTransitionUpdateMessages();
+      }
     }
     // Cancel any pending deferred updateMessages to prevent stale data from
     // being applied after messages are cleared.

@@ -13,6 +13,11 @@ export const EDIT_TOOL_NAMES = new Set([
   'replace_string',
   'write_to_file',
   'multiedit',
+  // Grok / Cursor-style names (UI often shows "Search Replace")
+  'search_replace',
+  'searchreplace',
+  'str_replace',
+  'strreplace',
 ]);
 
 // Bash/command execution tools
@@ -48,12 +53,26 @@ export const FILE_MODIFY_TOOL_NAMES = new Set([
   'notebookedit',
   'create_file',
   'multiedit',
+  // Grok / Cursor-style names (UI often shows "Search Replace")
+  'search_replace',
+  'searchreplace',
+  'str_replace',
+  'strreplace',
+  'apply_patch',
 ]);
 
+/**
+ * Normalize tool names for set membership checks.
+ * - lowercases
+ * - strips MCP prefix mcp__server__tool → tool
+ * - spaces / hyphens → underscores ("Search Replace" → "search_replace")
+ * Does NOT split camelCase (TaskCreate stays "taskcreate") so existing sets keep working.
+ */
 export function normalizeToolName(toolName: string): string {
-  const lower = toolName.toLowerCase();
+  const lower = toolName.toLowerCase().trim();
   const mcpMatch = /^mcp__[^_]+__(.+)$/.exec(lower);
-  return mcpMatch ? mcpMatch[1] : lower;
+  const base = mcpMatch ? mcpMatch[1] : lower;
+  return base.replace(/[\s-]+/g, '_');
 }
 
 /**

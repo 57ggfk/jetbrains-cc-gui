@@ -165,7 +165,8 @@ public class GrokHistoryReader {
         long summaryMtime = fileMtimeMillis(summaryPath);
         long created = 0L;
         long updatedFromSummary = 0L;
-        String title = null;
+        String generatedTitle = null;
+        String sessionSummary = null;
         int messageCount = 0;
 
         if (Files.isRegularFile(summaryPath)) {
@@ -173,9 +174,10 @@ public class GrokHistoryReader {
                 String raw = Files.readString(summaryPath, StandardCharsets.UTF_8);
                 JsonObject summary = JsonParser.parseString(raw).getAsJsonObject();
                 if (summary.has("generated_title") && !summary.get("generated_title").isJsonNull()) {
-                    title = summary.get("generated_title").getAsString();
-                } else if (summary.has("session_summary") && !summary.get("session_summary").isJsonNull()) {
-                    title = summary.get("session_summary").getAsString();
+                    generatedTitle = summary.get("generated_title").getAsString();
+                }
+                if (summary.has("session_summary") && !summary.get("session_summary").isJsonNull()) {
+                    sessionSummary = summary.get("session_summary").getAsString();
                 }
                 if (summary.has("num_chat_messages") && summary.get("num_chat_messages").isJsonPrimitive()) {
                     messageCount = summary.get("num_chat_messages").getAsInt();
@@ -204,30 +206,23 @@ public class GrokHistoryReader {
             }
         }
 
+        String firstUserPrompt = null;
         if (Files.isRegularFile(chatPath)) {
             try {
                 info.fileSize = Files.size(chatPath);
-                boolean needCount = messageCount <= 0;
-                boolean needTitle = title == null || title.trim().isEmpty();
-                if (needCount || needTitle) {
-                    ChatHistoryMeta meta = scanChatHistoryMeta(chatPath, needTitle);
-                    if (needCount) {
-                        messageCount = meta.nonEmptyLines;
-                    }
-                    if (needTitle && meta.firstUserPrompt != null && !meta.firstUserPrompt.isEmpty()) {
-                        title = truncate(meta.firstUserPrompt, MAX_TITLE_CHARS);
-                    }
+                // Always capture first user prompt when possible: Grok CLI's generated_title
+                // is frequently an English paraphrase of a non-English user message.
+                ChatHistoryMeta meta = scanChatHistoryMeta(chatPath, true);
+                if (messageCount <= 0) {
+                    messageCount = meta.nonEmptyLines;
                 }
+                firstUserPrompt = meta.firstUserPrompt;
             } catch (Exception e) {
                 LOG.debug("[GrokHistoryReader] Failed to read chat history meta for " + sessionDir + ": " + e.getMessage());
             }
         }
 
-        if (title == null || title.trim().isEmpty()) {
-            title = "Grok session " + sessionId.substring(0, Math.min(8, sessionId.length()));
-        }
-
-        info.title = title.trim();
+        info.title = resolveSessionTitle(firstUserPrompt, generatedTitle, sessionSummary, sessionId);
         info.messageCount = Math.max(messageCount, 0);
         info.firstTimestamp = created > 0 ? created : (summaryMtime > 0 ? summaryMtime : chatMtime);
         // Prefer chat file mtime so bulk summary rewrites don't collapse all rows to "just now".
@@ -618,6 +613,35 @@ public class GrokHistoryReader {
             return content.getAsString();
         }
         return content.toString();
+    }
+
+    /**
+     * History list / reopen title priority:
+     * <ol>
+     *   <li>First real user prompt (preserves the user's language; matches Codex)</li>
+     *   <li>Grok CLI {@code generated_title}</li>
+     *   <li>{@code session_summary}</li>
+     *   <li>Short session-id fallback</li>
+     * </ol>
+     * Preferring the user prompt avoids English auto-titles for Chinese (etc.) prompts.
+     */
+    static String resolveSessionTitle(
+            String firstUserPrompt,
+            String generatedTitle,
+            String sessionSummary,
+            String sessionId
+    ) {
+        if (firstUserPrompt != null && !firstUserPrompt.trim().isEmpty()) {
+            return truncate(firstUserPrompt.trim(), MAX_TITLE_CHARS);
+        }
+        if (generatedTitle != null && !generatedTitle.trim().isEmpty()) {
+            return generatedTitle.trim();
+        }
+        if (sessionSummary != null && !sessionSummary.trim().isEmpty()) {
+            return truncate(sessionSummary.trim(), MAX_TITLE_CHARS);
+        }
+        String id = sessionId != null ? sessionId : "";
+        return "Grok session " + id.substring(0, Math.min(8, id.length()));
     }
 
     private static String stripUserQueryWrapper(String raw) {

@@ -29,6 +29,8 @@ const translations: Record<string, string> = {
   'settings.cli.tools.pi.description': 'PI desc',
   'settings.cli.tools.omp.name': 'OMP CLI',
   'settings.cli.tools.omp.description': 'OMP desc',
+  'settings.cli.tools.dsh.name': 'DeepSeek Harness',
+  'settings.cli.tools.dsh.description': 'DSH desc',
   'settings.cli.installDialog.title': 'Install {{name}}',
   'settings.cli.installDialog.lead': 'Lead {{name}} {{binary}}',
   'settings.cli.installDialog.stepOpenTerminal': 'Open terminal',
@@ -58,6 +60,10 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../shared/ProviderModelIcon', () => ({
   ProviderModelIcon: () => <span data-testid="provider-icon" />,
+}));
+
+vi.mock('./DshConnectionCard', () => ({
+  default: () => <div data-testid="dsh-connection-card">DSH connection</div>,
 }));
 
 describe('CliSection', () => {
@@ -120,6 +126,14 @@ describe('CliSection', () => {
           version: '17.2.14',
           path: '/home/test/.bun/bin/omp',
         },
+        dsh: {
+          id: 'dsh',
+          name: 'DeepSeek Harness',
+          binaryName: 'dsh',
+          installed: true,
+          version: '0.1',
+          path: '/usr/local/bin/dsh',
+        },
       }));
     });
 
@@ -128,9 +142,15 @@ describe('CliSection', () => {
     expect(screen.getByText('OpenCode')).toBeTruthy();
     expect(screen.getByText('PI CLI')).toBeTruthy();
     expect(screen.getByText('OMP CLI')).toBeTruthy();
+    expect(screen.getByText('DeepSeek Harness')).toBeTruthy();
     expect(screen.getByText('v1.2.3')).toBeTruthy();
     expect(screen.getByText('/Users/test/.grok/bin/grok')).toBeTruthy();
     expect(screen.getByText('More coming soon')).toBeTruthy();
+
+    const harness = screen.getByText('DeepSeek Harness');
+    const connection = screen.getByTestId('dsh-connection-card');
+    expect(harness.compareDocumentPosition(connection) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('opens install guide dialog without auto-installing', async () => {

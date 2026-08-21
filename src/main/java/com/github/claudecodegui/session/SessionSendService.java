@@ -411,7 +411,8 @@ public class SessionSendService {
                 || "config-default".equals(lower)
                 || "config_default".equals(lower)
                 || "opencode default".equals(lower)
-                || "opencode-default".equals(lower)) {
+                || "opencode-default".equals(lower)
+                || "dsh-default".equals(lower)) {
             return null;
         }
         // Leftovers after a provider switch without model reset. OpenCode

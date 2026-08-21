@@ -83,13 +83,13 @@ describe('ModelSelect', () => {
       'claude-opus-5',
       'claude-opus-4-8',
       'claude-sonnet-5',
-      'claude-sonnet-4-7',
       'claude-haiku-4-5',
     ]);
     const ids = CLAUDE_MODELS.map((model) => model.id);
     expect(ids).not.toContain('claude-opus-4-7');
     expect(ids).not.toContain('claude-opus-4-6');
     expect(ids).not.toContain('claude-sonnet-4-6');
+    expect(ids).not.toContain('claude-sonnet-4-7');
     expect(ids.some((id) => id.endsWith('[1m]'))).toBe(false);
   });
 

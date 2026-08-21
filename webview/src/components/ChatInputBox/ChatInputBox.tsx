@@ -14,6 +14,7 @@ import type {
   ChatInputBoxProps,
   PermissionMode,
 } from './types.js';
+import { DEFAULT_CLAUDE_MODEL_ID } from './types.js';
 import { ChatInputBoxHeader } from './ChatInputBoxHeader.js';
 import { ChatInputBoxFooter } from './ChatInputBoxFooter.js';
 import { ResizeHandles } from './ResizeHandles.js';
@@ -76,7 +77,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
   (
     {
       isLoading = false,
-      selectedModel = 'claude-sonnet-4-7',
+      selectedModel = DEFAULT_CLAUDE_MODEL_ID,
       permissionMode = 'default',
       currentProvider = 'claude',
       usagePercentage = 0,
