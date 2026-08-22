@@ -449,7 +449,24 @@ public class ClaudeSession {
             String requestedReasoningEffort,
             String requestedCodexFastMode
     ) {
-        return send(input, null, agentPrompt, fileTagPaths, requestedPermissionMode, requestedReasoningEffort, requestedCodexFastMode);
+        return send(input, null, agentPrompt, fileTagPaths, requestedPermissionMode,
+                requestedReasoningEffort, requestedCodexFastMode, null);
+    }
+
+    /**
+     * Send a message with an optional DSH agent preset.
+     */
+    public CompletableFuture<Void> send(
+            String input,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String requestedPermissionMode,
+            String requestedReasoningEffort,
+            String requestedCodexFastMode,
+            String requestedDshPreset
+    ) {
+        return send(input, null, agentPrompt, fileTagPaths, requestedPermissionMode,
+                requestedReasoningEffort, requestedCodexFastMode, requestedDshPreset);
     }
 
     /**
@@ -518,6 +535,23 @@ public class ClaudeSession {
             String requestedReasoningEffort,
             String requestedCodexFastMode
     ) {
+        return send(input, attachments, agentPrompt, fileTagPaths, requestedPermissionMode,
+                requestedReasoningEffort, requestedCodexFastMode, null);
+    }
+
+    /**
+     * Send a message with attachments and an optional DSH agent preset.
+     */
+    public CompletableFuture<Void> send(
+            String input,
+            List<Attachment> attachments,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String requestedPermissionMode,
+            String requestedReasoningEffort,
+            String requestedCodexFastMode,
+            String requestedDshPreset
+    ) {
         lastTurnStartedAtMillis = System.currentTimeMillis();
         // Reset the manual-interrupt flag at the start of a new turn so that
         // a fresh send is not mistaken for a user-initiated stop.
@@ -531,6 +565,7 @@ public class ClaudeSession {
         final String finalRequestedPermissionMode = requestedPermissionMode;
         final String finalRequestedReasoningEffort = requestedReasoningEffort;
         final String finalRequestedCodexFastMode = requestedCodexFastMode;
+        final String finalRequestedDshPreset = requestedDshPreset;
 
         return launchClaude().thenCompose(chId -> {
             sendService.prepareContextCollector(contextCollector);
@@ -545,7 +580,8 @@ public class ClaudeSession {
                             finalFileTagPaths,
                             finalRequestedPermissionMode,
                             finalRequestedReasoningEffort,
-                            finalRequestedCodexFastMode
+                            finalRequestedCodexFastMode,
+                            finalRequestedDshPreset
                     )
             ).thenCompose(v -> syncUserMessageUuidsAfterSend());
         }).exceptionally(ex -> {

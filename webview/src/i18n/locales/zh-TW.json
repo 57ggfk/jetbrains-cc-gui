@@ -1861,6 +1861,15 @@
       "description": "Codex 快速回應模式（會產生額外消耗）"
     }
   },
+  "dshPresets": {
+    "title": "選擇 DeepSeek Harness Agent 預設",
+    "none": { "label": "預設", "description": "dsh 預設 headless 組合（完整工具集）" },
+    "standard": { "label": "標準模式", "description": "功能完整的標準編碼工具集" },
+    "code": { "label": "PTC 模式", "description": "標準能力加 Code Mode" },
+    "minimal": { "label": "極簡模式", "description": "僅提供 bash 與 str_replace_editor" },
+    "cordis": { "label": "創造模式", "description": "標準能力加組合編排能力" },
+    "user": { "description": "安裝在 DSH 主目錄中的自訂預設" }
+  },
   "error": {
     "providerNotConfigured": "供應商未設定",
     "providerNotConfiguredDesc": "尚未設定 AI 供應商或未授權使用本機設定，請先在供應商管理設定中完成設定後再開始對話。",

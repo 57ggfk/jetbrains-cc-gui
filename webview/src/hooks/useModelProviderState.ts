@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
 import {
   apply1MContextSuffix,
+  isValidDshPreset,
   isValidPermissionMode,
   normalizeClaudeModelId,
   strip1MContextSuffix,
@@ -105,6 +106,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const {
     selectedDshModel, setSelectedDshModel,
     dshPermissionMode, setDshPermissionMode,
+    dshPreset, setDshPreset,
   } = dsh;
 
   // ── Persistence: load on mount + save on change ──
@@ -130,6 +132,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setLongContextEnabled,
     setReasoningEffort,
     setCodexFastMode,
+    setDshPreset,
     currentProvider,
     selectedClaudeModel,
     selectedCodexModel,
@@ -150,6 +153,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
+    dshPreset,
   });
 
   // ── Computed values ──
@@ -350,6 +354,14 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     }
   }, [currentProvider, selectedClaudeModel, setLongContextEnabled]);
 
+  const handleDshPresetChange = useCallback((preset: string) => {
+    if (!isValidDshPreset(preset)) return;
+    setDshPreset(preset);
+    if (currentProvider === 'dsh') {
+      sendBridgeEvent('set_dsh_preset', preset);
+    }
+  }, [currentProvider, setDshPreset]);
+
   const handleToggleThinking = useCallback((enabled: boolean) => {
     const config = settings.activeProviderConfig;
     const isSpecialProvider = isSpecialProviderId(config?.id || '');
@@ -411,6 +423,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     handleModeSelect,
     handleModelSelect,
     handleProviderSelect,
+    handleDshPresetChange,
     handleLongContextChange,
     handleToggleThinking,
   };

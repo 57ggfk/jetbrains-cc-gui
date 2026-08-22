@@ -1,6 +1,7 @@
 package com.github.claudecodegui.session;
 
 
+import com.github.claudecodegui.util.PlatformUtils;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -61,6 +62,40 @@ public class SessionState {
         return effort != null && VALID_REASONING_EFFORTS.contains(effort.trim());
     }
 
+    /**
+     * Check whether the given DSH agent preset id is recognized.
+     */
+    public static boolean isValidDshPreset(String preset) {
+        if (preset == null) {
+            return false;
+        }
+        String normalized = preset.trim();
+        return normalized.isEmpty()
+                || Set.of("standard", "code", "minimal", "cordis").contains(normalized)
+                || discoverUserDshPresetIds().contains(normalized);
+    }
+
+    public static List<String> discoverUserDshPresetIds() {
+        List<String> ids = new ArrayList<>();
+        String dshHome = System.getenv("DSH_HOME");
+        java.nio.file.Path dshRoot = dshHome != null && !dshHome.trim().isEmpty()
+                ? java.nio.file.Paths.get(dshHome.trim())
+                : java.nio.file.Paths.get(PlatformUtils.getHomeDirectory(), ".dsh");
+        java.nio.file.Path root = dshRoot.resolve(".agent-presets");
+        try (java.nio.file.DirectoryStream<java.nio.file.Path> stream =
+                     java.nio.file.Files.newDirectoryStream(root)) {
+            for (java.nio.file.Path entry : stream) {
+                if (java.nio.file.Files.isDirectory(entry)
+                        && java.nio.file.Files.isRegularFile(entry.resolve("agent.cordis.yml"))) {
+                    ids.add(entry.getFileName().toString());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        java.util.Collections.sort(ids);
+        return ids;
+    }
+
     // Session identifiers
     private volatile String sessionId;
     private volatile String channelId;
@@ -93,6 +128,7 @@ public class SessionState {
     private volatile String reasoningEffort = null;
     // Codex service tier: null = use Codex defaults, "fast" = Codex /fast.
     private volatile String codexServiceTier = null;
+    private volatile String dshPreset = "";
 
     // Slash commands — volatile for cross-thread visibility (same reason as permissionMode/model/provider)
     private volatile List<String> slashCommands = new ArrayList<>();
@@ -159,6 +195,10 @@ public class SessionState {
 
     public String getCodexServiceTier() {
         return codexServiceTier;
+    }
+
+    public String getDshPreset() {
+        return dshPreset;
     }
 
     public String getRuntimeSessionEpoch() {
@@ -281,6 +321,12 @@ public class SessionState {
 
     public void setCodexServiceTier(String codexServiceTier) {
         this.codexServiceTier = codexServiceTier;
+    }
+
+    public void setDshPreset(String preset) {
+        if (isValidDshPreset(preset)) {
+            this.dshPreset = preset.trim();
+        }
     }
 
     public void setRuntimeSessionEpoch(String runtimeSessionEpoch) {

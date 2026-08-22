@@ -1091,6 +1091,9 @@ interface Window {
    */
   __INITIAL_TAB_MODEL__?: string;
 
+  /** User-installed DSH agent preset ids discovered from the DSH home. */
+  __INITIAL_DSH_PRESETS__?: string[];
+
   /** Runtime page generation established by Java before exposing the bridge. */
   __CCG_PAGE_GENERATION__?: number;
 

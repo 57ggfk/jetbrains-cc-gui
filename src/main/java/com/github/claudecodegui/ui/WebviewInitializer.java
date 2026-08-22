@@ -9,6 +9,7 @@ import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import java.util.Map;
 import com.github.claudecodegui.session.ClaudeSession;
+import com.github.claudecodegui.session.SessionState;
 import com.github.claudecodegui.startup.BridgePreloader;
 import com.github.claudecodegui.util.FontConfigService;
 import com.github.claudecodegui.util.HtmlLoader;
@@ -1310,7 +1311,10 @@ public class WebviewInitializer {
         String tabProvider = session != null ? session.getProvider() : null;
         String tabModel = session != null ? session.getModel() : null;
         String htmlWithTabState = htmlLoader.injectInitialTabState(htmlContent, tabProvider, tabModel);
-        return htmlLoader.injectPageContextBootstrap(htmlWithTabState);
+        String htmlWithDshPresets = htmlLoader.injectInitialDshPresets(
+                htmlWithTabState,
+                SessionState.discoverUserDshPresetIds());
+        return htmlLoader.injectPageContextBootstrap(htmlWithDshPresets);
     }
 
     /**

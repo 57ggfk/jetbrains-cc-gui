@@ -2341,6 +2341,15 @@
       "description": "Codex fast response mode (uses additional credits)"
     }
   },
+  "dshPresets": {
+    "title": "Select DeepSeek Harness agent preset",
+    "none": { "label": "Default", "description": "dsh default headless composition (full toolset)" },
+    "standard": { "label": "Standard", "description": "Full coding agent with the standard toolset" },
+    "code": { "label": "PTC", "description": "Standard capabilities with Code Mode" },
+    "minimal": { "label": "Minimal", "description": "Bash and str_replace_editor only" },
+    "cordis": { "label": "Creator", "description": "Standard capabilities plus composition authoring" },
+    "user": { "description": "Custom preset installed under the DSH home" }
+  },
   "error": {
     "providerNotConfigured": "Provider Not Configured",
     "providerNotConfiguredDesc": "No AI provider is configured yet, or access to the local configuration has not been authorized. Please complete setup in Provider Management settings before starting a conversation.",

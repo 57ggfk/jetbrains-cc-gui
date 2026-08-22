@@ -2346,6 +2346,15 @@
       "description": "Codex快速响应模式（会产生额外消耗）"
     }
   },
+  "dshPresets": {
+    "title": "选择 DeepSeek Harness Agent 预设",
+    "none": { "label": "默认", "description": "dsh 默认 headless 组合（完整工具集）" },
+    "standard": { "label": "标准模式", "description": "功能完整的标准编码工具集" },
+    "code": { "label": "PTC 模式", "description": "标准能力加 Code Mode" },
+    "minimal": { "label": "极简模式", "description": "仅提供 bash 与 str_replace_editor" },
+    "cordis": { "label": "创造模式", "description": "标准能力加组合编排能力" },
+    "user": { "description": "安装在 DSH 主目录中的自定义预设" }
+  },
   "error": {
     "providerNotConfigured": "供应商未配置",
     "providerNotConfiguredDesc": "尚未配置 AI 供应商或未授权使用本地配置，请先在供应商管理设置中完成配置后再开始对话。",
