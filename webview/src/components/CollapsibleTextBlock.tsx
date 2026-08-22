@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import DOMPurify from 'dompurify';
 import { openFile } from '../utils/bridge';
+import { looksLikePathSegment } from '../utils/pathSegment';
 
 interface CollapsibleTextBlockProps {
   content: string;
@@ -22,31 +23,6 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-/**
- * Convert @path references into compact clickable `<a>` links at display time.
- *
- * Before: "@C:\Users\Bob\proj\src\app.ts#L10-20"
- * After:  "<a href=... data-linkify=file>@app.ts#L10-20</a>"
- *
- * The href preserves the full absolute path (with :line format for navigation).
- * Protocol layer text sent to the AI is unchanged — this transformation is
- * display-only.
- */
-/**
- * Whether a word following a space could be a continuation of a file path.
- * Accepts segments that contain a path separator (`\` or `/`), or that end
- * with a file extension — the latter covers filenames containing spaces
- * such as "第六章 框架开发实践.md". A trailing `#L10-20` line marker is
- * stripped first so the extension is still visible.
- */
-function looksLikePathSegment(segment: string): boolean {
-  const withoutLineMarker = segment.replace(/#L\d+(?:-\d+)?$/, '');
-  return (
-    /[\\/]/.test(withoutLineMarker) || // contains a path separator (dir / absolute segment)
-    /\.[A-Za-z0-9]{1,10}$/.test(withoutLineMarker) // ends with a file extension (filename with spaces)
-  );
 }
 
 /**
@@ -112,7 +88,18 @@ function extractAtFilePath(
   return { rawPath, lineStart, lineEnd };
 }
 
-/** @visibleForTesting */
+/**
+ * Convert @path references into compact clickable `<a>` links at display time.
+ *
+ * Before: "@C:\Users\Bob\proj\src\app.ts#L10-20"
+ * After:  "<a href=... data-linkify=file>@app.ts#L10-20</a>"
+ *
+ * The href preserves the full absolute path (with :line format for navigation).
+ * Protocol layer text sent to the AI is unchanged — this transformation is
+ * display-only.
+ *
+ * @visibleForTesting
+ */
 export function convertAtFileRefsToLinks(text: string): string {
   if (!text || !text.includes('@')) {
     return escapeHtml(text);
