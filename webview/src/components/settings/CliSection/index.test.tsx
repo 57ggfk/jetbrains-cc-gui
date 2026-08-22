@@ -175,4 +175,20 @@ describe('CliSection', () => {
     const calls = (window.sendToJava as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
     expect(calls.every((c) => !c.includes('install'))).toBe(true);
   });
+
+  it('opens the install dialog docs link in the system browser via the bridge', async () => {
+    render(<CliSection />);
+
+    await act(async () => {
+      window.updateCliStatus?.(JSON.stringify({
+        grok: { id: 'grok', name: 'Grok CLI', binaryName: 'grok', installed: false },
+      }));
+    });
+
+    fireEvent.click(screen.getAllByText('Install guide')[0]);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Docs'));
+    expect(window.sendToJava).toHaveBeenCalledWith('open_browser:https://x.ai/cli');
+  });
 });
