@@ -342,7 +342,7 @@ public class SessionSendService {
         ).thenApply(result -> null);
     }
 
-        private CompletableFuture<Void> sendToGrok(
+    private CompletableFuture<Void> sendToGrok(
             String channelId,
             String input,
             List<ClaudeSession.Attachment> attachments,
@@ -394,7 +394,7 @@ public class SessionSendService {
         ).thenApply(result -> null);
     }
 
-private CompletableFuture<Void> sendToCliProvider(
+    private CompletableFuture<Void> sendToCliProvider(
             String provider,
             String channelId,
             String input,

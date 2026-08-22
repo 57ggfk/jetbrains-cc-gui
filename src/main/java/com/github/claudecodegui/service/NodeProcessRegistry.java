@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 
 /**
  * Project-scoped service that aggregates all Node.js subprocess data for the
@@ -389,16 +390,26 @@ public final class NodeProcessRegistry implements Disposable {
     }
 
     // Package-private for unit testing.
+    //
+    // Provider names are matched on word boundaries, not as bare substrings:
+    // a coincidental path segment (username "grokky", folder "gemini-old") must
+    // not mislabel an unrelated process. `\b` sits between [a-z0-9_] and anything
+    // else, so "grok-agent" and ".antig-grok" still match while "grokky" does not.
+    private static final Pattern GROK_WORD = Pattern.compile("\\bgrok\\b");
+    private static final Pattern GEMINI_WORD = Pattern.compile("\\bgemini\\b");
+
     static @Nullable String detectProviderFromCmd(String cmd) {
         if (cmd == null) {
             return null;
         }
         String lower = cmd.toLowerCase();
+        boolean hasGrok = GROK_WORD.matcher(lower).find();
+        boolean hasGemini = GEMINI_WORD.matcher(lower).find();
         // Shared daemon.js is used by Claude and Grok; channel-manager fingerprints are clearer.
-        if (lower.contains("channel-manager") && lower.contains("grok")) {
+        if (lower.contains("channel-manager") && hasGrok) {
             return "grok";
         }
-        if (lower.contains("channel-manager") && lower.contains("gemini")) {
+        if (lower.contains("channel-manager") && hasGemini) {
             return "gemini";
         }
         if (lower.contains("channel-manager") && lower.contains("codex")) {
@@ -411,10 +422,10 @@ public final class NodeProcessRegistry implements Disposable {
         if (lower.contains("codex")) {
             return "codex";
         }
-        if (lower.contains("grok")) {
+        if (hasGrok) {
             return "grok";
         }
-        if (lower.contains("gemini")) {
+        if (hasGemini) {
             return "gemini";
         }
         if (lower.contains("claude")) {

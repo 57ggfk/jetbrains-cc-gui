@@ -127,6 +127,30 @@ public class NodeProcessRegistryHelpersTest {
                 NodeProcessRegistry.detectProviderFromCmd("node /path/daemon.js channel-manager grok"));
     }
 
+    @Test
+    public void detectProviderIgnoresCoincidentalGrokSubstring() {
+        // "grokky" contains "grok" but is not the provider — word-boundary
+        // matching must not mislabel a process that merely lives under such a path.
+        assertNull(
+                NodeProcessRegistry.detectProviderFromCmd("node /home/grokky/tools/channel-manager.js kimi send"));
+        assertNull(
+                NodeProcessRegistry.detectProviderFromCmd("node /home/grokky/some-agent.js --stdio"));
+    }
+
+    @Test
+    public void detectProviderIgnoresCoincidentalGeminiSubstring() {
+        // "mygemini" has no word boundary around "gemini" — must not match.
+        assertNull(
+                NodeProcessRegistry.detectProviderFromCmd("node /home/mygemini/channel-manager.js kimi send"));
+    }
+
+    @Test
+    public void detectProviderMatchesGrokHomeStylePaths() {
+        // Hyphen/dot separators are word boundaries, so real grok paths still match.
+        assertEquals("grok",
+                NodeProcessRegistry.detectProviderFromCmd("node /home/u/.antig-grok/grok-agent.js --stdio"));
+    }
+
     // ============================================================================
     // Ownership check — prevents IDEA from claiming PyCharm's daemons as orphans
     // (and vice-versa) when both run CC GUI side-by-side.
