@@ -8,7 +8,7 @@
  * can stop it via the recorded pid.
  */
 
-import { existsSync, mkdirSync, readFileSync, openSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, openSync, writeFileSync, rmSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -239,6 +239,24 @@ export function probeDshVersion(bin) {
   return 'unknown';
 }
 
+/**
+ * Remove stale `dsh-preset-*.patch` overlays from the state dir. A patch file
+ * is only read by the host at boot, and spawnDshWeb runs after the previous
+ * spawned host was stopped — so any leftover patch belongs to a dead host and
+ * would otherwise pile up on every preset switch.
+ */
+function cleanupStalePresetPatches(stateDir) {
+  try {
+    for (const entry of readdirSync(stateDir)) {
+      if (/^dsh-preset-.+\.patch$/.test(entry)) {
+        rmSync(join(stateDir, entry), { force: true });
+      }
+    }
+  } catch {
+    // best-effort cleanup
+  }
+}
+
 function spawnDshWeb(bin, host, port, preset = '') {
   const args = ['web', '--host', host, '--port', String(port)];
   // One stable log next to the state file, truncated per spawn — avoids
@@ -265,7 +283,9 @@ function spawnDshWeb(bin, host, port, preset = '') {
         ? buildPresetOverlay({ presetId: preset, presetText, baseIds, presetDir: presetDir || '' })
         : null;
       if (overlay) {
-        const patchFile = join(dirname(stateFilePath()), `dsh-preset-${Date.now()}.patch`);
+        const stateDir = dirname(stateFilePath());
+        cleanupStalePresetPatches(stateDir);
+        const patchFile = join(stateDir, `dsh-preset-${Date.now()}.patch`);
         writeFileSync(patchFile, overlay, 'utf8');
         args.push('--patch', patchFile);
         logDebug(`preset=${preset} overlay=${overlay.length} chars`);
@@ -334,18 +354,35 @@ export async function ensureHost(settings) {
   }
 
   if (existing) {
-    const canReload = remembered
+    const requestedPreset = normalizeDshPreset(settings.dshPreset);
+    // The host counts as ours only when the state file recorded it, the pid
+    // is still alive, and the process still looks like dsh (PID-reuse guard).
+    const ownedRunning = remembered
       && remembered.origin === origin
       && isPidAlive(remembered.pid)
-      && isDshHostProcess(remembered.pid, remembered.bin)
-      && presetNeedsReload(remembered, settings.dshPreset);
-    if (!canReload) {
+      && isDshHostProcess(remembered.pid, remembered.bin);
+    if (!ownedRunning || !presetNeedsReload(remembered, requestedPreset)) {
+      // A preset only takes effect on hosts this bridge spawns (it is applied
+      // via --patch at boot). An adopted/external host keeps whatever
+      // composition it was started with — warn instead of silently ignoring
+      // the user's selection.
+      const presetApplied = ownedRunning
+        && typeof remembered.preset === 'string'
+        && normalizeDshPreset(remembered.preset) === requestedPreset;
+      if (requestedPreset !== '' && !presetApplied) {
+        console.error(
+          `[DSH] Agent preset "${requestedPreset}" requested, but the DSH host at ${origin} `
+          + 'was not spawned by this plugin and cannot be reloaded — the preset will NOT '
+          + 'be applied. Stop the external `dsh web` process and let the plugin '
+          + 'auto-start the host.'
+        );
+      }
       return existing;
     }
 
     logDebug(
       `reloading spawned host for preset change: ${normalizeDshPreset(remembered.preset) || 'default'} -> `
-      + `${normalizeDshPreset(settings.dshPreset) || 'default'}`
+      + `${requestedPreset || 'default'}`
     );
     const stopped = await stopSpawnedHost(settings);
     if (!stopped.success) {

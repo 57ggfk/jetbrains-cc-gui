@@ -70,8 +70,10 @@ public class SessionState {
             return false;
         }
         String normalized = preset.trim();
+        // Keep aligned with DSH_PRESET_IDS in ai-bridge/services/dsh/preset-overlay.js
+        // (router-standard ships with the dsh-routing-suite user presets).
         return normalized.isEmpty()
-                || Set.of("standard", "code", "minimal", "cordis").contains(normalized)
+                || Set.of("standard", "code", "minimal", "cordis", "router-standard").contains(normalized)
                 || discoverUserDshPresetIds().contains(normalized);
     }
 

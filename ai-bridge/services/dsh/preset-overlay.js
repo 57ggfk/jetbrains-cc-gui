@@ -28,6 +28,7 @@ import { spawnSync } from 'child_process';
 import { homedir } from 'os';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
+import { pathToFileURL } from 'url';
 import { enrichPathWithBinDirs, commonCliBinDirs } from '../../utils/cli-path.js';
 
 /**
@@ -298,7 +299,10 @@ export function buildPresetOverlay({ presetId, presetText, baseIds, presetDir = 
   const { dropEntryIds = [], stripNestedIds = [] } = presetOverlayOptions(presetId);
   const dropIds = new Set(dropEntryIds);
   const stripIds = new Set(stripNestedIds);
-  const presetDirUrl = presetDir ? `file:///${presetDir.replace(/\\/g, '/')}/` : '';
+  // pathToFileURL keeps the URL well-formed on both platforms — the previous
+  // `file:///${dir}` template produced `file:////tmp/...` on POSIX (pathname
+  // `//tmp/...`), which breaks ESM resolution of the preset's local plugins.
+  const presetDirUrl = presetDir ? pathToFileURL(presetDir.replace(/[\\/]+$/, '') + '/').href : '';
   const entries = parsePresetEntries(presetText);
   const overrides = [];
   const inserts = [];
