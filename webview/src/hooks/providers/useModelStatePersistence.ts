@@ -10,6 +10,8 @@ import {
   OPENCODE_DEFAULT_MODEL_ID,
   PI_DEFAULT_MODEL_ID,
   DSH_DEFAULT_MODEL_ID,
+  DSH_PRESET_NONE,
+  isValidDshPreset,
   isValidPermissionMode,
   normalizeClaudeModelId,
   apply1MContextSuffix,
@@ -69,6 +71,7 @@ export interface UseModelStatePersistenceOptions {
   setLongContextEnabled: (value: boolean) => void;
   setReasoningEffort: (value: ReasoningEffort) => void;
   setCodexFastMode: (value: CodexFastMode) => void;
+  setDshPreset: (value: string) => void;
   // Cross-slice save deps (re-saves on any change)
   currentProvider: string;
   selectedClaudeModel: string;
@@ -90,6 +93,7 @@ export interface UseModelStatePersistenceOptions {
   longContextEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
+  dshPreset: string;
 }
 
 /**
@@ -125,6 +129,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     setLongContextEnabled,
     setReasoningEffort,
     setCodexFastMode,
+    setDshPreset,
     currentProvider,
     selectedClaudeModel,
     selectedCodexModel,
@@ -145,6 +150,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
+    dshPreset,
   } = options;
 
   // Hydrate from localStorage and sync to backend (mount only).
@@ -189,6 +195,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       let restoredDshPermissionMode: PermissionMode = 'default';
       let restoredLongContextEnabled = true;
       let restoredCodexFastMode: CodexFastMode = 'normal';
+      let restoredDshPreset = DSH_PRESET_NONE;
 
       // Model validation helpers — close over the restored* lets so both
       // branches (saved localStorage / fresh backend-only) share the same logic
@@ -297,6 +304,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         if (isCodexFastMode(state.codexFastMode)) {
           restoredCodexFastMode = state.codexFastMode;
           setCodexFastMode(restoredCodexFastMode);
+        }
+        if (isValidDshPreset(state.dshPreset)) {
+          restoredDshPreset = state.dshPreset;
+          setDshPreset(restoredDshPreset);
         }
 
         const claudeModelCandidate = hasBackendModel && restoredProvider === 'claude'
@@ -429,6 +440,9 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           // The mode is only sent to Java on an explicit user switch
           // (handleModeSelect → set_mode).
           sendBridgeEvent('set_codex_fast_mode', restoredCodexFastMode);
+          if (restoredProvider === 'dsh') {
+            sendBridgeEvent('set_dsh_preset', restoredDshPreset);
+          }
         } else {
           syncRetryCount++;
           if (syncRetryCount < MAX_SYNC_RETRIES) {
@@ -488,6 +502,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           longContextEnabled,
           reasoningEffort,
           codexFastMode,
+          dshPreset,
         }));
       } catch {
         // Failed to save model selection state — non-fatal.
@@ -521,5 +536,6 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
+    dshPreset,
   ]);
 }

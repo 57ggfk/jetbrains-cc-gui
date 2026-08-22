@@ -33,6 +33,7 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     setLongContextEnabled: vi.fn(),
     setReasoningEffort: vi.fn(),
     setCodexFastMode: vi.fn(),
+    setDshPreset: vi.fn(),
     currentProvider: 'claude',
     selectedClaudeModel: 'claude-sonnet-4-5',
     selectedCodexModel: 'gpt-5-codex',
@@ -53,6 +54,7 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     longContextEnabled: false,
     reasoningEffort: 'medium',
     codexFastMode: 'normal',
+    dshPreset: '',
     ...overrides,
   };
 }

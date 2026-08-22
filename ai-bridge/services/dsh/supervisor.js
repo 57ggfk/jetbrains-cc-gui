@@ -19,18 +19,30 @@ import {
   resolveCliSpawn,
   resolveWindowsSpawnableBin,
 } from '../../utils/cli-path.js';
+import {
+  buildPresetOverlay,
+  getHeadlessBaseIds,
+  isKnownDshPresetId,
+  readDshPresetFile,
+  resolveDshPresetDir,
+} from './preset-overlay.js';
 import { DshHostClient, DshTransportError, originFromHostPort, probeDescribe } from './host.js';
 
 const SPAWN_READY_TIMEOUT_MS = process.platform === 'win32' ? 45_000 : 20_000;
 const SPAWN_POLL_MS = 250;
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 
+function logDebug(...args) {
+  console.error('[DEBUG][DSH]', ...args);
+}
+
 export function runtimeSettingsFromEnv(env = process.env) {
   const host = (env.DSH_HOST || '').trim() || '127.0.0.1';
   const port = Number(env.DSH_PORT) > 0 ? Number(env.DSH_PORT) : 3080;
   const autoStart = (env.DSH_AUTO_START || '').trim().toLowerCase() !== 'false';
   const binPath = (env.DSH_BIN || '').trim() || null;
-  return { binPath, host, port, autoStart };
+  const dshPreset = (env.DSH_PRESET || '').trim();
+  return { binPath, host, port, autoStart, dshPreset };
 }
 
 function stateFilePath() {
@@ -67,6 +79,20 @@ function removeStateFile() {
   } catch {
     // ignore
   }
+}
+
+function normalizeDshPreset(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function presetNeedsReload(remembered, requestedPreset) {
+  const requested = normalizeDshPreset(requestedPreset);
+  // State files written by older bridge versions have no preset field. They
+  // are known to be the default only when the caller also requests default.
+  if (!remembered || typeof remembered.preset !== 'string') {
+    return requested !== '';
+  }
+  return normalizeDshPreset(remembered.preset) !== requested;
 }
 
 function isPidAlive(pid) {
@@ -213,7 +239,7 @@ export function probeDshVersion(bin) {
   return 'unknown';
 }
 
-function spawnDshWeb(bin, host, port) {
+function spawnDshWeb(bin, host, port, preset = '') {
   const args = ['web', '--host', host, '--port', String(port)];
   // One stable log next to the state file, truncated per spawn — avoids
   // accumulating dsh-web-spawn-*.log files in tmpdir.
@@ -230,6 +256,26 @@ function spawnDshWeb(bin, host, port) {
   const env = { ...process.env };
   const home = process.env.HOME || process.env.USERPROFILE || homedir();
   enrichPathWithBinDirs(env, [...dshHomeBinDirs(), ...commonCliBinDirs(home)]);
+  if (preset && isKnownDshPresetId(preset)) {
+    try {
+      const baseIds = getHeadlessBaseIds({ bin, args: [], shell: false });
+      const presetText = readDshPresetFile(preset, { bin, args: [], shell: false });
+      const presetDir = resolveDshPresetDir(preset, { bin, args: [], shell: false });
+      const overlay = presetText && baseIds
+        ? buildPresetOverlay({ presetId: preset, presetText, baseIds, presetDir: presetDir || '' })
+        : null;
+      if (overlay) {
+        const patchFile = join(dirname(stateFilePath()), `dsh-preset-${Date.now()}.patch`);
+        writeFileSync(patchFile, overlay, 'utf8');
+        args.push('--patch', patchFile);
+        logDebug(`preset=${preset} overlay=${overlay.length} chars`);
+      } else {
+        console.error(`[DEBUG][DSH] preset=${preset} skipped: composition unavailable`);
+      }
+    } catch (error) {
+      console.error(`[DEBUG][DSH] preset=${preset} failed: ${error?.message || error}`);
+    }
+  }
   const invocation = resolveCliSpawn(bin, args, {
     detached: true,
     stdio: ['ignore', logFd === 'ignore' ? 'ignore' : logFd, logFd === 'ignore' ? 'ignore' : logFd],
@@ -278,14 +324,40 @@ export async function connectExisting(settings) {
  */
 export async function ensureHost(settings) {
   const origin = originFromHostPort(settings.host, settings.port);
+  const remembered = readStateFile();
+  let existing = null;
+  let reloaded = false;
   try {
-    return await connectExisting(settings);
+    existing = await connectExisting(settings);
   } catch {
-    // host not up yet — fall through
+    // Host not up yet — fall through.
   }
 
-  const remembered = readStateFile();
-  if (remembered && remembered.origin === origin && isPidAlive(remembered.pid)) {
+  if (existing) {
+    const canReload = remembered
+      && remembered.origin === origin
+      && isPidAlive(remembered.pid)
+      && isDshHostProcess(remembered.pid, remembered.bin)
+      && presetNeedsReload(remembered, settings.dshPreset);
+    if (!canReload) {
+      return existing;
+    }
+
+    logDebug(
+      `reloading spawned host for preset change: ${normalizeDshPreset(remembered.preset) || 'default'} -> `
+      + `${normalizeDshPreset(settings.dshPreset) || 'default'}`
+    );
+    const stopped = await stopSpawnedHost(settings);
+    if (!stopped.success) {
+      throw new DshTransportError(`Failed to reload DSH host: ${stopped.error || 'stop failed'}`);
+    }
+    reloaded = stopped.stopped;
+    // The host was ours and is now stopped; fall through to spawn it with the
+    // requested preset. If it disappeared concurrently, the same path is safe.
+  }
+
+  const refreshedRemembered = readStateFile();
+  if (refreshedRemembered && refreshedRemembered.origin === origin && isPidAlive(refreshedRemembered.pid)) {
     try {
       const describe = await waitForDescribe(origin, SPAWN_READY_TIMEOUT_MS);
       return {
@@ -301,14 +373,19 @@ export async function ensureHost(settings) {
     }
   }
 
-  if (!settings.autoStart) {
+  if (!settings.autoStart && !reloaded) {
     throw new DshTransportError(
       `DSH host is not running at ${origin}. Start \`dsh web\` or enable auto-start.`
     );
   }
 
   const bin = resolveDshBin(settings.binPath);
-  const { child, logFile } = spawnDshWeb(bin, settings.host, settings.port);
+  const { child, logFile } = spawnDshWeb(
+    bin,
+    settings.host,
+    settings.port,
+    settings.dshPreset || '',
+  );
   writeStateFile({
     pid: child.pid,
     origin,
@@ -316,6 +393,7 @@ export async function ensureHost(settings) {
     port: settings.port,
     bin,
     logFile,
+    preset: normalizeDshPreset(settings.dshPreset),
     startedAt: new Date().toISOString(),
   });
 

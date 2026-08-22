@@ -161,7 +161,7 @@ const App = () => {
     claudeSdkMeetsMinimum,
     currentProviderRef,
     activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
-    reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
+    reasoningEffort, codexFastMode, dshPreset, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
     longContextEnabled,
     usagePercentage, usageUsedTokens, usageMaxTokens,
     setPermissionMode, setCurrentProvider,
@@ -178,7 +178,7 @@ const App = () => {
     setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens,
     syncActiveProviderModelMapping,
     handleModeSelect, handleModelSelect, handleProviderSelect,
-    handleReasoningChange, handleCodexFastModeChange, handleAgentSelect, handleToggleThinking,
+    handleReasoningChange, handleCodexFastModeChange, handleDshPresetChange, handleAgentSelect, handleToggleThinking,
     handleStreamingEnabledChange, handleSendShortcutChange,
     handleAutoOpenFileEnabledChange, handleLongContextChange,
   } = useModelProviderState({ addToast, t });
@@ -428,7 +428,7 @@ const App = () => {
     interruptSession,
   } = useMessageSender({
     t, addToast,
-    currentProvider, selectedModel, permissionMode, reasoningEffort, selectedAgent, codexFastMode,
+    currentProvider, selectedModel, permissionMode, reasoningEffort, selectedAgent, codexFastMode, dshPreset,
     sdkStatusLoading, currentSdkInstalled,
     sentAttachmentsRef, chatInputRef, messagesContainerRef,
     isUserAtBottomRef, userPausedRef, isStreamingRef,
@@ -649,6 +649,7 @@ const App = () => {
               claudeSettingsAlwaysThinkingEnabled={claudeSettingsAlwaysThinkingEnabled}
               reasoningEffort={reasoningEffort}
               codexFastMode={codexFastMode}
+              dshPreset={dshPreset}
               streamingEnabledSetting={streamingEnabledSetting}
               sendShortcut={sendShortcut}
               autoOpenFileEnabled={autoOpenFileEnabled}
@@ -661,6 +662,7 @@ const App = () => {
               onAgentSelect={handleAgentSelect}
               onReasoningChange={handleReasoningChange}
               onCodexFastModeChange={handleCodexFastModeChange}
+              onDshPresetChange={handleDshPresetChange}
               onToggleThinking={handleToggleThinking}
               onStreamingEnabledChange={handleStreamingEnabledChange}
               onAutoOpenFileEnabledChange={handleAutoOpenFileEnabledChange}

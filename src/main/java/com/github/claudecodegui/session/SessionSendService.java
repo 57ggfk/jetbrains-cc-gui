@@ -116,7 +116,8 @@ public class SessionSendService {
             List<String> fileTagPaths,
             String requestedPermissionMode,
             String requestedReasoningEffort,
-            String requestedCodexFastMode
+            String requestedCodexFastMode,
+            String requestedDshPreset
     ) {
         String agentPrompt = externalAgentPrompt;
         if (agentPrompt == null) {
@@ -176,6 +177,9 @@ public class SessionSendService {
         }
 
         if (cliBridges.containsKey(currentProvider) && !"grok".equals(currentProvider)) {
+            if ("dsh".equals(currentProvider) && requestedDshPreset != null) {
+                state.setDshPreset(requestedDshPreset);
+            }
             return sendToCliProvider(
                     currentProvider,
                     channelId,
@@ -451,6 +455,7 @@ public class SessionSendService {
                 effort,
                 attachments,
                 effectiveMode,
+                "dsh".equals(provider) ? state.getDshPreset() : null,
                 handler
         ).thenApply(result -> null);
     }

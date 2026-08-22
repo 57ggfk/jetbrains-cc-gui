@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { DEFAULT_CLAUDE_MODEL_ID } from './types';
-import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
+import { CodexFastModeSelect, ConfigSelect, DshPresetSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
@@ -78,6 +78,7 @@ export const ButtonArea = ({
   permissionMode = 'default',
   currentProvider = 'claude',
   reasoningEffort = 'high',
+  dshPreset = '',
   codexFastMode = 'normal',
   onSubmit,
   onStop,
@@ -86,6 +87,7 @@ export const ButtonArea = ({
   onProviderSelect,
   onReasoningChange,
   onCodexFastModeChange,
+  onDshPresetChange,
   onEnhancePrompt,
   alwaysThinkingEnabled = false,
   onToggleThinking,
@@ -235,6 +237,10 @@ export const ButtonArea = ({
     onCodexFastModeChange?.(mode);
   }, [onCodexFastModeChange]);
 
+  const handleDshPresetChange = useCallback((preset: string) => {
+    onDshPresetChange?.(preset);
+  }, [onDshPresetChange]);
+
   /**
    * Handle enhance prompt button click
    */
@@ -253,6 +259,7 @@ export const ButtonArea = ({
     permissionMode,
     reasoningEffort,
     codexFastMode,
+    dshPreset,
     selectedAgent?.id ?? '',
     cliModelsLoading ? 'loading' : 'ready',
   ].join('|');
@@ -302,6 +309,9 @@ export const ButtonArea = ({
         <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
+        )}
+        {currentProvider === 'dsh' && (
+          <DshPresetSelect value={dshPreset} onChange={handleDshPresetChange} />
         )}
       </div>
 
