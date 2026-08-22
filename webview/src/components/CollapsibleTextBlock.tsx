@@ -35,13 +35,28 @@ function escapeHtml(text: string): string {
  * display-only.
  */
 /**
+ * Whether a word following a space could be a continuation of a file path.
+ * Accepts segments that contain a path separator (`\` or `/`), or that end
+ * with a file extension — the latter covers filenames containing spaces
+ * such as "第六章 框架开发实践.md". A trailing `#L10-20` line marker is
+ * stripped first so the extension is still visible.
+ */
+function looksLikePathSegment(segment: string): boolean {
+  const withoutLineMarker = segment.replace(/#L\d+(?:-\d+)?$/, '');
+  return (
+    /[\\/]/.test(withoutLineMarker) || // contains a path separator (dir / absolute segment)
+    /\.[A-Za-z0-9]{1,10}$/.test(withoutLineMarker) // ends with a file extension (filename with spaces)
+  );
+}
+
+/**
  * Extract a file path starting after `@` at position `start` in `text`.
  * Returns `[fullMatch, filePath, lineStart?, lineEnd?]` or null.
  *
  * Scans forward character-by-character, allowing spaces inside the path
  * when the next word segment looks like a path continuation (contains
- * a path separator: `\` or `/`).  A trailing `#L10-20` line marker is
- * parsed into separate line-start / line-end groups.
+ * a path separator or a file extension).  A trailing `#L10-20` line marker
+ * is parsed into separate line-start / line-end groups.
  */
 function extractAtFilePath(
   text: string,
@@ -66,7 +81,7 @@ function extractAtFilePath(
         peekRemainder[0] !== '\n' &&
         peekRemainder[0] !== '\r' &&
         peekRemainder[0] !== '@' &&
-        /[\\/]/.test(peekRemainder.split(/\s/)[0])
+        looksLikePathSegment(peekRemainder.split(/\s/)[0])
       ) {
         endPos++; // space is inside the path
         continue;
