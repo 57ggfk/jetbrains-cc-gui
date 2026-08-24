@@ -264,7 +264,19 @@ public class ChatWindowDelegate {
      * {@link CodemossSettingsService#applyActiveProviderToClaudeSettings()}.
      */
     public void syncActiveProvider() {
-        LOG.info("[ClaudeSDKToolWindow] Skip startup settings.json sync (provider switch/save only; empty-env protected)");
+        try {
+            // Repair-only pass: fills in provider-managed fields that are missing
+            // from ~/.claude/settings.json, never overwrites existing values.
+            // Local / CLI Login modes are skipped inside the manager.
+            boolean repaired = host.getSettingsService().repairActiveProviderToClaudeSettings();
+            if (repaired) {
+                LOG.info("[ClaudeSDKToolWindow] Repaired missing provider fields in global settings");
+            } else {
+                LOG.info("[ClaudeSDKToolWindow] No missing provider fields to repair");
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to sync active provider on startup: " + e.getMessage());
+        }
     }
 
     public String setupPermissionService() {
