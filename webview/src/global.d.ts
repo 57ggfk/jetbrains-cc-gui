@@ -23,7 +23,13 @@ interface Window {
   getClipboardFilePath?: () => Promise<string>;
 
   /**
-   * Handle file path(s) dropped from Java (supports batch files)
+   * Insert structured absolute file references from Java or another IDE
+   * integration. The array form preserves spaces inside each path.
+   */
+  insertFileReferencesAtCursor?: (filePathInput: string | string[]) => void;
+
+  /**
+   * Legacy file-path callback retained for older integrations.
    */
   handleFilePathFromJava?: (filePathInput: string | string[]) => void;
 
