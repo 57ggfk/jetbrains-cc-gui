@@ -2,14 +2,20 @@
 
 /**
  * AI Bridge Channel Manager
- * Unified bridge entry point for Claude and Codex SDKs
+ * Unified bridge entry point for Claude/Codex SDKs and CLI providers
  *
  * Command format:
  *   node channel-manager.js <provider> <command> [args...]
  *
  * Provider:
- *   claude - Claude Agent SDK (@anthropic-ai/claude-agent-sdk)
- *   codex  - Codex SDK (@openai/codex-sdk)
+ *   claude   - Claude Agent SDK (@anthropic-ai/claude-agent-sdk)
+ *   codex    - Codex SDK (@openai/codex-sdk)
+ *   grok     - Grok CLI (no SDK; spawns local `grok` binary)
+ *   kimi     - Kimi CLI (no SDK; spawns local `kimi` binary)
+ *   opencode - OpenCode CLI (no SDK; spawns local `opencode` binary)
+ *   pi       - PI CLI (no SDK; spawns local `pi` binary)
+ *   omp      - OMP CLI (no SDK; spawns local `omp` binary)
+ *   dsh      - DeepSeek Harness (Host RPC + WS mux against local `dsh web`)
  *
  * Commands:
  *   send                - Send a message (parameters passed via stdin as JSON)
@@ -26,8 +32,36 @@
 import { readStdinData } from './utils/stdin-utils.js';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
+import { handleGrokCommand } from './channels/grok-channel.js';
+import { handleKimiCommand } from './channels/kimi-channel.js';
+import { handleOpenCodeCommand } from './channels/opencode-channel.js';
+import { handlePiCommand } from './channels/pi-channel.js';
+import { handleOmpCommand } from './channels/omp-channel.js';
+import { handleDshCommand } from './channels/dsh-channel.js';
 import { getSdkStatus, isClaudeSdkAvailable, isCodexSdkAvailable } from './utils/sdk-loader.js';
 import { injectStartupEnvVars, configureCliIdentity } from './config/api-config.js';
+
+/**
+ * Write a JSON payload to stdout and exit once the bytes are flushed.
+ *
+ * `console.log` followed by `process.exit` races the stdout buffer: for a
+ * piped stdout the underlying `process.stdout.write` is asynchronous, and
+ * `process.exit` does not wait for it to drain, truncating the JSON. Writing
+ * explicitly and exiting in the flush callback guarantees the payload reaches
+ * the OS pipe first. The timeout fallback ensures the process still terminates
+ * if the callback never fires (e.g. a broken pipe).
+ */
+function writeJsonAndExit(payload, code = 0) {
+  let exited = false;
+  const exitNow = () => {
+    if (!exited) {
+      exited = true;
+      process.exit(code);
+    }
+  };
+  process.stdout.write(JSON.stringify(payload) + '\n', 'utf8', exitNow);
+  setTimeout(exitNow, 5000);
+}
 
 // Sync proxy/TLS settings and AWS credentials from ~/.claude/settings.json
 // BEFORE any network activity, but only for explicitly authorized Local
@@ -40,11 +74,11 @@ injectStartupEnvVars();
 configureCliIdentity();
 
 // Diagnostic logging: startup info
-console.log('[DIAG-ENTRY] ========== CHANNEL-MANAGER STARTUP ==========');
-console.log('[DIAG-ENTRY] Node.js version:', process.version);
-console.log('[DIAG-ENTRY] Platform:', process.platform);
-console.log('[DIAG-ENTRY] CWD:', process.cwd());
-console.log('[DIAG-ENTRY] argv:', process.argv);
+console.error('[DIAG-ENTRY] ========== CHANNEL-MANAGER STARTUP ==========');
+console.error('[DIAG-ENTRY] Node.js version:', process.version);
+console.error('[DIAG-ENTRY] Platform:', process.platform);
+console.error('[DIAG-ENTRY] CWD:', process.cwd());
+console.error('[DIAG-ENTRY] argv:', process.argv);
 
 // Parse command-line arguments
 const provider = process.argv[2];
@@ -52,27 +86,25 @@ const command = process.argv[3];
 const args = process.argv.slice(4);
 
 // Diagnostic logging: argument info
-console.log('[DIAG-ENTRY] Provider:', provider);
-console.log('[DIAG-ENTRY] Command:', command);
-console.log('[DIAG-ENTRY] Args:', args);
+console.error('[DIAG-ENTRY] Provider:', provider);
+console.error('[DIAG-ENTRY] Command:', command);
+console.error('[DIAG-ENTRY] Args:', args);
 
 // Error handling
 process.on('uncaughtException', (error) => {
   console.error('[UNCAUGHT_ERROR]', error.message);
-  console.log(JSON.stringify({
+  writeJsonAndExit({
     success: false,
     error: error.message
-  }));
-  process.exit(1);
+  }, 1);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('[UNHANDLED_REJECTION]', reason);
-  console.log(JSON.stringify({
+  writeJsonAndExit({
     success: false,
     error: String(reason)
-  }));
-  process.exit(1);
+  }, 1);
 });
 
 /**
@@ -106,55 +138,57 @@ async function handleSystemCommand(command, args, stdinData) {
       break;
 
     default:
-      console.log(JSON.stringify({
-        success: false,
-        error: 'Unknown system command: ' + command
-      }));
-      process.exit(1);
+      throw new Error('Unknown system command: ' + command);
   }
 }
 
 const providerHandlers = {
   claude: handleClaudeCommand,
   codex: handleCodexCommand,
+  grok: handleGrokCommand,
+  kimi: handleKimiCommand,
+  opencode: handleOpenCodeCommand,
+  pi: handlePiCommand,
+  omp: handleOmpCommand,
+  dsh: handleDshCommand,
   system: handleSystemCommand
 };
 
 // Execute command
 (async () => {
-  console.log('[DIAG-EXEC] ========== STARTING EXECUTION ==========');
+  console.error('[DIAG-EXEC] ========== STARTING EXECUTION ==========');
   try {
     // Validate provider
-    console.log('[DIAG-EXEC] Validating provider...');
+    console.error('[DIAG-EXEC] Validating provider...');
     if (!provider || !providerHandlers[provider]) {
-      console.error('Invalid provider. Use "claude", "codex", or "system"');
-      console.log(JSON.stringify({
+      console.error('Invalid provider. Use "claude", "codex", "grok", "kimi", "opencode", "pi", "omp", "dsh", or "system"');
+      writeJsonAndExit({
         success: false,
         error: 'Invalid provider: ' + provider
-      }));
-      process.exit(1);
+      }, 1);
+      return;
     }
 
     // Validate command
     if (!command) {
       console.error('No command specified');
-      console.log(JSON.stringify({
+      writeJsonAndExit({
         success: false,
         error: 'No command specified'
-      }));
-      process.exit(1);
+      }, 1);
+      return;
     }
 
     // Read stdin data
-    console.log('[DIAG-EXEC] Reading stdin data...');
+    console.error('[DIAG-EXEC] Reading stdin data...');
     const stdinData = await readStdinData(provider);
-    console.log('[DIAG-EXEC] Stdin data received, keys:', stdinData ? Object.keys(stdinData) : 'null');
+    console.error('[DIAG-EXEC] Stdin data received, keys:', stdinData ? Object.keys(stdinData) : 'null');
 
     // Dispatch to the appropriate provider handler
-    console.log('[DIAG-EXEC] Dispatching to handler:', provider);
+    console.error('[DIAG-EXEC] Dispatching to handler:', provider);
     const handler = providerHandlers[provider];
     await handler(command, args, stdinData);
-    console.log('[DIAG-EXEC] Handler completed successfully');
+    console.error('[DIAG-EXEC] Handler completed successfully');
 
     // IMPORTANT: Do not use process.exit(0) here -- it terminates the process
     // before the stdout buffer is fully flushed, which can truncate large JSON
@@ -172,10 +206,9 @@ const providerHandlers = {
 
   } catch (error) {
     console.error('[COMMAND_ERROR]', error.message);
-    console.log(JSON.stringify({
+    writeJsonAndExit({
       success: false,
       error: error.message
-    }));
-    process.exit(1);
+    }, 1);
   }
 })();

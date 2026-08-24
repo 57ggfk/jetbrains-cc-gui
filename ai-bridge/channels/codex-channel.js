@@ -3,6 +3,7 @@
  */
 import { sendMessage as codexSendMessage } from '../services/codex/message-service.js';
 import { getMcpServerTools as codexGetMcpServerTools } from '../services/codex/message-service.js';
+import { listModels as codexListModels } from '../services/codex/models-service.js';
 
 /**
  * Execute a Codex command.
@@ -34,7 +35,7 @@ export async function handleCodexCommand(command, args, stdinData) {
           model || '',
           baseUrl || '',
           apiKey || '',
-          (reasoningEffort === 'max' ? 'xhigh' : (reasoningEffort || 'medium')),
+          (reasoningEffort || 'medium'),
           serviceTier || '',
           attachments || []  // Pass attachments to message service
         );
@@ -51,11 +52,16 @@ export async function handleCodexCommand(command, args, stdinData) {
       break;
     }
 
+    case 'listModels': {
+      codexListModels();
+      break;
+    }
+
     default:
       throw new Error(`Unknown Codex command: ${command}`);
   }
 }
 
 export function getCodexCommandList() {
-  return ['send', 'getMcpServerTools'];
+  return ['send', 'getMcpServerTools', 'listModels'];
 }

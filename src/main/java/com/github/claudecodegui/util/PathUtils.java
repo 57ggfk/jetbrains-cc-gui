@@ -56,11 +56,96 @@ public class PathUtils {
         if (path == null || path.isEmpty()) {
             return path;
         }
+        // WSL UNC paths (\\wsl.localhost\..., \\wsl$\..., and the forward-slash
+        // //wsl.localhost/... form IntelliJ's getBasePath() returns on Windows) must NOT be run
+        // through Paths.get(...).toAbsolutePath(): the leading "//" collapses and the path resolves
+        // drive-relative (C:\wsl.localhost\...), producing a different ~/.claude/projects/<key>
+        // than the SDK writes to. See WslPathUtil.resolveHomeForFileOps for the same hazard.
+        if (isWslUncPath(path)) {
+            return normalizeWslUncLexically(path);
+        }
         try {
             return java.nio.file.Paths.get(path).toAbsolutePath().normalize().toString();
         } catch (Exception e) {
             return path;
         }
+    }
+
+    /**
+     * Guard a provider daemon's requested working directory against the project
+     * base so it cannot be pointed outside the project.
+     *
+     * <p>Returns {@code null} when there is no project base to guard against, in
+     * which case the caller should keep the original cwd. When the cwd is missing
+     * or resolves outside the project base, the project base is returned (clamping
+     * the daemon back inside the project). When the cwd already resolves inside
+     * (or equal to) the project base, the cwd is returned verbatim so legitimate
+     * sub-directory selections are preserved. Comparison is done on normalized
+     * absolute paths (so trailing-slash / relative differences don't bypass the
+     * guard), but the returned value keeps the original path form.
+     */
+    public static String guardWorkingDirectory(String cwd, String projectBase) {
+        if (projectBase == null || projectBase.isEmpty()) {
+            return null;
+        }
+        String base = normalizeAbsolute(projectBase);
+        if (base == null || base.isEmpty()) {
+            return null;
+        }
+        if (!isValidWorkingDirectory(cwd)) {
+            return projectBase;
+        }
+        String normalizedCwd = normalizeAbsolute(cwd);
+        if (normalizedCwd == null || !isWithinOrEqual(normalizedCwd, base)) {
+            return projectBase;
+        }
+        return cwd;
+    }
+
+    /** Non-null, non-empty, and not one of the sentinel strings the webview sends for "no cwd". */
+    private static boolean isValidWorkingDirectory(String cwd) {
+        return cwd != null && !cwd.isEmpty() && !"undefined".equals(cwd) && !"null".equals(cwd);
+    }
+
+    /** True when {@code path} equals {@code base} or is nested directly under it. */
+    private static boolean isWithinOrEqual(String path, String base) {
+        if (path.equals(base)) {
+            return true;
+        }
+        String prefix = base.endsWith(File.separator) ? base : base + File.separator;
+        return path.startsWith(prefix);
+    }
+
+    /** True for the WSL UNC roots ({@code \\wsl.localhost\...}, {@code \\wsl$\...}) in either slash form. */
+    private static boolean isWslUncPath(String path) {
+        String p = path.replace('\\', '/');
+        return p.startsWith("//wsl.localhost/") || p.startsWith("//wsl$/")
+                || p.equals("//wsl.localhost") || p.equals("//wsl$");
+    }
+
+    /**
+     * Collapse {@code .}/{@code ..} segments lexically while preserving the leading {@code //}
+     * UNC prefix and using forward slashes (which {@link WslPathUtil} accepts on both sides).
+     * Used instead of {@link java.nio.file.Path#normalize()} because Java's Windows path parser
+     * corrupts the {@code //wsl...} prefix (see {@link #normalizeAbsolute}).
+     */
+    private static String normalizeWslUncLexically(String path) {
+        String p = path.replace('\\', '/');
+        String[] segments = p.substring(2).split("/");
+        java.util.Deque<String> stack = new java.util.ArrayDeque<>();
+        for (String seg : segments) {
+            if (seg.isEmpty() || ".".equals(seg)) {
+                continue;
+            }
+            if ("..".equals(seg)) {
+                if (!stack.isEmpty()) {
+                    stack.pollLast();
+                }
+                continue;
+            }
+            stack.addLast(seg);
+        }
+        return "//" + String.join("/", stack);
     }
 
     /**

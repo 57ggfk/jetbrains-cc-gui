@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaudeMessage } from '../types';
-import { getMessageKey } from '../utils/messageUtils';
+import { getLogicalOffsetTop } from '../utils/viewport';
 
 interface AnchorItem {
   id: string;
@@ -10,6 +10,7 @@ interface AnchorItem {
 
 interface MessageAnchorRailProps {
   messages: ClaudeMessage[];
+  messageKeys: readonly string[];
   /** Number of messages hidden by the collapse feature. Anchors start after this offset. */
   collapsedCount?: number;
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -17,7 +18,18 @@ interface MessageAnchorRailProps {
 }
 
 const MAX_PREVIEW_LENGTH = 300;
+const MAX_ANCHOR_COUNT = 30;
 const TOOLTIP_DELAY_MS = 500;
+
+export function sampleAnchorItems(items: AnchorItem[], maxCount = MAX_ANCHOR_COUNT): AnchorItem[] {
+  if (items.length <= maxCount || maxCount < 2) {
+    return items;
+  }
+  return Array.from({ length: maxCount }, (_, index) => {
+    const sourceIndex = Math.round((index / (maxCount - 1)) * (items.length - 1));
+    return items[sourceIndex];
+  });
+}
 
 function getAnchorStyle(position: number): React.CSSProperties {
   return { top: `${position * 100}%` };
@@ -42,6 +54,7 @@ function getMessagePreview(message: ClaudeMessage): string {
 
 export const MessageAnchorRail = memo(function MessageAnchorRail({
   messages,
+  messageKeys,
   collapsedCount = 0,
   containerRef,
   messageNodeMap,
@@ -77,22 +90,32 @@ export const MessageAnchorRail = memo(function MessageAnchorRail({
     const userMessages: AnchorItem[] = [];
     const startIndex = collapsedCount;
     for (let i = startIndex; i < messages.length; i++) {
-      if (messages[i].type === 'user') {
+      const message = messages[i];
+      const messageKey = messageKeys[i];
+      if (message?.type === 'user' && messageKey) {
         userMessages.push({
-          id: getMessageKey(messages[i], i),
+          id: messageKey,
           position: 0,
-          preview: getMessagePreview(messages[i]),
+          preview: getMessagePreview(message),
         });
       }
     }
     // Guard: also prevents division by zero in the position calculation below
     if (userMessages.length <= 1) return [];
-    // Distribute positions evenly between 4% and 96%
-    return userMessages.map((item, idx) => ({
+    // Keep the rail usable for long conversations by sampling evenly across the
+    // full message range while retaining the first and last user messages.
+    const visibleMessages = sampleAnchorItems(userMessages);
+    return visibleMessages.map((item, idx) => ({
       ...item,
-      position: 0.04 + (idx / (userMessages.length - 1)) * 0.92,
+      position: 0.04 + (idx / (visibleMessages.length - 1)) * 0.92,
     }));
-  }, [messages, collapsedCount]);
+  }, [messages, messageKeys, collapsedCount]);
+
+  useEffect(() => {
+    const anchorIds = new Set(anchors.map((anchor) => anchor.id));
+    setActiveAnchorId((current) => current && !anchorIds.has(current) ? null : current);
+    setTooltipAnchorId((current) => current && !anchorIds.has(current) ? null : current);
+  }, [anchors]);
 
   // Scroll to a specific anchor message
   const scrollToAnchor = useCallback((messageId: string) => {
@@ -100,10 +123,12 @@ export const MessageAnchorRail = memo(function MessageAnchorRail({
     const container = containerRef.current;
     if (!node || !container) return;
 
-    const containerRect = container.getBoundingClientRect();
-    const nodeRect = node.getBoundingClientRect();
+    // getLogicalOffsetTop returns the layout-space delta (zoom-compensated),
+    // so it matches scrollTop/clientHeight units. The raw getBoundingClientRect
+    // delta is zoom-scaled under #app CSS zoom != 1, which made the target land
+    // short and converge only over repeated clicks.
     const targetTop =
-      container.scrollTop + (nodeRect.top - containerRect.top) - container.clientHeight * 0.28;
+      container.scrollTop + getLogicalOffsetTop(node, container) - container.clientHeight * 0.28;
 
     container.scrollTo({
       top: Math.max(0, targetTop),
@@ -143,6 +168,7 @@ export const MessageAnchorRail = memo(function MessageAnchorRail({
             return;
           }
         }
+        setActiveAnchorId(null);
       },
       {
         root: container,

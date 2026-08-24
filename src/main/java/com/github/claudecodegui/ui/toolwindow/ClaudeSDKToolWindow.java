@@ -24,6 +24,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -47,6 +48,9 @@ public class ClaudeSDKToolWindow implements ToolWindowFactory, DumbAware {
     private static final Map<Content, ClaudeChatWindow> contentToWindowMap = new ConcurrentHashMap<>();
     private static volatile boolean shutdownHookRegistered = false;
     private static final String TAB_NAME_PREFIX = "AI";
+    /** Matches tab names like "AI1", "AI1..." (answering) or "AI1 (completed)" — extracts the numeric part. */
+    private static final java.util.regex.Pattern TAB_NAME_PATTERN =
+            java.util.regex.Pattern.compile("^" + TAB_NAME_PREFIX + "(\\d+)");
     private static final Set<Content> detachingContents =
             Collections.newSetFromMap(new ConcurrentHashMap<>());
 
@@ -64,9 +68,15 @@ public class ClaudeSDKToolWindow implements ToolWindowFactory, DumbAware {
 
         for (Content content : contentManager.getContents()) {
             String displayName = content.getDisplayName();
-            if (displayName != null && displayName.startsWith(TAB_NAME_PREFIX)) {
+            if (displayName == null) {
+                continue;
+            }
+            // Extract the leading number after the "AI" prefix so status suffixes
+            // like "AI1..." (answering) or "AI1 (completed)" still count.
+            java.util.regex.Matcher matcher = TAB_NAME_PATTERN.matcher(displayName);
+            if (matcher.find()) {
                 try {
-                    int number = Integer.parseInt(displayName.substring(TAB_NAME_PREFIX.length()));
+                    int number = Integer.parseInt(matcher.group(1));
                     if (number > maxNumber) {
                         maxNumber = number;
                     }
@@ -153,6 +163,14 @@ public class ClaudeSDKToolWindow implements ToolWindowFactory, DumbAware {
             }
             if (window.getCodexSDKBridge() != null) {
                 window.getCodexSDKBridge().cleanupAllProcesses();
+            }
+            if (window.getCliBridges() != null) {
+                for (com.github.claudecodegui.provider.common.MarkerCliBridge bridge
+                        : window.getCliBridges().values()) {
+                    if (bridge != null) {
+                        bridge.cleanupAllProcesses();
+                    }
+                }
             }
         } catch (Exception e) {
             LOG.error("[ShutdownHook] Error cleaning up processes: " + e.getMessage(), e);
@@ -306,8 +324,12 @@ public class ClaudeSDKToolWindow implements ToolWindowFactory, DumbAware {
 
             @Override
             public void selectionChanged(@NotNull ContentManagerEvent event) {
+                if (contentManager.getSelectedContent() != event.getContent()) {
+                    return;
+                }
                 ClaudeChatWindow window = contentToWindowMap.get(event.getContent());
                 if (window != null) {
+                    window.onTabActivated();
                     window.loadRestoredHistoryIfNeeded();
                 }
             }
@@ -532,6 +554,14 @@ public class ClaudeSDKToolWindow implements ToolWindowFactory, DumbAware {
 
     public static void addSelectionFromExternal(Project project, String selectionInfo) {
         codeSnippetManager.addSelectionFromExternal(project, selectionInfo);
+    }
+
+    /**
+     * Send project-tree file references to the selected chat tab as structured
+     * paths, keeping spaces inside a path separate from multi-file routing.
+     */
+    public static void addFileReferencesFromExternal(Project project, List<String> filePaths) {
+        codeSnippetManager.addFileReferencesFromExternal(project, filePaths);
     }
 
     /**

@@ -28,7 +28,13 @@ public class SettingsHandler extends BaseMessageHandler {
     private final NodePathHandler nodePathHandler;
     private final ClaudeCliPathHandler claudeCliPathHandler;
     private final ProjectConfigHandler projectConfigHandler;
+    // Handle for the theme-change callback registered with ThemeConfigService.
+    // Kept so it can be cleanly unregistered when the owning window is disposed,
+    // preventing notifications to disposed webviews (issue #1586).
+    private ThemeConfigService.RegisteredCallback themeCallbackHandle;
     private final CodexSubscriptionQuotaHandler codexSubscriptionQuotaHandler;
+    private final TokenTrackerHandler tokenTrackerHandler;
+    private final DshPresetHandler dshPresetHandler;
 
     private static final String[] SUPPORTED_TYPES = {
         "get_mode",
@@ -37,11 +43,16 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_provider",
         "set_reasoning_effort",
         "set_codex_fast_mode",
+        "set_dsh_preset",
         "get_node_path",
         "set_node_path",
         "get_claude_cli_path",
         "set_claude_cli_path",
-        "get_usage_statistics",
+        // TokenTracker local usage dashboard (vendored tokentracker-cli server)
+        "tt_detect_cli",
+        "tt_install_cli",
+        "tt_ensure_server",
+        "tt_proxy",
         "get_codex_subscription_quota",
         "get_working_directory",
         "set_working_directory",
@@ -66,10 +77,15 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_commit_generation_enabled",
         "get_status_bar_widget_enabled",
         "set_status_bar_widget_enabled",
+
         "get_task_completion_notification_enabled",
         "set_task_completion_notification_enabled",
         "get_ask_user_question_notification_enabled",
         "set_ask_user_question_notification_enabled",
+        "get_system_notification_only_when_unfocused",
+        "set_system_notification_only_when_unfocused",
+        "get_ask_user_question_sound_notification_enabled",
+        "set_ask_user_question_sound_notification_enabled",
         "get_ide_theme",
         "get_commit_prompt",
         "set_commit_prompt",
@@ -108,19 +124,35 @@ public class SettingsHandler extends BaseMessageHandler {
         this.claudeCliPathHandler = new ClaudeCliPathHandler(context);
         this.projectConfigHandler = new ProjectConfigHandler(context);
         this.codexSubscriptionQuotaHandler = new CodexSubscriptionQuotaHandler(context);
+        this.tokenTrackerHandler = new TokenTrackerHandler(context);
+        this.dshPresetHandler = new DshPresetHandler(context);
         // Register theme change listener to automatically notify frontend when IDE theme changes
         registerThemeChangeListener();
     }
 
     /**
      * Register theme change listener.
+     * Uses the multi-callback API so that every open ClaudeChatWindow receives
+     * theme change notifications. The returned handle is stored for clean
+     * unregistration in {@link #dispose()}.
      */
     private void registerThemeChangeListener() {
-        ThemeConfigService.registerThemeChangeListener(themeConfig -> {
+        themeCallbackHandle = ThemeConfigService.registerThemeChangeListener(themeConfig -> {
             ApplicationManager.getApplication().invokeLater(() -> {
                 callJavaScript("window.onIdeThemeChanged", escapeJs(themeConfig.toString()));
             });
-        });
+        }, true);
+    }
+
+    /**
+     * Unregister the theme change callback to prevent notifications to a disposed webview.
+     * Should be called when the owning ClaudeChatWindow is disposed.
+     */
+    public void dispose() {
+        if (themeCallbackHandle != null) {
+            ThemeConfigService.unregisterThemeChangeListener(themeCallbackHandle);
+            themeCallbackHandle = null;
+        }
     }
 
     @Override
@@ -151,6 +183,9 @@ public class SettingsHandler extends BaseMessageHandler {
             case "set_codex_fast_mode":
                 modelProviderHandler.handleSetCodexFastMode(content);
                 return true;
+            case "set_dsh_preset":
+                dshPresetHandler.handleSetDshPreset(content);
+                return true;
             // Node path
             case "get_node_path":
                 nodePathHandler.handleGetNodePath();
@@ -165,9 +200,18 @@ public class SettingsHandler extends BaseMessageHandler {
             case "set_claude_cli_path":
                 claudeCliPathHandler.handleSetClaudeCliPath(content);
                 return true;
-            // Project configuration
-            case "get_usage_statistics":
-                projectConfigHandler.handleGetUsageStatistics(content);
+            // TokenTracker local usage dashboard
+            case "tt_detect_cli":
+                tokenTrackerHandler.handleDetectCli(content);
+                return true;
+            case "tt_install_cli":
+                tokenTrackerHandler.handleInstallCli(content);
+                return true;
+            case "tt_ensure_server":
+                tokenTrackerHandler.handleEnsureServer(content);
+                return true;
+            case "tt_proxy":
+                tokenTrackerHandler.handleProxy(content);
                 return true;
             case "get_codex_subscription_quota":
                 codexSubscriptionQuotaHandler.handleGetCodexSubscriptionQuota();
@@ -241,6 +285,7 @@ public class SettingsHandler extends BaseMessageHandler {
             case "set_status_bar_widget_enabled":
                 projectConfigHandler.handleSetStatusBarWidgetEnabled(content);
                 return true;
+
             case "get_task_completion_notification_enabled":
                 projectConfigHandler.handleGetTaskCompletionNotificationEnabled();
                 return true;
@@ -252,6 +297,18 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_ask_user_question_notification_enabled":
                 projectConfigHandler.handleSetAskUserQuestionNotificationEnabled(content);
+                return true;
+            case "get_system_notification_only_when_unfocused":
+                projectConfigHandler.handleGetSystemNotificationOnlyWhenUnfocused();
+                return true;
+            case "set_system_notification_only_when_unfocused":
+                projectConfigHandler.handleSetSystemNotificationOnlyWhenUnfocused(content);
+                return true;
+            case "get_ask_user_question_sound_notification_enabled":
+                projectConfigHandler.handleGetAskUserQuestionSoundNotificationEnabled();
+                return true;
+            case "set_ask_user_question_sound_notification_enabled":
+                projectConfigHandler.handleSetAskUserQuestionSoundNotificationEnabled(content);
                 return true;
             case "get_ai_title_generation_enabled":
                 projectConfigHandler.handleGetAiTitleGenerationEnabled();
@@ -397,5 +454,9 @@ public class SettingsHandler extends BaseMessageHandler {
      */
     public static int getModelContextLimit(String model) {
         return ModelProviderHandler.getModelContextLimit(model);
+    }
+
+    public static int getModelContextLimit(String provider, String model) {
+        return ModelProviderHandler.getModelContextLimit(provider, model);
     }
 }

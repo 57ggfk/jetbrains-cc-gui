@@ -17,6 +17,7 @@ public class HistoryHandler extends BaseMessageHandler {
     private static final String[] SUPPORTED_TYPES = {
             "load_history_data",
             "load_session",
+            "load_codex_history_page",
             "delete_session",  // Delete session
             "delete_sessions", // Batch delete sessions
             "export_session",  // Export session
@@ -25,12 +26,16 @@ public class HistoryHandler extends BaseMessageHandler {
             "delete_title",    // Delete orphaned custom title (B-011)
             "deep_search_history", // Deep search (clear cache and reload)
             "load_subagent_session", // Load Claude Code sidechain Agent process log
+            "load_subagent_statuses", // Load lightweight Codex subagent statuses
             "convert_to_cli_session" // Convert sidechain session to CLI-recognizable session
     };
 
     // Session load callback interface
     public interface SessionLoadCallback {
-        void onLoadSession(String sessionId, String projectPath, String provider);
+        /**
+         * @param model optional model id from the history row; null/blank keeps previous UI model
+         */
+        void onLoadSession(String sessionId, String projectPath, String provider, String model);
     }
 
     private SessionLoadCallback sessionLoadCallback;
@@ -77,6 +82,10 @@ public class HistoryHandler extends BaseMessageHandler {
                 LOG.debug("[HistoryHandler] 处理: load_session");
                 historyMessageInjector.handleLoadSession(content, currentProvider, sessionLoadCallback);
                 return true;
+            case "load_codex_history_page":
+                LOG.debug("[HistoryHandler] Processing: load_codex_history_page");
+                historyMessageInjector.loadEarlierCodexHistoryPage(content);
+                return true;
             case "delete_session":
                 LOG.info("[HistoryHandler] 处理: delete_session, sessionId=" + content);
                 historyDeleteService.handleDeleteSession(content, currentProvider);
@@ -109,6 +118,10 @@ public class HistoryHandler extends BaseMessageHandler {
             case "load_subagent_session":
                 LOG.debug("[HistoryHandler] 处理: load_subagent_session");
                 subagentHistoryService.handleLoadSubagentSession(content);
+                return true;
+            case "load_subagent_statuses":
+                LOG.debug("[HistoryHandler] Processing: load_subagent_statuses");
+                subagentHistoryService.handleLoadSubagentStatuses(content);
                 return true;
             case "convert_to_cli_session":
                 LOG.debug("[HistoryHandler] 处理: convert_to_cli_session");

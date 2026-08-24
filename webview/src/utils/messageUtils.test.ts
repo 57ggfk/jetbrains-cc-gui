@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { ClaudeMessage } from '../types';
 import {
   getMessageKey,
+  reconcileMessageKeys,
   getContentBlocks,
   mergeConsecutiveAssistantMessages,
   formatCommandForDisplay,
   formatCommandForResubmit,
   formatTaskNotificationForDisplay,
+  createTaskNotificationBlock,
+  attachCompactBoundaryMetadata,
   hasCommandMessageTag,
   hasTaskNotificationTag,
   isTaskNotificationOnlyMessage,
@@ -68,6 +71,89 @@ describe('getMessageKey', () => {
   it('falls back to type-index when no uuid, __turnId, or timestamp', () => {
     const msg: ClaudeMessage = { type: 'assistant', content: 'hi' };
     expect(getMessageKey(msg, 7)).toBe('assistant-7');
+  });
+});
+
+describe('reconcileMessageKeys', () => {
+  it('deduplicates repeated UUIDs, turn IDs, timestamps, and fallback keys', () => {
+    const messages = [
+      { type: 'user', content: 'a', raw: { uuid: 'same' } },
+      { type: 'user', content: 'b', raw: { uuid: 'same' } },
+      { type: 'assistant', content: 'c', __turnId: 7 },
+      { type: 'assistant', content: 'd', __turnId: 7 },
+      { type: 'user', content: 'e', timestamp: '2026-01-01T00:00:00Z' },
+      { type: 'user', content: 'f', timestamp: '2026-01-01T00:00:00Z' },
+      { type: 'error', content: 'g' },
+      { type: 'error', content: 'h' },
+    ] as ClaudeMessage[];
+
+    const snapshot = reconcileMessageKeys(messages, undefined, 'session-a');
+
+    expect(new Set(snapshot.keys).size).toBe(messages.length);
+  });
+
+  it('keeps existing keys when a duplicate is prepended', () => {
+    const existing = { type: 'user', content: 'existing', raw: { uuid: 'duplicate' } } as ClaudeMessage;
+    const first = reconcileMessageKeys([existing], undefined, 'session-a');
+    const prepended = { type: 'user', content: 'new', raw: { uuid: 'duplicate' } } as ClaudeMessage;
+
+    const next = reconcileMessageKeys([prepended, existing], first, 'session-a');
+
+    expect(next.keys[1]).toBe(first.keys[0]);
+    expect(next.keys[0]).not.toBe(next.keys[1]);
+  });
+
+  it('does not let a prepended timestamp match steal a later UUID key', () => {
+    const oldA = {
+      type: 'user', content: 'A', timestamp: 'shared-time', raw: { uuid: 'uuid-a' },
+    } as ClaudeMessage;
+    const oldB = {
+      type: 'user', content: 'B', timestamp: 'shared-time', raw: { uuid: 'uuid-b' },
+    } as ClaudeMessage;
+    const first = reconcileMessageKeys([oldA, oldB], undefined, 'session-a');
+    const newC = {
+      type: 'user', content: 'C', timestamp: 'shared-time', raw: { uuid: 'uuid-c' },
+    } as ClaudeMessage;
+    const replayA = { ...oldA, raw: { uuid: 'uuid-a' } } as ClaudeMessage;
+    const replayB = { ...oldB, raw: { uuid: 'uuid-b' } } as ClaudeMessage;
+
+    const next = reconcileMessageKeys([newC, replayA, replayB], first, 'session-a');
+
+    expect(next.keys[1]).toBe(first.keys[0]);
+    expect(next.keys[2]).toBe(first.keys[1]);
+    expect(next.keys[0]).not.toBe(first.keys[0]);
+  });
+
+  it('retains one key through turn ID and UUID identity enrichment', () => {
+    const turnOnly = { type: 'assistant', content: '', __turnId: 42 } as ClaudeMessage;
+    const first = reconcileMessageKeys([turnOnly], undefined, 'session-a');
+    const enriched = {
+      ...turnOnly,
+      raw: { uuid: 'assistant-uuid' },
+    } as ClaudeMessage;
+    const second = reconcileMessageKeys([enriched], first, 'session-a');
+    const uuidOnly = { ...enriched, __turnId: undefined } as ClaudeMessage;
+    const third = reconcileMessageKeys([uuidOnly], second, 'session-a');
+
+    expect(second.keys[0]).toBe(first.keys[0]);
+    expect(third.keys[0]).toBe(first.keys[0]);
+  });
+
+  it('keeps duplicate references unique and stable by occurrence', () => {
+    const message = { type: 'assistant', content: 'duplicate reference' } as ClaudeMessage;
+    const first = reconcileMessageKeys([message, message], undefined, 'session-a');
+    const second = reconcileMessageKeys([message, message], first, 'session-a');
+
+    expect(new Set(first.keys).size).toBe(2);
+    expect(second.keys).toEqual(first.keys);
+  });
+
+  it('changes the key namespace when the session scope changes', () => {
+    const message = { type: 'user', content: 'same', raw: { uuid: 'message-1' } } as ClaudeMessage;
+    const first = reconcileMessageKeys([message], undefined, 'session-a');
+    const second = reconcileMessageKeys([message], first, 'session-b');
+
+    expect(second.keys[0]).not.toBe(first.keys[0]);
   });
 });
 
@@ -1054,3 +1140,202 @@ describe('buildCompactNotification', () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// formatCommandForResubmit — real CLI tag order (command-name → command-message
+// → command-args). A combined regex used to require args to IMMEDIATELY follow
+// the name, silently dropping them from copy/export.
+// ---------------------------------------------------------------------------
+
+describe('formatCommandForResubmit — name → message → args tag order', () => {
+  it('extracts args when <command-message> sits between name and args', () => {
+    const text = '<command-name>/effort</command-name>\n<command-message>effort</command-message>\n<command-args>ultracode</command-args>';
+    expect(formatCommandForResubmit(text)).toBe('/effort ultracode');
+  });
+
+  it('extracts multi-word args in the real order', () => {
+    const text = '<command-name>/plugin</command-name>\n<command-message>plugin</command-message>\n<command-args>marketplace list</command-args>';
+    expect(formatCommandForResubmit(text)).toBe('/plugin marketplace list');
+  });
+
+  it('extracts multiline args bodies (e.g. /compact instructions)', () => {
+    const text = '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>keep the source paths\nand the test counts</command-args>';
+    expect(formatCommandForResubmit(text)).toBe('/compact keep the source paths\nand the test counts');
+  });
+
+  it('still supports the message-first order', () => {
+    const text = '<command-message>effort</command-message>\n<command-name>/effort</command-name>\n<command-args>ultracode</command-args>';
+    expect(formatCommandForResubmit(text)).toBe('/effort ultracode');
+  });
+});
+
+describe('formatCommandForDisplay — tag order tolerance', () => {
+  it('renders args when command-name precedes command-message (real CLI order)', () => {
+    const text = '<command-name>/effort</command-name>\n<command-message>effort</command-message>\n<command-args>ultracode</command-args>';
+    expect(formatCommandForDisplay(text)).toBe('/effort ultracode');
+  });
+
+  it('renders skill format regardless of tag position', () => {
+    const text = '<skill-format>true</skill-format>\n<command-message>opsx:ff</command-message>';
+    expect(formatCommandForDisplay(text)).toBe('Skill(opsx:ff)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatTaskNotificationForDisplay — <event> payload (monitor notifications)
+// ---------------------------------------------------------------------------
+
+describe('formatTaskNotificationForDisplay — <event> payload', () => {
+  it('returns the event body as detail for status-less monitor events', () => {
+    const text = '<task-notification>\n<task-id>bkvs4037z</task-id>\n<summary>Monitor event: "verify gate exit + result"</summary>\n<event>2026-07-13 14:14:23.887 [main] ERROR c.k.p.s.StatusClient - Failed to check branch status 123456\nEXIT=</event>\n</task-notification>';
+    const result = formatTaskNotificationForDisplay(text);
+    expect(result?.summary).toBe('Monitor event: "verify gate exit + result"');
+    expect(result?.status).toBe('completed');
+    expect(result?.detail).toBe('2026-07-13 14:14:23.887 [main] ERROR c.k.p.s.StatusClient - Failed to check branch status 123456\nEXIT=');
+  });
+
+  it('returns detail together with an explicit status', () => {
+    const text = '<task-notification><status>failed</status><summary>Build watch</summary><event>[ERROR] compilation failed</event></task-notification>';
+    const result = formatTaskNotificationForDisplay(text);
+    expect(result?.status).toBe('failed');
+    expect(result?.detail).toBe('[ERROR] compilation failed');
+  });
+
+  it('omits detail when there is no event tag', () => {
+    const text = '<task-notification><status>completed</status><summary>Review finished</summary></task-notification>';
+    const result = formatTaskNotificationForDisplay(text);
+    expect(result?.detail).toBeUndefined();
+  });
+
+  it('propagates detail into the task_notification content block', () => {
+    const text = '<task-notification><summary>Monitor event</summary><event>[INFO] BUILD SUCCESS</event></task-notification>';
+    const block = createTaskNotificationBlock(text);
+    expect(block).toMatchObject({ type: 'task_notification', summary: 'Monitor event', detail: '[INFO] BUILD SUCCESS' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attachCompactBoundaryMetadata — pairing the compact_boundary system line with
+// the compact-summary user line (real two-line transcript shape)
+// ---------------------------------------------------------------------------
+
+describe('attachCompactBoundaryMetadata', () => {
+  // Mirrors the real JSONL pair: a type:'system', subtype:'compact_boundary'
+  // line carrying compactMetadata, immediately followed by the summary line.
+  const boundaryMessage = (): ClaudeMessage => ({
+    type: 'system',
+    content: 'Conversation compacted',
+    raw: {
+      type: 'system',
+      subtype: 'compact_boundary',
+      content: 'Conversation compacted',
+      isMeta: false,
+      compactMetadata: {
+        trigger: 'manual',
+        preTokens: 524835,
+        durationMs: 109542,
+        postTokens: 14582,
+        preCompactDiscoveredTools: ['TaskCreate', 'TaskUpdate'],
+      },
+    } as ClaudeMessage['raw'],
+  });
+
+  const summaryMessage = (): ClaudeMessage => ({
+    type: 'user',
+    content: '',
+    raw: {
+      type: 'user',
+      isCompactSummary: true,
+      message: { role: 'user', content: 'This session is being continued from a previous conversation…' },
+    } as ClaudeMessage['raw'],
+  });
+
+  it('attaches compactMetadata to the following compact-summary message and drops the boundary line', () => {
+    const other = makeMsg('user', 'hello');
+    const result = attachCompactBoundaryMetadata([other, boundaryMessage(), summaryMessage()]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe(other);
+    const raw = result[1].raw as Record<string, unknown>;
+    expect(raw.isCompactSummary).toBe(true);
+    expect(raw.compactMetadata).toMatchObject({
+      trigger: 'manual',
+      preTokens: 524835,
+      postTokens: 14582,
+      durationMs: 109542,
+    });
+  });
+
+  it('returns the same array reference when no boundary line is present', () => {
+    const messages = [makeMsg('user', 'hello'), makeMsg('assistant', 'hi')];
+    expect(attachCompactBoundaryMetadata(messages)).toBe(messages);
+  });
+
+  it('does not overwrite metadata the summary already carries', () => {
+    const summary = summaryMessage();
+    (summary.raw as Record<string, unknown>).compactMetadata = { trigger: 'auto', preTokens: 1 };
+    const result = attachCompactBoundaryMetadata([boundaryMessage(), summary]);
+
+    expect(result).toHaveLength(1);
+    expect((result[0].raw as Record<string, unknown>).compactMetadata).toMatchObject({ trigger: 'auto', preTokens: 1 });
+  });
+
+  it('pairs across intermediate messages between boundary and summary', () => {
+    const between = makeMsg('assistant', 'unrelated');
+    const result = attachCompactBoundaryMetadata([boundaryMessage(), between, summaryMessage()]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe(between);
+    expect((result[1].raw as Record<string, unknown>).compactMetadata).toMatchObject({ trigger: 'manual' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getContentBlocks — compact summary metadata subtitle wiring
+// ---------------------------------------------------------------------------
+
+describe('getContentBlocks — compact summary compactMetadata', () => {
+  const normalizeBlocksFn = () => null;
+  const localizeMessage = (text: string) => text;
+
+  it('exposes compactMetadata as the compact_summary block metadata', () => {
+    const message: ClaudeMessage = {
+      type: 'notification',
+      content: '',
+      raw: {
+        type: 'user',
+        isCompactSummary: true,
+        compactMetadata: { trigger: 'manual', preTokens: 524835, postTokens: 14582, durationMs: 109542 },
+        message: { role: 'user', content: 'This session is being continued…' },
+      } as ClaudeMessage['raw'],
+    };
+
+    const blocks = getContentBlocks(message, normalizeBlocksFn, localizeMessage);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      type: 'compact_summary',
+      content: 'This session is being continued…',
+      metadata: { trigger: 'manual', preTokens: 524835, postTokens: 14582, durationMs: 109542 },
+    });
+  });
+
+  it('still honors the legacy summarizeMetadata shape', () => {
+    const message: ClaudeMessage = {
+      type: 'notification',
+      content: '',
+      raw: {
+        type: 'user',
+        isCompactSummary: true,
+        summarizeMetadata: { messagesSummarized: 12, direction: 'up_to' },
+        message: { role: 'user', content: 'summary' },
+      } as ClaudeMessage['raw'],
+    };
+
+    const blocks = getContentBlocks(message, normalizeBlocksFn, localizeMessage);
+    expect(blocks[0]).toMatchObject({
+      type: 'compact_summary',
+      title: 'chat.compactSummary.summarizedConversation',
+      metadata: { messagesSummarized: 12 },
+    });
+  });
+});

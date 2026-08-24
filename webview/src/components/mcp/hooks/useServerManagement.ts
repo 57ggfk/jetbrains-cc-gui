@@ -114,17 +114,26 @@ export function useServerManagement({
 
     sendToJava(`toggle_${messagePrefix}mcp_server`, updatedServer);
 
-    // Show toast notification
-    onToast(
-      enabled
-        ? `${t('mcp.enabled')} ${server.name || server.id}`
-        : `${t('mcp.disabled')} ${server.name || server.id}`,
-      'success'
-    );
+    // A toggle invalidates the previous tool result. This forces a fresh
+    // tools/list request after the server becomes connected again.
+    clearToolsCache(server.id, cacheKeys);
+    setServerTools(prev => {
+      const next = { ...prev };
+      delete next[server.id];
+      return next;
+    });
 
-    loadServers();
-    loadServerStatus();
-  }, [isCodexMode, messagePrefix, onToast, t, loadServers, loadServerStatus]);
+    if (!isCodexMode) {
+      onToast(
+        enabled
+          ? `${t('mcp.enabled')} ${server.name || server.id}`
+          : `${t('mcp.disabled')} ${server.name || server.id}`,
+        'success'
+      );
+      loadServers();
+      loadServerStatus();
+    }
+  }, [isCodexMode, messagePrefix, cacheKeys, setServerTools, onToast, t, loadServers, loadServerStatus]);
 
   return {
     serverRefreshStates,

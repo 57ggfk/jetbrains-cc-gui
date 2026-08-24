@@ -22,6 +22,7 @@ import java.util.concurrent.CompletableFuture;
 public class CodexMcpServerHandler extends BaseMessageHandler {
 
     private static final Logger LOG = Logger.getInstance(CodexMcpServerHandler.class);
+    static final String CODEX_MCP_TOOLS_CALLBACK = "window.updateCodexMcpServerTools";
 
     private static final String[] SUPPORTED_TYPES = {
         "get_codex_mcp_servers",
@@ -85,7 +86,7 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
     private void handleGetMcpServers() {
         CompletableFuture.runAsync(() -> {
             try {
-                if (!isCodexLocalConfigAuthorized()) {
+                if (!isCodexConfigManagementAllowed()) {
                     ApplicationManager.getApplication().invokeLater(() -> {
                         callJavaScript("window.updateCodexMcpServers", escapeJs("[]"));
                     });
@@ -122,7 +123,7 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
     private void handleGetMcpServerStatus() {
         CompletableFuture.runAsync(() -> {
             try {
-                if (!isCodexLocalConfigAuthorized()) {
+                if (!isCodexConfigManagementAllowed()) {
                     ApplicationManager.getApplication().invokeLater(() -> {
                         callJavaScript("window.updateCodexMcpServerStatus", escapeJs("[]"));
                     });
@@ -162,7 +163,7 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
      */
     private void handleGetMcpServerTools(String content) {
         try {
-            if (!isCodexLocalConfigAuthorized()) {
+            if (!isCodexConfigManagementAllowed()) {
                 Gson gson = new Gson();
                 sendToolsError("", com.github.claudecodegui.i18n.ClaudeCodeGuiBundle.message("error.codexLocalAccessNotAuthorized"), gson);
                 return;
@@ -190,14 +191,17 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
                 return;
             }
 
-            JsonObject serverConfig = targetServer.getAsJsonObject("server");
+            String sessionCwd = context.getSession() != null ? context.getSession().getCwd() : null;
+            String projectBasePath = context.getProject() != null ? context.getProject().getBasePath() : null;
+            JsonObject serverConfig = prepareServerConfig(
+                    targetServer.getAsJsonObject("server"), sessionCwd, projectBasePath);
             LOG.info("[CodexMcpServerHandler] Getting tools for Codex MCP server: " + serverId);
 
             context.getCodexSDKBridge().getMcpServerTools(serverId, serverConfig)
                 .thenAccept(result -> {
                     String resultJson = gson.toJson(result);
                     ApplicationManager.getApplication().invokeLater(() ->
-                        callJavaScript("window.updateMcpServerTools", escapeJs(resultJson))
+                        callJavaScript(CODEX_MCP_TOOLS_CALLBACK, escapeJs(resultJson))
                     );
                 })
                 .exceptionally(e -> {
@@ -219,17 +223,41 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
         errorResult.add("tools", new com.google.gson.JsonArray());
         String json = gson.toJson(errorResult);
         ApplicationManager.getApplication().invokeLater(() ->
-            callJavaScript("window.updateMcpServerTools", escapeJs(json))
+            callJavaScript(CODEX_MCP_TOOLS_CALLBACK, escapeJs(json))
         );
     }
 
-    private boolean isCodexLocalConfigAuthorized() {
+    static JsonObject prepareServerConfig(
+            JsonObject originalConfig, String sessionCwd, String projectBasePath) {
+        JsonObject serverConfig = originalConfig.deepCopy();
+        if (!serverConfig.has("cwd")) {
+            String cwd = sessionCwd != null && !sessionCwd.trim().isEmpty()
+                    ? sessionCwd
+                    : projectBasePath;
+            if (cwd != null && !cwd.trim().isEmpty()) {
+                serverConfig.addProperty("cwd", cwd);
+            }
+        }
+        return serverConfig;
+    }
+
+    private boolean isCodexConfigManagementAllowed() {
         try {
-            return context.getSettingsService().isCodexLocalConfigAuthorized();
+            return context.getSettingsService().isCodexConfigManagementAllowed();
         } catch (Exception e) {
-            LOG.warn("[CodexMcpServerHandler] Failed to read Codex local authorization state: " + e.getMessage());
+            LOG.warn("[CodexMcpServerHandler] Failed to read Codex config management state: " + e.getMessage());
             return false;
         }
+    }
+
+    private boolean requireCodexConfigManagement() {
+        if (isCodexConfigManagementAllowed()) {
+            return true;
+        }
+        ApplicationManager.getApplication().invokeLater(() ->
+                callJavaScript("window.showError", escapeJs(
+                        com.github.claudecodegui.i18n.ClaudeCodeGuiBundle.message("error.codexLocalAccessNotAuthorized"))));
+        return false;
     }
 
     /**
@@ -237,6 +265,9 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
      */
     private void handleAddMcpServer(String content) {
         try {
+            if (!requireCodexConfigManagement()) {
+                return;
+            }
             Gson gson = new Gson();
             JsonObject server = gson.fromJson(content, JsonObject.class);
 
@@ -247,7 +278,6 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
 
             ApplicationManager.getApplication().invokeLater(() -> {
                 callJavaScript("window.codexMcpServerAdded", escapeJs(content));
-                handleGetMcpServers();
             });
         } catch (Exception e) {
             LOG.error("[CodexMcpServerHandler] Failed to add Codex MCP server: " + e.getMessage(), e);
@@ -263,17 +293,26 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
      */
     private void handleUpdateMcpServer(String content) {
         try {
+            if (!requireCodexConfigManagement()) {
+                return;
+            }
             Gson gson = new Gson();
             JsonObject server = gson.fromJson(content, JsonObject.class);
 
-            codexMcpServerManager.upsertMcpServer(server);
+            String oldServerId = server.has("oldId") && server.get("oldId").isJsonPrimitive()
+                    ? server.get("oldId").getAsString()
+                    : null;
+            if (oldServerId != null && !oldServerId.equals(server.get("id").getAsString())) {
+                codexMcpServerManager.renameMcpServer(oldServerId, server);
+            } else {
+                codexMcpServerManager.upsertMcpServer(server);
+            }
 
             String serverId = server.has("id") ? server.get("id").getAsString() : "unknown";
             LOG.info("[CodexMcpServerHandler] Updated Codex MCP server: " + serverId);
 
             ApplicationManager.getApplication().invokeLater(() -> {
                 callJavaScript("window.codexMcpServerUpdated", escapeJs(content));
-                handleGetMcpServers();
             });
         } catch (Exception e) {
             LOG.error("[CodexMcpServerHandler] Failed to update Codex MCP server: " + e.getMessage(), e);
@@ -289,6 +328,9 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
      */
     private void handleDeleteMcpServer(String content) {
         try {
+            if (!requireCodexConfigManagement()) {
+                return;
+            }
             Gson gson = new Gson();
             JsonObject json = gson.fromJson(content, JsonObject.class);
             String serverId = json.get("id").getAsString();
@@ -299,7 +341,6 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
                 LOG.info("[CodexMcpServerHandler] Deleted Codex MCP server: " + serverId);
                 ApplicationManager.getApplication().invokeLater(() -> {
                     callJavaScript("window.codexMcpServerDeleted", escapeJs(serverId));
-                    handleGetMcpServers();
                 });
             } else {
                 LOG.warn("[CodexMcpServerHandler] Codex MCP server not found: " + serverId);
@@ -322,6 +363,9 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
      */
     private void handleToggleMcpServer(String content) {
         try {
+            if (!requireCodexConfigManagement()) {
+                return;
+            }
             Gson gson = new Gson();
             JsonObject server = gson.fromJson(content, JsonObject.class);
 
@@ -335,7 +379,6 @@ public class CodexMcpServerHandler extends BaseMessageHandler {
 
             ApplicationManager.getApplication().invokeLater(() -> {
                 callJavaScript("window.codexMcpServerToggled", escapeJs(content));
-                handleGetMcpServers();
             });
         } catch (Exception e) {
             LOG.error("[CodexMcpServerHandler] Failed to toggle Codex MCP server: " + e.getMessage(), e);

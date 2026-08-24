@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
@@ -23,8 +24,11 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 /**
@@ -42,12 +46,15 @@ public class CodexSkillService {
     private static final Logger LOG = Logger.getInstance(CodexSkillService.class);
     private static final Gson gson = new Gson();
     private static final int MAX_SCAN_LEVELS = 3;
+    private static final int MAX_SKILL_SCAN_DEPTH = 8;
+    private static final int MAX_SKILL_SCAN_NODES = 10_000;
+    private static final int MAX_DISCOVERED_SKILLS = 1_000;
+    private static final Set<String> SKIPPED_SKILL_SCAN_DIRECTORIES = Set.of(
+            "node_modules", "build", "target", "dist", "out", "coverage"
+    );
 
     // Shared instance to avoid repeated instantiation (I1)
     private static final CodexSettingsManager codexSettingsManager = new CodexSettingsManager(gson);
-
-    // Lock for config.toml read-modify-write operations to prevent data loss (B2)
-    private static final Object CONFIG_TOML_LOCK = new Object();
 
     /**
      * Represents a directory to scan for skills, with its scope.
@@ -86,6 +93,32 @@ public class CodexSkillService {
     private static String normalizePath(String path) {
         if (path == null || path.isEmpty()) { return path; }
         return Paths.get(path).toAbsolutePath().normalize().toString();
+    }
+
+    static boolean isToggleSkillPathAllowed(String skillPath, String cwd) {
+        if (skillPath == null || skillPath.isEmpty()) {
+            return false;
+        }
+        try {
+            Path candidate = Paths.get(skillPath).toAbsolutePath().normalize();
+            Path fileName = candidate.getFileName();
+            boolean hasValidFileName = fileName != null
+                    && ("SKILL.md".equals(fileName.toString()) || "skill.md".equals(fileName.toString()));
+            if (!hasValidFileName || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) {
+                return false;
+            }
+
+            Path realCandidate = candidate.toRealPath();
+            for (SkillScanDir scanDir : getSkillScanDirs(cwd)) {
+                Path scanRoot = Paths.get(scanDir.path());
+                if (Files.isDirectory(scanRoot) && realCandidate.startsWith(scanRoot.toRealPath())) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("[CodexSkills] Failed to validate toggle path: " + e.getMessage());
+        }
+        return false;
     }
 
     /**
@@ -159,7 +192,7 @@ public class CodexSkillService {
         }
 
         // ~/.codex/skills/ (Codex CLI installed skills)
-        if (isCodexLocalConfigAuthorized()) {
+        if (isCodexConfigManagementAllowed()) {
             String codexDir = Paths.get(userHome, ".codex", "skills").toString();
             if (Files.isDirectory(Path.of(codexDir)) && seen.add(normalizePath(codexDir))) {
                 dirs.add(new SkillScanDir(codexDir, "user"));
@@ -179,22 +212,69 @@ public class CodexSkillService {
      * Scans a directory for skill subdirectories and returns skill metadata as JsonObject.
      */
     public static JsonObject scanSkillsDirectory(String dirPath, String scope) {
+        return scanSkillsDirectory(dirPath, scope, MAX_SKILL_SCAN_NODES);
+    }
+
+    static JsonObject scanSkillsDirectory(String dirPath, String scope, int maxScanNodes) {
         JsonObject skills = new JsonObject();
-        File dir = new File(dirPath);
+        Path rootDir = Paths.get(dirPath).toAbsolutePath().normalize();
+        File dir = rootDir.toFile();
 
         if (!dir.exists() || !dir.isDirectory()) {
             return skills;
         }
 
-        File[] entries = dir.listFiles();
-        if (entries == null) {
+        List<File> entries = new ArrayList<>();
+        AtomicInteger visitedNodes = new AtomicInteger();
+        AtomicBoolean limitReached = new AtomicBoolean(false);
+        try {
+            Files.walkFileTree(rootDir, EnumSet.noneOf(FileVisitOption.class), MAX_SKILL_SCAN_DEPTH,
+                    new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path currentDir, BasicFileAttributes attrs) {
+                    if (!currentDir.equals(rootDir) && (containsHiddenPathSegment(rootDir, currentDir)
+                            || isSkippedSkillScanDirectory(currentDir))) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    if (visitedNodes.incrementAndGet() > maxScanNodes) {
+                        limitReached.set(true);
+                        return FileVisitResult.TERMINATE;
+                    }
+                    if (!currentDir.equals(rootDir) && locateSkillDefinition(currentDir) != null) {
+                        if (entries.size() >= MAX_DISCOVERED_SKILLS) {
+                            limitReached.set(true);
+                            return FileVisitResult.TERMINATE;
+                        }
+                        entries.add(currentDir.toFile());
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (visitedNodes.incrementAndGet() > maxScanNodes) {
+                        limitReached.set(true);
+                        return FileVisitResult.TERMINATE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException e) {
+                    LOG.warn("[CodexSkills] Skipping unreadable path: " + file, e);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            LOG.warn("[CodexSkills] Failed to scan skills directory: " + dirPath, e);
             return skills;
         }
+        if (limitReached.get()) {
+            LOG.warn("[CodexSkills] Skill scan limit reached: " + dirPath);
+        }
 
-        for (File entry : entries) {
-            if (!entry.isDirectory() || entry.getName().startsWith(".")) {
-                continue;
-            }
+        for (File entry : entries.stream().distinct().sorted().toList()) {
             // Use normalized path in id to prevent collisions when same-named skills
             // exist in different scan directories (child vs parent)
             String normalizedEntryPath = normalizePath(entry.getAbsolutePath());
@@ -219,11 +299,8 @@ public class CodexSkillService {
             }
 
             // Store skillPath (SKILL.md path) for config.toml operations
-            Path skillMd = entry.toPath().resolve("SKILL.md");
-            if (!Files.exists(skillMd)) {
-                skillMd = entry.toPath().resolve("skill.md");
-            }
-            if (Files.exists(skillMd)) {
+            Path skillMd = locateSkillDefinition(entry.toPath());
+            if (skillMd != null) {
                 skill.addProperty("skillPath", skillMd.toString());
             }
 
@@ -243,6 +320,36 @@ public class CodexSkillService {
         return skills;
     }
 
+    private static boolean isSkippedSkillScanDirectory(Path directory) {
+        Path fileName = directory.getFileName();
+        return fileName != null && SKIPPED_SKILL_SCAN_DIRECTORIES.contains(
+                fileName.toString().toLowerCase(Locale.ROOT)
+        );
+    }
+
+    private static Path locateSkillDefinition(Path skillDir) {
+        Path upper = skillDir.resolve("SKILL.md");
+        if (Files.isRegularFile(upper, LinkOption.NOFOLLOW_LINKS)) {
+            return upper;
+        }
+        Path lower = skillDir.resolve("skill.md");
+        return Files.isRegularFile(lower, LinkOption.NOFOLLOW_LINKS) ? lower : null;
+    }
+
+    private static boolean containsHiddenPathSegment(Path rootDir, Path skillDir) {
+        Path normalizedSkillDir = skillDir.toAbsolutePath().normalize();
+        if (!normalizedSkillDir.startsWith(rootDir)) {
+            return true;
+        }
+        Path relative = rootDir.relativize(normalizedSkillDir);
+        for (Path segment : relative) {
+            if (segment.toString().startsWith(".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ==================== Config.toml Integration ====================
 
     /**
@@ -253,14 +360,11 @@ public class CodexSkillService {
     @SuppressWarnings("unchecked")
     public static Set<String> getDisabledSkillPaths() {
         Set<String> disabled = new HashSet<>();
-        if (!isCodexLocalConfigAuthorized()) {
+        if (!isCodexConfigManagementAllowed()) {
             return disabled;
         }
         try {
-            Map<String, Object> config;
-            synchronized (CONFIG_TOML_LOCK) {
-                config = codexSettingsManager.readConfigToml();
-            }
+            Map<String, Object> config = codexSettingsManager.readConfigToml();
             if (config == null) {
                 return disabled;
             }
@@ -356,7 +460,7 @@ public class CodexSkillService {
     public static JsonObject toggleSkill(String skillPath, boolean currentEnabled, String cwd) {
         JsonObject result = new JsonObject();
 
-        if (!isCodexLocalConfigAuthorized()) {
+        if (!isCodexConfigManagementAllowed()) {
             result.addProperty("success", false);
             result.addProperty("error", com.github.claudecodegui.i18n.ClaudeCodeGuiBundle.message("error.codexLocalAccessNotAuthorized"));
             return result;
@@ -368,12 +472,9 @@ public class CodexSkillService {
             return result;
         }
 
-        // Validate skillPath: must point to an existing SKILL.md or skill.md file
-        Path skillFilePath = Paths.get(skillPath).toAbsolutePath().normalize();
-        String skillFileName = skillFilePath.getFileName().toString();
-        if (!"SKILL.md".equals(skillFileName) && !"skill.md".equals(skillFileName)) {
+        if (!isToggleSkillPathAllowed(skillPath, cwd)) {
             result.addProperty("success", false);
-            result.addProperty("error", "Skill path must point to a SKILL.md file");
+            result.addProperty("error", "Skill path must point to an existing SKILL.md inside a configured skills directory");
             return result;
         }
 
@@ -381,12 +482,7 @@ public class CodexSkillService {
         String normalizedSkillPath = normalizePath(skillPath);
 
         try {
-            synchronized (CONFIG_TOML_LOCK) {
-                Map<String, Object> config = codexSettingsManager.readConfigToml();
-                if (config == null) {
-                    config = new LinkedHashMap<>();
-                }
-
+            codexSettingsManager.updateConfigToml(CodexSkillService::isCodexConfigManagementAllowed, config -> {
                 // Navigate to skills -> config list
                 Map<String, Object> skillsMap = (Map<String, Object>) config
                         .computeIfAbsent("skills", k -> new LinkedHashMap<String, Object>());
@@ -412,9 +508,8 @@ public class CodexSkillService {
                     });
                     result.addProperty("enabled", true);
                 }
-
-                codexSettingsManager.writeConfigToml(config);
-            }
+                return true;
+            });
             result.addProperty("success", true);
             LOG.info("[CodexSkills] Toggled skill: " + normalizedSkillPath + " -> enabled=" + !currentEnabled);
         } catch (Exception e) {
@@ -625,18 +720,25 @@ public class CodexSkillService {
             return result;
         }
 
+        Path codexSkillsDir = Paths.get(userHome, ".codex", "skills").toAbsolutePath().normalize();
+        boolean isCodexManagedSkill = isPathSafe(normalizedSkillDir, codexSkillsDir);
+
         try {
-            // B1: Handle symlinks safely - delete only the link, not the target
-            if (Files.isSymbolicLink(skillDir.toPath())) {
-                Files.delete(skillDir.toPath());
-                LOG.info("[CodexSkills] Deleted symbolic link skill: " + skillDir);
+            if (isCodexManagedSkill) {
+                codexSettingsManager.runWithConfigAccess(
+                        CodexSkillService::isCodexConfigManagementAllowed,
+                        () -> deleteSkillDirectory(skillDir));
             } else {
-                deleteDirectory(skillDir.toPath());
-                LOG.info("[CodexSkills] Deleted skill directory: " + skillDir);
+                deleteSkillDirectory(skillDir);
             }
         } catch (IOException e) {
             result.addProperty("success", false);
-            result.addProperty("error", "Delete failed: " + e.getMessage());
+            if (isCodexManagedSkill && !isCodexConfigManagementAllowed()) {
+                result.addProperty("error", com.github.claudecodegui.i18n.ClaudeCodeGuiBundle.message(
+                        "error.codexLocalAccessNotAuthorized"));
+            } else {
+                result.addProperty("error", "Delete failed: " + e.getMessage());
+            }
             return result;
         }
 
@@ -654,22 +756,19 @@ public class CodexSkillService {
      */
     @SuppressWarnings("unchecked")
     private static void cleanupConfigTomlEntry(String skillPath) {
-        if (!isCodexLocalConfigAuthorized()) {
+        if (!isCodexConfigManagementAllowed()) {
             return;
         }
         try {
             // Normalize for consistent cross-platform comparison
             String normalizedSkillPath = normalizePath(skillPath);
-            synchronized (CONFIG_TOML_LOCK) {
-                Map<String, Object> config = codexSettingsManager.readConfigToml();
-                if (config == null) { return; }
-
+            codexSettingsManager.updateConfigToml(CodexSkillService::isCodexConfigManagementAllowed, config -> {
                 Object skillsObj = config.get("skills");
-                if (!(skillsObj instanceof Map)) { return; }
+                if (!(skillsObj instanceof Map)) { return false; }
 
                 Map<String, Object> skillsMap = (Map<String, Object>) skillsObj;
                 Object configObj = skillsMap.get("config");
-                if (!(configObj instanceof List)) { return; }
+                if (!(configObj instanceof List)) { return false; }
 
                 List<Map<String, Object>> configList = (List<Map<String, Object>>) configObj;
                 boolean removed = configList.removeIf(e -> {
@@ -677,10 +776,10 @@ public class CodexSkillService {
                     return pathVal instanceof String && normalizedSkillPath.equals(normalizePath((String) pathVal));
                 });
                 if (removed) {
-                    codexSettingsManager.writeConfigToml(config);
                     LOG.info("[CodexSkills] Cleaned up config.toml entry for: " + skillPath);
                 }
-            }
+                return removed;
+            });
         } catch (Exception e) {
             LOG.warn("[CodexSkills] Failed to cleanup config.toml: " + e.getMessage());
         }
@@ -729,12 +828,23 @@ public class CodexSkillService {
         });
     }
 
-    private static boolean isCodexLocalConfigAuthorized() {
+    private static boolean isCodexConfigManagementAllowed() {
         try {
-            return new CodemossSettingsService().isCodexLocalConfigAuthorized();
+            return new CodemossSettingsService().isCodexConfigManagementAllowed();
         } catch (Exception e) {
-            LOG.warn("[CodexSkills] Failed to read Codex local authorization state: " + e.getMessage());
+            LOG.warn("[CodexSkills] Failed to read Codex config management state: " + e.getMessage());
             return false;
+        }
+    }
+
+    private static void deleteSkillDirectory(File skillDir) throws IOException {
+        // Delete a directory symlink itself, never the target it references.
+        if (Files.isSymbolicLink(skillDir.toPath())) {
+            Files.delete(skillDir.toPath());
+            LOG.info("[CodexSkills] Deleted symbolic link skill: " + skillDir);
+        } else {
+            deleteDirectory(skillDir.toPath());
+            LOG.info("[CodexSkills] Deleted skill directory: " + skillDir);
         }
     }
 

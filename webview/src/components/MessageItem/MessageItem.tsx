@@ -8,7 +8,6 @@ import { ErrorDiagnosticCard } from './ErrorDiagnosticCard';
 import { matchErrorPattern } from '../../utils/errorMatcher';
 import {
   EditToolBlock,
-  EditToolGroupBlock,
   ReadToolBlock,
   ReadToolGroupBlock,
   BashToolBlock,
@@ -19,7 +18,8 @@ import {
 import { ContentBlockRenderer } from './ContentBlockRenderer';
 import { formatTime } from '../../utils/helpers';
 import { copyToClipboard } from '../../utils/copyUtils';
-import { READ_TOOL_NAMES, EDIT_TOOL_NAMES, BASH_TOOL_NAMES, SEARCH_TOOL_NAMES, AGENT_TOOL_NAMES, isToolName } from '../../utils/toolConstants';
+import { quoteToChatInput } from '../../utils/quoteUtils';
+import { READ_TOOL_NAMES, EDIT_TOOL_NAMES, BASH_TOOL_NAMES, SEARCH_TOOL_NAMES, AGENT_TOOL_NAMES, isToolName, isNonRenderedToolUse } from '../../utils/toolConstants';
 
 export interface MessageItemProps {
   message: ClaudeMessage;
@@ -39,11 +39,21 @@ export interface MessageItemProps {
   toolResultSignature?: string;
   /** Current active provider id (e.g. 'claude', 'codex'); drives the streaming-connect label. */
   currentProvider?: string;
+  /** Show opt-in detailed footer extras such as turn cost and cache-hit ratio. */
+  detailedOutputEnabled?: boolean;
 }
 
 /** Map provider id to a human-readable label used in UI text. */
 function getProviderDisplayName(providerId?: string): string {
   if (providerId === 'codex') return 'Codex';
+  if (providerId === 'grok') return 'Grok';
+  if (providerId === 'gemini') return 'Gemini';
+  if (providerId === 'opencode') return 'OpenCode';
+  if (providerId === 'kimi') return 'Kimi';
+  if (providerId === 'pi') return 'Pi';
+  if (providerId === 'omp') return 'OMP';
+  if (providerId === 'dsh') return 'DSH';
+  if (providerId) return providerId.charAt(0).toUpperCase() + providerId.slice(1);
   return 'Claude';
 }
 
@@ -94,6 +104,45 @@ const CopyButton = memo(function CopyButton({
   );
 });
 
+/** Quote icon (chat bubble with a right-arrow) used by the message quote button */
+const QuoteIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6l-3 3v-3H3a1 1 0 0 1-1-1z" fill="currentColor" fillOpacity="0.6"/>
+    <path d="M7.5 4.5l2.5 2.5-2.5 2.5M5 7h5" stroke="var(--bg-secondary)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+interface QuoteButtonProps {
+  className?: string;
+  isQuoted: boolean;
+  onClick: () => void;
+  quoteLabel: string;
+  quoteSuccessText: string;
+}
+
+const QuoteButton = memo(function QuoteButton({
+  className,
+  isQuoted,
+  onClick,
+  quoteLabel,
+  quoteSuccessText,
+}: QuoteButtonProps) {
+  return (
+    <button
+      type="button"
+      className={`message-copy-btn message-quote-btn${className ? ` ${className}` : ''} ${isQuoted ? 'copied' : ''}`}
+      onClick={onClick}
+      title={quoteLabel}
+      aria-label={quoteLabel}
+    >
+      <span className="copy-icon">
+        <QuoteIcon />
+      </span>
+      <span className="copy-tooltip">{quoteSuccessText}</span>
+    </button>
+  );
+});
+
 function formatDurationMs(durationMs: number): string {
   const seconds = Math.max(0, Math.floor(durationMs / 1000));
   const hours = Math.floor(seconds / 3600);
@@ -112,6 +161,7 @@ interface TokenUsageInfo {
   nonCacheInputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+  costUsd?: number;
 }
 
 /**
@@ -140,12 +190,15 @@ function extractTokenUsage(raw: ClaudeMessage['raw']): TokenUsageInfo | null {
   const output = num(usage.output_tokens);
   const input = nonCacheInput + cacheCreation + cacheRead;
   if (input === 0 && output === 0) return null;
+  const rawCost = (raw as Record<string, unknown>).turnCostUsd;
+  const costUsd = typeof rawCost === 'number' && Number.isFinite(rawCost) && rawCost > 0 ? rawCost : undefined;
   return {
     inputTokens: input,
     outputTokens: output,
     nonCacheInputTokens: nonCacheInput,
     cacheCreationTokens: cacheCreation,
     cacheReadTokens: cacheRead,
+    ...(costUsd !== undefined ? { costUsd } : {}),
   };
 }
 
@@ -154,6 +207,19 @@ function formatTokenCount(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
   return String(count);
+}
+
+function formatUsdCost(cost: number): string {
+  if (cost > 0 && cost < 0.0001) return '<$0.0001';
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  if (cost < 1) return `$${cost.toFixed(3)}`;
+  return `$${cost.toFixed(2)}`;
+}
+
+function formatCacheHitRatio(tokenInfo: TokenUsageInfo): string | null {
+  if (tokenInfo.cacheReadTokens <= 0 || tokenInfo.inputTokens <= 0) return null;
+  const ratio = Math.round((tokenInfo.cacheReadTokens / tokenInfo.inputTokens) * 100);
+  return `${Math.min(100, Math.max(0, ratio))}%`;
 }
 
 function isToolBlockOfType(block: ClaudeContentBlock, toolNames: Set<string>): boolean {
@@ -335,12 +401,15 @@ export const MessageItem = memo(function MessageItem({
   onNavigateToDependencySettings,
   toolResultSignature: _toolResultSignature,
   currentProvider,
+  detailedOutputEnabled = false,
 }: MessageItemProps): React.ReactElement {
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+  const [quotedMessageIndex, setQuotedMessageIndex] = useState<number | null>(null);
   const [showStreamingConnectHint, setShowStreamingConnectHint] = useState(false);
 
   // Track timeout to properly cleanup on unmount
   const copyTimeoutRef = useRef<number | null>(null);
+  const quoteTimeoutRef = useRef<number | null>(null);
 
   // Manage thinking expansion state locally to avoid prop drilling and unnecessary re-renders
   const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
@@ -401,6 +470,19 @@ export const MessageItem = memo(function MessageItem({
     }
   }, [hasCopyableText, markdownContent, messageIndex, copiedMessageIndex]);
 
+  const handleQuoteMessage = useCallback(() => {
+    if (!hasCopyableText) return;
+    if (!quoteToChatInput(markdownContent)) return;
+    setQuotedMessageIndex(messageIndex);
+    if (quoteTimeoutRef.current !== null) {
+      window.clearTimeout(quoteTimeoutRef.current);
+    }
+    quoteTimeoutRef.current = window.setTimeout(() => {
+      setQuotedMessageIndex(null);
+      quoteTimeoutRef.current = null;
+    }, 1500);
+  }, [hasCopyableText, markdownContent, messageIndex]);
+
   // Cleanup timeout on unmount to prevent memory leaks
   useEffect(() => {
     return () => {
@@ -408,11 +490,28 @@ export const MessageItem = memo(function MessageItem({
         window.clearTimeout(copyTimeoutRef.current);
         copyTimeoutRef.current = null;
       }
+      if (quoteTimeoutRef.current !== null) {
+        window.clearTimeout(quoteTimeoutRef.current);
+        quoteTimeoutRef.current = null;
+      }
     };
   }, []);
 
   // Memoize blocks and grouped blocks to avoid recalculation on every render
   const blocks = useMemo(() => getContentBlocks(message), [message, getContentBlocks]);
+  // Tool calls that render nothing (TodoWrite, TaskCreate, ...) still live in
+  // `blocks`, so their arrival re-rendered the message and - worse - flipped
+  // the streaming thinking block's last-block status, which switched its
+  // MarkdownBlock between the streaming and full-pipeline renderers (they
+  // differ in height on single-newline content) and made the thinking block
+  // visibly collapse then re-expand. Filter them out of the rendered list so
+  // non-rendered tools never disturb the message list. `blocks` is kept whole
+  // for the empty-placeholder check below, since a message carrying only a
+  // non-rendered tool is not an empty streaming placeholder.
+  const renderedBlocks = useMemo(
+    () => blocks.filter((block) => !isNonRenderedToolUse(block, isMessageStreaming)),
+    [blocks, isMessageStreaming],
+  );
   const isEmptyStreamingPlaceholder =
     message.type === 'assistant' &&
     isMessageStreaming &&
@@ -435,7 +534,7 @@ export const MessageItem = memo(function MessageItem({
   useEffect(() => {
     if (!isMessageStreaming) return;
 
-    const thinkingIndices = blocks
+    const thinkingIndices = renderedBlocks
       .map((block, index) => (block.type === 'thinking' ? index : -1))
       .filter((index) => index !== -1);
 
@@ -461,9 +560,9 @@ export const MessageItem = memo(function MessageItem({
       });
       lastAutoExpandedIndexRef.current = lastThinkingIndex;
     }
-  }, [blocks, isMessageStreaming, manuallyExpandedThinking]);
+  }, [renderedBlocks, isMessageStreaming, manuallyExpandedThinking]);
 
-  const groupedBlocks = useMemo(() => groupBlocks(blocks), [blocks]);
+  const groupedBlocks = useMemo(() => groupBlocks(renderedBlocks), [renderedBlocks]);
 
   // Register user message DOM node for anchor navigation
   // Must be called before any early returns to satisfy React hooks rules
@@ -553,24 +652,17 @@ export const MessageItem = memo(function MessageItem({
             name: block.name,
             input: block.input,
             result: findToolResult(block.id, messageIndex),
+            toolId: block.id,
           };
         });
 
-        if (editItems.length === 1) {
-          return (
-            <div key={`${messageIndex}-editgroup-${grouped.startIndex}`} className="content-block">
-              <EditToolBlock
-                name={editItems[0].name}
-                input={editItems[0].input}
-                result={editItems[0].result}
-              />
-            </div>
-          );
-        }
-
+        // Always route through EditToolBlock so the instance stays stable as
+        // edits stream in (1 -> 2 -> ...). It renders the inline-diff view for
+        // a single item and delegates to the grouped list view for multiple,
+        // without unmounting on the transition.
         return (
           <div key={`${messageIndex}-editgroup-${grouped.startIndex}`} className="content-block">
-            <EditToolGroupBlock items={editItems} />
+            <EditToolBlock items={editItems} />
           </div>
         );
       }
@@ -627,7 +719,7 @@ export const MessageItem = memo(function MessageItem({
                 isThinkingExpanded={false}
                 isThinking={isThinking}
                 isLastMessage={isLast}
-                isLastBlock={grouped.startIndex === blocks.length - 1}
+                isLastBlock={grouped.startIndex === renderedBlocks.length - 1}
                 t={t}
                 onToggleThinking={() => {}}
                 findToolResult={findToolResult}
@@ -644,9 +736,8 @@ export const MessageItem = memo(function MessageItem({
       }
 
       if (grouped.type === 'agent_group') {
-        const agentToolId = grouped.agentBlock.type === 'tool_use' ? grouped.agentBlock.id : undefined;
         return (
-          <div key={`agentgroup-${agentToolId ?? grouped.startIndex}`} className="content-block">
+          <div key={`${messageKey}-agentgroup-${grouped.startIndex}`} className="content-block">
             <AgentGroupBlock
               agentBlock={grouped.agentBlock}
               followingBlocks={grouped.followingBlocks}
@@ -672,7 +763,7 @@ export const MessageItem = memo(function MessageItem({
             isThinkingExpanded={isThinkingExpanded(blockIndex)}
             isThinking={isThinking}
             isLastMessage={isLast}
-            isLastBlock={blockIndex === blocks.length - 1}
+            isLastBlock={blockIndex === renderedBlocks.length - 1}
             t={t}
             onToggleThinking={() => toggleThinking(blockIndex)}
             findToolResult={findToolResult}
@@ -699,25 +790,42 @@ export const MessageItem = memo(function MessageItem({
             {formatTime(message.timestamp)}
           </div>
           {hasCopyableText && (
-            <CopyButton
-              className="message-copy-btn-inline"
-              isCopied={copiedMessageIndex === messageIndex}
-              onClick={handleCopyMessage}
-              copyLabel={t('markdown.copyMessage')}
-              copySuccessText={t('markdown.copySuccess')}
-            />
+            <>
+              <QuoteButton
+                className="message-copy-btn-inline"
+                isQuoted={quotedMessageIndex === messageIndex}
+                onClick={handleQuoteMessage}
+                quoteLabel={t('markdown.quoteMessage', 'Quote message')}
+                quoteSuccessText={t('markdown.quoteSuccess', 'Quoted!')}
+              />
+              <CopyButton
+                className="message-copy-btn-inline"
+                isCopied={copiedMessageIndex === messageIndex}
+                onClick={handleCopyMessage}
+                copyLabel={t('markdown.copyMessage')}
+                copySuccessText={t('markdown.copySuccess')}
+              />
+            </>
           )}
         </div>
       )}
 
-      {/* Copy button for assistant messages only */}
+      {/* Copy and quote buttons for assistant messages only */}
       {message.type === 'assistant' && !isMessageStreaming && hasCopyableText && (
-        <CopyButton
-          isCopied={copiedMessageIndex === messageIndex}
-          onClick={handleCopyMessage}
-          copyLabel={t('markdown.copyMessage')}
-          copySuccessText={t('markdown.copySuccess')}
-        />
+        <>
+          <QuoteButton
+            isQuoted={quotedMessageIndex === messageIndex}
+            onClick={handleQuoteMessage}
+            quoteLabel={t('markdown.quoteMessage', 'Quote message')}
+            quoteSuccessText={t('markdown.quoteSuccess', 'Quoted!')}
+          />
+          <CopyButton
+            isCopied={copiedMessageIndex === messageIndex}
+            onClick={handleCopyMessage}
+            copyLabel={t('markdown.copyMessage')}
+            copySuccessText={t('markdown.copySuccess')}
+          />
+        </>
       )}
 
       {/* Role label for non-user/assistant messages — hidden for notification types */}
@@ -742,6 +850,13 @@ export const MessageItem = memo(function MessageItem({
             {(() => {
               const tokenInfo = extractTokenUsage(message.raw);
               if (!tokenInfo) return null;
+              const cacheHitRatio = detailedOutputEnabled ? formatCacheHitRatio(tokenInfo) : null;
+              const cacheHitLabel = cacheHitRatio
+                ? t('chat.cacheHitsWithRatio', {
+                  tokens: formatTokenCount(tokenInfo.cacheReadTokens),
+                  ratio: cacheHitRatio,
+                })
+                : '';
               return (
                 <>
                   <span className="message-duration-separator">·</span>
@@ -755,10 +870,16 @@ export const MessageItem = memo(function MessageItem({
                     })}
                   >
                     {t('chat.tokenUsage', {
-                      input: formatTokenCount(tokenInfo.inputTokens),
+                      input: `${formatTokenCount(tokenInfo.inputTokens)}${cacheHitLabel}`,
                       output: formatTokenCount(tokenInfo.outputTokens),
                     })}
                   </span>
+                  {detailedOutputEnabled && tokenInfo.costUsd !== undefined && (
+                    <>
+                      <span className="message-duration-separator">·</span>
+                      <span className="message-duration-tokens">{formatUsdCost(tokenInfo.costUsd)}</span>
+                    </>
+                  )}
                 </>
               );
             })()}

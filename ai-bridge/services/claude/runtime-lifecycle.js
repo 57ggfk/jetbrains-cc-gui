@@ -1,6 +1,7 @@
 import { AsyncStream } from '../../utils/async-stream.js';
 import { loadClaudeSdk } from '../../utils/sdk-loader.js';
 import { createPreToolUseHook, normalizePermissionMode } from './permission-mode.js';
+import { parseTaskNotificationXml, buildTaskNotificationEvent, extractTaskNotificationXml } from './task-notification-parser.js';
 import {
   beginRuntimeTurn,
   cleanupStaleAnonymousRuntimes as cleanupAnonymousFromRegistry,
@@ -15,6 +16,52 @@ import {
 } from './runtime-registry.js';
 
 let cachedQueryFn = null;
+
+/**
+ * Emit a process-level daemon event that bypasses daemon.js's activeRequestId
+ * interception.
+ *
+ * _originalStdoutWrite is required because daemon.js intercepts process.stdout
+ * .write and wraps output with the active request's id; a plain console.log
+ * here would tag the event with whatever request is currently active (possibly
+ * a different session) and misdeliver it. Writing directly to the original
+ * stdout keeps the event process-level, which Java's DaemonBridge.handleDaemon
+ * Event then routes to registered listeners.
+ *
+ * Hoisted to module scope (out of the perpetual reader closure) so executeTurn
+ * can emit task events on the in-turn path too — see emitTaskEvent.
+ */
+function emitDaemonEvent(event, sessionId, payload = {}) {
+  try {
+    const originalWrite = process.stdout._originalStdoutWrite;
+    if (!originalWrite) {
+      console.error(`[PERPETUAL_READER] _originalStdoutWrite not available (daemon.js not initialized?), cannot emit ${event} event`);
+      return;
+    }
+    const eventPayload = { type: 'daemon', event, sessionId, ...payload };
+    originalWrite.call(process.stdout, JSON.stringify(eventPayload) + '\n', 'utf8');
+  } catch (err) {
+    console.error(`[PERPETUAL_READER] Failed to emit ${event} event:`, err);
+  }
+}
+
+function emitInterTurnEvent(sessionId) {
+  emitDaemonEvent('session_updated', sessionId);
+}
+
+/**
+ * Forward a task lifecycle event to Java as a daemon event. The message is
+ * either a real SDK task_* system event (settled after the turn's result, so
+ * it arrives inter-turn) or a task_notification synthesized from a
+ * <task-notification> XML carried by a main-session user message (recent
+ * Claude Code delivers the background agent's terminal report that way
+ * instead of emitting an SDK event). Both the perpetual reader (inter-turn)
+ * and executeTurn (in-turn) call this so every delivery path converges on
+ * window.onTaskEvent, which dedups by tool_use_id + observable fields.
+ */
+export function emitTaskEvent(sessionId, taskMsg) {
+  emitDaemonEvent('task_event', sessionId, { taskEvent: taskMsg });
+}
 
 /**
  * TurnSink: A simple queue/channel for passing messages from the perpetual reader to executeTurn.
@@ -83,7 +130,7 @@ export function createTurnSink() {
   };
 }
 
-export function buildRuntimeSignature(options, systemPromptAppend, streamingEnabled, runtimeSessionEpoch) {
+export function buildRuntimeSignature(options, systemPromptAppend, streamingEnabled, runtimeSessionEpoch, modelId) {
   const material = {
     cwd: options.cwd || '',
     additionalDirectories: options.additionalDirectories || [],
@@ -91,7 +138,22 @@ export function buildRuntimeSignature(options, systemPromptAppend, streamingEnab
     streamingEnabled: !!streamingEnabled,
     runtimeSessionEpoch: runtimeSessionEpoch || '',
     model: options.model || '',
-    effort: options.effort || ''
+    effort: options.effort || '',
+    // The [1m] suffix selects the 1M context window. The CLI subprocess locks
+    // the window in at spawn from its environment, and setModel() cannot change
+    // it afterwards (see shouldRecreateRuntimeForModel) — so toggling [1m] must
+    // change the signature and rebuild the runtime instead of reusing it.
+    contextWindow1M: (modelId || '').includes('[1m]'),
+    // bypassPermissions (Auto mode) requires allowDangerouslySkipPermissions,
+    // which the SDK passes as a process-launch argv flag — it is frozen at spawn
+    // and setPermissionMode() (a runtime control request) cannot add it to a
+    // live subprocess. So a runtime spawned in another mode keeps prompting via
+    // canUseTool even after switching to Auto. Put the bypass state in the
+    // signature so entering/leaving Auto rebuilds the runtime with the correct
+    // launch flag. The other modes (default/plan/acceptEdits) need no launch
+    // flag and keep applying live via setPermissionMode, so they intentionally
+    // do NOT change the signature.
+    bypassPermissions: options.permissionMode === 'bypassPermissions'
   };
   return JSON.stringify(material);
 }
@@ -154,12 +216,18 @@ async function createRuntime(requestContext, callbacks) {
     runtimeSignature: requestContext.runtimeSignature,
     currentModel: requestContext.sdkModelName || null,
     modelId: requestContext.modelId || null, // Original model ID, may contain [1m] suffix
+    currentResolvedModel: requestContext.resolvedModelId || null,
     currentPermissionMode: initialPermissionMode,
     permissionModeState: { value: initialPermissionMode },
     currentMaxThinkingTokens: requestContext.maxThinkingTokens ?? null,
     createdAt: Date.now(),
     lastUsedAt: Date.now(),
     activeTurnCount: 0,
+    // CLI turn accounting for the quiescence gate — see waitForReaderQuiescent.
+    // cliTurnInFlight: a run whose output we have seen but whose closing result
+    // has not. readerProgress: ticks per message the perpetual reader routes.
+    cliTurnInFlight: false,
+    readerProgress: 0,
     stderrLines: [],
     query: null,
     inputStream: new AsyncStream(),
@@ -223,6 +291,52 @@ async function createRuntime(requestContext, callbacks) {
 }
 
 /**
+ * Wait until the perpetual reader has drained the SDK pipe and parked on
+ * query.next() with no CLI run in flight. Called by executeTurn BEFORE it opens
+ * the turn sink and enqueues the user message, so anything still buffered in the
+ * pipe is prior-turn tail (e.g. a still-in-flight background run_in_background,
+ * #1305) and routes inter-turn instead of into the new turn's sink — where its
+ * output, and worse its closing result, would be misattributed and seed the
+ * sticky "answered my previous message" / one-behind shift (#1410).
+ *
+ * Quiescence = a full macrotask with no reader progress (the reader is parked on
+ * a pending query.next()) AND cliTurnInFlight === false. An idle pipe therefore
+ * returns after one macrotask — the CLI would queue our send behind an in-flight
+ * run anyway, so this adds no latency on the common path; it only aligns the
+ * daemon's accounting with the CLI's actual order. Resolves on quiescence, on
+ * dispose (runtime.closed is checked each tick so abort stays responsive and the
+ * turn fails fast), or a loud 120s protocol-anomaly backstop so a stuck CLI
+ * cannot wedge the daemon silently.
+ */
+export async function waitForReaderQuiescent(runtime) {
+  if (!runtime || runtime.closed) {
+    throw new Error('Runtime closed while waiting for the CLI to become quiet');
+  }
+  const deadline = Date.now() + 120_000;
+  let lastProgress = runtime.readerProgress || 0;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (runtime.closed) {
+      throw new Error('Runtime closed while waiting for the CLI to become quiet');
+    }
+    // Normalize: readerProgress is undefined until the reader processes its
+    // first message, and undefined !== 0 would otherwise read as perpetual
+    // progress and wedge the gate on a fresh/parked reader.
+    const progress = runtime.readerProgress || 0;
+    const progressed = progress !== lastProgress;
+    lastProgress = progress;
+    if (!progressed && !runtime.cliTurnInFlight) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      console.warn('[LIFECYCLE] waitForReaderQuiescent timed out after 120s'
+        + ' (protocol anomaly; proceeding) cliTurnInFlight=' + !!runtime.cliTurnInFlight);
+      return;
+    }
+  }
+}
+
+/**
  * Start the perpetual reader for a runtime.
  * The reader continuously consumes runtime.query.next() for the runtime's lifetime,
  * routing messages to either the active turn (via turnSink) or inter-turn handling.
@@ -233,42 +347,9 @@ async function createRuntime(requestContext, callbacks) {
  * Exported for testing; returns the reader loop promise.
  */
 export function startPerpetualReader(runtime, callbacks) {
-  /**
-   * Emit an inter-turn event using daemon.js's writeRawLine mechanism.
-   *
-   * IMPORTANT: Must bypass activeRequestId interception to avoid misrouting.
-   *
-   * Why writeRawLine is required:
-   * - daemon.js intercepts process.stdout.write and wraps output with activeRequestId
-   * - If we used console.log() here, the event would be tagged with whatever request
-   *   is currently active (possibly from a different session)
-   * - This would cause the session_updated event to be delivered to the wrong session
-   * - writeRawLine (_originalStdoutWrite) bypasses the interception layer and outputs
-   *   directly to stdout, ensuring the event is process-level and not request-scoped
-   *
-   * The event format {type: 'daemon', event: 'session_updated', sessionId} is recognized
-   * by Java's DaemonBridge.handleDaemonEvent() which routes it to registered listeners.
-   */
-  const emitInterTurnEvent = (sessionId) => {
-    try {
-      // Access the global writeRawLine from daemon.js
-      // daemon.js stores the original stdout.write as _originalStdoutWrite
-      // We must use _originalStdoutWrite to bypass activeRequestId wrapping
-      const originalWrite = process.stdout._originalStdoutWrite;
-      if (!originalWrite) {
-        console.error('[PERPETUAL_READER] _originalStdoutWrite not available (daemon.js not initialized?), cannot emit session_updated event');
-        return;
-      }
-      const eventPayload = {
-        type: 'daemon',
-        event: 'session_updated',
-        sessionId: sessionId
-      };
-      originalWrite.call(process.stdout, JSON.stringify(eventPayload) + '\n', 'utf8');
-    } catch (err) {
-      console.error('[PERPETUAL_READER] Failed to emit session_updated event:', err);
-    }
-  };
+  // emitDaemonEvent / emitInterTurnEvent / emitTaskEvent are defined at module
+  // scope above so executeTurn can share the in-turn task-event emission path.
+  // See those definitions for the bypass-activeRequestId rationale.
 
   // Start the perpetual reader loop; return the promise so callers (and tests)
   // can await its completion.
@@ -310,6 +391,24 @@ export function startPerpetualReader(runtime, callbacks) {
         // additionally covers the inter-turn path executeTurn cannot see.
         touchRuntime(runtime);
 
+        // CLI turn accounting for executeTurn's quiescence gate. Substantive
+        // output (assistant / user / stream_event) means a CLI run is in flight;
+        // its closing result clears it (output always precedes its result on the
+        // pipe). system and other control messages leave the flag untouched, so
+        // prewarmed/idle runtimes stay quiet. This lets a new user turn wait for
+        // a still-in-flight run (e.g. a run_in_background completion, #1305)
+        // instead of absorbing its output — and worse, its result — which is the
+        // sticky "answered my previous message" / one-behind shift (#1410).
+        if (msg?.type === 'result') {
+          runtime.cliTurnInFlight = false;
+        } else if (msg?.type === 'assistant' || msg?.type === 'user' || msg?.type === 'stream_event') {
+          runtime.cliTurnInFlight = true;
+        }
+        // readerProgress ticks once per processed message so waitForReaderQuiescent
+        // can tell a parked reader (no progress across a macrotask) from one still
+        // draining the pipe.
+        runtime.readerProgress = (runtime.readerProgress || 0) + 1;
+
         // Dual-mode routing: check if we're in an active turn or inter-turn period
         if (runtime.turnSink) {
           // IN-TURN MODE: Forward message to executeTurn via turnSink
@@ -326,6 +425,60 @@ export function startPerpetualReader(runtime, callbacks) {
             } else {
               // Anonymous runtime - silently consume
               console.log('[PERPETUAL_READER] Inter-turn result for anonymous runtime, consuming silently');
+            }
+          }
+          // task_* SDK system events (async subagent lifecycle) that reach
+          // this inter-turn branch are the late ones - they settle AFTER the
+          // turn's result, by which point executeTurn has already exited and
+          // cleared turnSink, so they could not ride the in-turn [MESSAGE]
+          // stream. A task_notification that settles BEFORE the result is
+          // pushed to turnSink while it is still live, so executeTurn emits
+          // it in-turn and it never reaches this branch. Forward the late
+          // ones to Java so the frontend subagent list can mark the agent
+          // done instead of staying stuck on "running" until a manual reload.
+          // Other inter-turn message types are still silently consumed
+          // (already persisted to JSONL by the CLI).
+          if (msg?.type === 'system' && typeof msg.subtype === 'string' && msg.subtype.startsWith('task_')) {
+            // Mirror emitInterTurnEvent's sessionId guard: anonymous runtimes
+            // (no session_id yet) have no Java listener to claim the event, so
+            // emitting {sessionId: null} only wastes a cross-process hop and
+            // risks JsonNull handling on the Java side. Silently consume instead.
+            if (runtime.sessionId) {
+              console.log('[PERPETUAL_READER] Inter-turn task_* event for sessionId=' + runtime.sessionId + ', subtype=' + msg.subtype);
+              emitTaskEvent(runtime.sessionId, msg);
+            } else {
+              console.log('[PERPETUAL_READER] Inter-turn task_* event for anonymous runtime, consuming silently (subtype=' + msg.subtype + ')');
+            }
+          }
+          // Recent Claude Code terminates a background Agent by injecting a
+          // <task-notification> XML into the main session, not as an SDK
+          // task_notification event. The XML arrives as either a plain user
+          // message (content) or a queued_command attachment (prompt); both are
+          // recognized by extractTaskNotificationXml. It carries the agent's
+          // full <result> report; inter-turn it is otherwise silently consumed
+          // (the frontend only sees it after a reload). Parse the XML and
+          // synthesize the task_notification event the SDK no longer emits, so
+          // window.onTaskEvent can surface the report without waiting for a
+          // reload. (The frontend also recovers these from history on its own —
+          // see collectTaskEventsFromMessages — so this is the live fast-path.)
+          const taskNotificationXml = extractTaskNotificationXml(msg);
+          if (taskNotificationXml !== null) {
+            // A <task-notification> XML carries a background agent's terminal
+            // result report (recent CLI emits no separate `result` for it), so it
+            // IS the run's completion — clear the in-flight flag so the next user
+            // turn's quiescence gate does not wait on a run that already ended.
+            runtime.cliTurnInFlight = false;
+            if (runtime.sessionId) {
+              const parsed = parseTaskNotificationXml(taskNotificationXml);
+              const event = buildTaskNotificationEvent(parsed);
+              if (event) {
+                console.log('[PERPETUAL_READER] Inter-turn task-notification message for sessionId=' + runtime.sessionId + ', toolUseId=' + parsed.toolUseId + ', status=' + event.status);
+                emitTaskEvent(runtime.sessionId, event);
+              } else {
+                console.log('[PERPETUAL_READER] Inter-turn task-notification message could not be parsed (no tool_use_id or non-terminal status), consuming silently');
+              }
+            } else {
+              console.log('[PERPETUAL_READER] Inter-turn task-notification message for anonymous runtime, consuming silently');
             }
           }
           // For other message types during inter-turn, we silently consume
@@ -377,10 +530,21 @@ async function applyDynamicControls(runtime, requestContext) {
   }
 
   const targetModel = requestContext.sdkModelName || null;
-  if (runtime.currentModel !== targetModel && typeof runtime.query?.setModel === 'function') {
+  const targetResolvedModel = requestContext.resolvedModelId || null;
+  // Compare both the SDK short name AND the resolved model ID: a settings-side
+  // remap (e.g. sonnet -> "MiniMax-M2.5") changes only the resolved ID.
+  // Pass the resolved ID to setModel, not the short name: the CLI subprocess
+  // resolves short names against its OWN environment, which was frozen at spawn
+  // time — the daemon-side env update in setModelEnvironmentVariables never
+  // reaches a live subprocess. The resolved ID needs no env lookup. ([1m]
+  // toggles never get here: they change the runtime signature, so acquireRuntime
+  // rebuilds the runtime instead of reusing it.)
+  if ((runtime.currentModel !== targetModel || runtime.currentResolvedModel !== targetResolvedModel)
+      && typeof runtime.query?.setModel === 'function') {
     try {
-      await runtime.query.setModel(targetModel || undefined);
+      await runtime.query.setModel(targetResolvedModel || targetModel || undefined);
       runtime.currentModel = targetModel;
+      runtime.currentResolvedModel = targetResolvedModel;
     } catch (error) {
       console.error('[DAEMON] setModel failed:', error.message);
     }
@@ -425,6 +589,21 @@ export async function acquireRuntime(requestContext, callbacks) {
   await cleanupAnonymousFromRegistry((runtime) => disposeRuntime(runtime, callbacks));
 
   let runtime = findRuntimeForRequest(requestContext);
+
+  // Never reuse a runtime that is closed but somehow still registered. If it
+  // reached acquireRuntime, executeTurn would immediately throw "Runtime is
+  // closed", and the prior abort left abortRequested=true on it, so sendInternal
+  // would swallow that failure as a graceful "User interrupted" — silently
+  // eating the message the user just sent. Evict it from the registry and treat
+  // it as absent so a fresh runtime is created instead. (disposeRuntime removes
+  // the runtime from the registry synchronously, so this branch is a defensive
+  // invariant, not a common path.)
+  if (runtime && runtime.closed) {
+    console.log('[LIFECYCLE] discardClosedRuntime sessionId=' + (runtime.sessionId || '(new)')
+      + ' epoch=' + (runtime.runtimeSessionEpoch || '(none)'));
+    removeRuntime(runtime, callbacks?.removeSession);
+    runtime = null;
+  }
 
   if (runtime && runtime.runtimeSignature !== requestContext.runtimeSignature) {
     await disposeRuntime(runtime, callbacks);

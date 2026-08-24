@@ -46,6 +46,7 @@
     "removeAttachment": "添付ファイルを削除",
     "closePreview": "プレビューを閉じる",
     "loadingDropdown": "読み込み中...",
+    "modelsLoadFailed": "モデルの読み込みに失敗しました。クリックして再試行",
     "addAttachment": "添付ファイルを追加",
     "stopGeneration": "生成を停止",
     "generatingResponse": "応答を生成中",
@@ -81,6 +82,8 @@
     "disabled": "無効",
     "sdkNotInstalled": "{{provider}} SDKがインストールされていません。チャットを開始するにはSDKをインストールしてください。",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "SDK の状態を確認できませんでした。",
+    "retrySdkStatus": "再試行",
     "openSourceBanner": "このプロジェクトは100%オープンソースかつ無料を保証します（海賊版プロジェクトにご注意ください）",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "リポジトリのURLをクリップボードにコピーしました。ブラウザに貼り付けてアクセスできます ⭐",
@@ -93,9 +96,13 @@
     "attachmentsUploaded": "[添付ファイルがアップロードされました]",
     "streamingConnected": "{{provider}}に接続しました、質問を理解しています",
     "showEarlierMessages": "以前の{{count}}件のメッセージを表示",
+    "showEarlierTurns": "前の{{count}}ターンを表示（読み込み済み残り{{remaining}}ターン）",
+    "loadEarlierTurns": "ディスクから前の{{count}}ターンを読み込む（全{{total}}ターン中、残り{{remaining}}ターン）",
+    "loadingEarlierTurns": "以前の会話を読み込み中...",
     "totalDuration": "今回の応答時間",
     "tokenUsage": "入力 {{input}} / 出力 {{output}}",
     "tokenUsageDetail": "ターン合計 — 入力 {{input}} · キャッシュ書き込み {{cacheWrite}} · キャッシュ読み取り {{cacheRead}} · 出力 {{output}}",
+    "cacheHitsWithRatio": "（キャッシュヒット {{tokens}}、{{ratio}}）",
     "search": {
       "ariaLabel": "会話内を検索",
       "placeholder": "会話内を検索...",
@@ -226,29 +233,79 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI",
+          "omp": "OMP CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "選択モード",
+        "modeAuto": "自動",
+        "modeManual": "手動",
+        "autoSummary": "現在のチャット CLI に追従 · 現在は {{provider}}",
+        "autoUnavailable": "利用可能な CLI がありません。手動に切り替えて選択してください。"
       },
       "diffExpanded": {
         "label": "差分をデフォルトで展開",
-        "enabled": "展開",
-        "disabled": "折りたたみ",
+        "enabled": "有効",
+        "disabled": "無効",
         "hint": "有効にすると、チャット内のコード差分がデフォルトで展開表示されます。無効の場合、差分は折りたたまれた状態で表示されます。"
       },
       "taskCompletionNotification": {
-        "label": "タスク完了通知",
+        "label": "タスク完了システム通知",
         "enabled": "有効",
         "disabled": "無効",
         "hint": "有効にすると、AIタスクが完了した時にシステム通知を表示します。無効の場合、通知は表示されません。"
       },
       "askUserQuestionNotification": {
-        "label": "ユーザー質問通知",
+        "label": "質問システム通知",
         "enabled": "有効",
         "disabled": "無効",
         "hint": "有効にすると、Claude が質問した時にシステム通知を表示し、見逃しを防ぎます。無効の場合、通知は表示されません。"
+      },
+      "detailedOutput": {
+        "label": "詳細な出力情報",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、利用可能な場合にメッセージ下部へターンの推定コストを表示し、入力 Token の概要内にキャッシュヒットを含めます。Token 消費量は常に表示されます。"
+      },
+      "askUserQuestionSoundNotification": {
+        "label": "質問アラート音",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、Claude が質問した時に設定済みのアラート音を再生します。下のサウンド選択とフォーカス規則を使用します。"
+      },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "IDE がフォーカスされていない時だけシステム通知を表示",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、タスク完了と質問のシステム通知は IDE がフォーカスされていない時だけ表示されます。"
+      },
+      "soundNotification": {
+        "label": "タスク完了アラート音",
+        "enabled": "有効",
+        "disabled": "無効",
+        "hint": "有効にすると、AI タスクが完了した時に通知音を再生します。画面から離れていても完了に気づけます。",
+        "onlyWhenUnfocused": "IDE がフォーカスされていない時だけアラート音を再生",
+        "onlyWhenUnfocusedHint": "有効にすると、タスク完了と質問のアラート音は IDE がフォーカスされていない時だけ再生されます。",
+        "selectSound": "通知音",
+        "soundDefault": "デフォルト",
+        "soundChime": "チャイム",
+        "soundBell": "ベル",
+        "soundDing": "ディン",
+        "soundSuccess": "成功",
+        "soundCustom": "カスタム...",
+        "customSound": "カスタム音声ファイル",
+        "customSoundPlaceholder": "音声ファイルのパスを選択または入力",
+        "customSoundHint": "WAV、MP3、AIFF 形式に対応",
+        "testSound": "テスト",
+        "browse": "参照",
+        "useDefault": "デフォルトを使用",
+        "customSoundSaved": "カスタム音声を保存しました"
       },
       "sendShortcut": {
         "label": "送信ショートカット",
@@ -268,6 +325,12 @@
         "reset": "デフォルトに戻す",
         "hint": "チャットエリアの背景色をカスタマイズします。空欄の場合はテーマのデフォルト色に従います。"
       },
+      "chatBarColor": {
+        "label": "ヘッダーとステータスバーの色",
+        "custom": "カスタム",
+        "reset": "リセット",
+        "hint": "セッションヘッダーとタスクステータスバーに共通のテーマ色を設定します。空欄の場合は現在のUIテーマに従います。"
+      },
       "userMsgColor": {
         "label": "ユーザーメッセージの色",
         "custom": "カスタム",
@@ -285,7 +348,8 @@
     "providersDesc": "ClaudeとCodex APIプロバイダー設定を管理し、異なるAPIサービスプロバイダー間で切り替え",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "カスタムモデル",
@@ -294,6 +358,7 @@
       "manage": "モデル管理",
       "pricing": {
         "title": "料金（USD/100万トークン）",
+        "optionalLabel": "任意",
         "hint": "任意です。空欄の項目はそのトークン種別の既定レートを使用します。",
         "inputLabel": "入力",
         "outputLabel": "出力",
@@ -305,6 +370,13 @@
         "cacheReadShort": "キャッシュ読み取り",
         "invalidValue": "料金は0以上の数値で入力してください",
         "defaultPricing": "既定料金を使用中"
+      },
+      "contextWindow": {
+        "label": "最大コンテキスト（Kトークン）",
+        "placeholder": "例: 500",
+        "hint": "任意。トークン数を千単位の整数で入力します（500 = 500,000トークン）。プラグインの使用量表示にのみ使用されます。",
+        "invalidValue": "最大コンテキストはK単位の正の整数で入力してください",
+        "summary": "コンテキスト: {{value}} トークン"
       },
       "configuredSectionTitle": "設定済みの Claude モデル",
       "configuredSectionDesc": "現在の Claude プロバイダーまたは settings.json のモデルは既にモデル選択リストに表示されています。ここでは料金のみ変更できます。",
@@ -360,7 +432,12 @@
         "providerUnavailable": "利用不可",
         "currentProviderAuto": "現在自動選択を使用中：{{provider}}",
         "currentProviderManual": "現在手動選択したプロバイダーを使用中：{{provider}}",
-        "currentProviderUnavailable": "選択したプロバイダーは現在利用できません：{{provider}}"
+        "currentProviderUnavailable": "選択したプロバイダーは現在利用できません：{{provider}}",
+        "modeLabel": "選択モード",
+        "modeAuto": "自動",
+        "modeManual": "手動",
+        "autoSummary": "現在のチャット CLI に追従 · 現在は {{provider}}",
+        "autoUnavailable": "利用可能な CLI がありません。手動に切り替えて選択してください。"
       },
       "prompt": {
         "label": "Additional Prompt",
@@ -586,6 +663,8 @@
         "modelMapping": "モデルマッピング (JSON環境に注入されます)",
         "mainModel": "メインモデル",
         "mainModelPlaceholder": "例: claude-sonnet-4-6",
+        "fableModel": "Fableデフォルトモデル",
+        "fableModelPlaceholder": "例: claude-fable-5",
         "haikuModel": "Haikuデフォルトモデル",
         "haikuModelPlaceholder": "例: claude-haiku-4-5",
         "sonnetModel": "Sonnetデフォルトモデル",
@@ -612,12 +691,17 @@
       "presets": {
         "custom": "カスタム",
         "zhipu": "Zhipu GLM",
-        "kimi": "Kimi K2",
+        "kimi": "Kimi",
+        "kimiCoding": "Kimi Coding",
         "deepseek": "DeepSeek",
         "minimax": "MiniMax",
         "xiaomi": "Xiaomi MiMo",
         "xiaomiPlan": "Xiaomi MiMo Plan",
         "qwen": "Alibaba Qwen",
+        "bailian": "Bailian",
+        "bailianCoding": "Bailian Coding",
+        "longcat": "LongCat",
+        "opencodeGo": "OpenCode Go",
         "openrouter": "OpenRouter"
       }
     },
@@ -636,6 +720,9 @@
         "editTitle": "Edit Provider: {{name}}",
         "addDescription": "Configure new Codex provider, will be written to ~/.codex/ directory",
         "editDescription": "Changes will be applied immediately to ~/.codex/ directory",
+        "officialPreset": "OpenAI Official Direct",
+        "officialSectionHint": "Use your manually entered OPENAI_API_KEY with the official endpoint https://api.openai.com/v1.",
+        "presetHint": "These presets include only third-party or proxy endpoints that match the Claude Code provider set.",
         "providerName": "Provider Name",
         "providerNamePlaceholder": "e.g., Codex Official",
         "configJson": "Config",
@@ -744,6 +831,60 @@
         "confirmAdd": "Create",
         "saveChanges": "Save"
       }
+    },
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "Install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "マルチプロバイダーのモデルに対応したミニマルなターミナルコーディングエージェント"
+        },
+        "omp": {
+          "name": "OMP CLI",
+          "description": "マルチプロバイダーのモデルに対応した Oh My Pi ターミナルコーディングエージェント"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "ローカル CLI ツール",
+      "summary": "{{installed}} / {{total}} インストール済み",
+      "moreComingSoon": "今後さらに対応予定",
+      "copyPath": "パスをコピー"
     }
   },
   "history": {
@@ -772,7 +913,7 @@
     "loading": "履歴を読み込み中...",
     "loadFailed": "読み込み失敗",
     "noSessions": "履歴セッションなし",
-    "noSessionsDesc": "現在のプロジェクトにClaudeセッション記録が見つかりません",
+    "noSessionsDesc": "現在のプロジェクトにセッション記録が見つかりません",
     "totalSessions": "{{count}}セッション · {{total}}メッセージ",
     "messageCount": "{{count}}メッセージ",
     "searchPlaceholder": "セッションタイトルを検索...",
@@ -826,7 +967,6 @@
     "dialogTitle": "権限リクエスト",
     "allow": "1回のみ許可",
     "allowAlways": "常に許可",
-    "allowAlwaysCommand": "このコマンドを常に許可",
     "deny": "拒否",
     "userDenied": "ユーザーが権限リクエストを拒否しました",
     "fromExternalProcess": "外部プロセスからのリクエスト",
@@ -896,6 +1036,7 @@
   },
   "config": {
     "clickToCopy": "クリックしてコピー",
+    "officialDocs": "公式ドキュメント",
     "switch": "切り替え",
     "switchProvider": "プロバイダーを切り替え",
     "runtimeProvider": {
@@ -947,51 +1088,29 @@
   "markdown": {
     "copyCode": "コードをコピー",
     "copyMessage": "メッセージをコピー",
-    "copySuccess": "コピーされました!"
+    "copySuccess": "コピーされました!",
+    "quoteMessage": "メッセージを引用",
+    "quoteSuccess": "引用しました!"
+  },
+  "contextMenu": {
+    "copy": "コピー",
+    "quote": "引用"
   },
   "usage": {
-    "loading": "統計を読み込み中...",
-    "noData": "統計データなし",
-    "loadData": "データを読み込む",
-    "currentProject": "現在のプロジェクト",
-    "allProjects": "すべてのプロジェクト",
-    "last7Days": "過去7日間",
-    "last30Days": "過去30日間",
-    "allTime": "全期間",
-    "refreshData": "データを更新",
-    "estimateNotice": "使用統計は推定値です。利用傾向の参考としてご利用ください。実際の請求書として使用しないでください。",
-    "overview": "概要",
-    "models": "モデル",
-    "sessions": "セッション",
-    "timeline": "タイムライン",
-    "totalCost": "総コスト",
-    "totalSessions": "総セッション数",
-    "totalTokens": "総トークン数",
-    "avgPerSession": "セッションあたりの平均",
-    "comparedToLastWeek": "先週との比較",
-    "tokenBreakdown": "トークン内訳",
-    "input": "入力",
-    "output": "出力",
-    "cacheWrite": "キャッシュ書き込み",
-    "cacheRead": "キャッシュ読み取り",
-    "topModels": "トップモデル",
-    "byModel": "モデル別",
-    "sessionCount": "セッション数",
-    "sessionList": "セッションリスト",
-    "sortByCost": "コスト順",
-    "sortByTime": "時間順",
-    "dailyTrend": "日次使用傾向",
-    "noDataInRange": "この日付範囲にデータがありません",
-    "sessionsCount": "セッション",
-    "lastUpdated": "最終更新",
-    "today": "今日",
-    "yesterday": "昨日",
-    "daysAgo": "日前",
-    "justNow": "たった今",
-    "minutesAgo": "分前",
-    "hoursAgo": "時間前",
-    "description": "説明",
-    "command": "コマンド"
+    "checkingLabel": "tokentracker-cli を確認しています…",
+    "installingLabel": "tokentracker-cli をインストールしています…",
+    "installingDesc": "少し時間がかかる場合があります。インストール後、アプリが再検出してローカルサーバーを起動します。",
+    "startingLabel": "tokentracker サーバーを起動しています…",
+    "guideTitle": "使用統計を見るには tokentracker-cli をインストール",
+    "guideDesc": "使用統計は tokentracker-cli が提供します。ローカルサーバーを起動し、各 AI ツールのトークン使用量を集約してダッシュボードに表示します。",
+    "guideInstallLabel": "インストールコマンド",
+    "guideCopy": "コピー",
+    "guideCopied": "コピーしました",
+    "guideInstallNow": "今すぐインストール",
+    "guideNoteHooks": "初回起動時、tokentracker サーバーはインストール済みの AI ツールに hooks を書き込みます（これがデータ収集の仕組みです）。",
+    "guideNoteTelemetry": "本アプリでは匿名テレメトリを無効化しています。",
+    "errorTitle": "tokentracker サーバーの起動に失敗しました",
+    "errorRetry": "再試行"
   },
   "mcp": {
     "title": "MCPサーバー",
@@ -1228,6 +1347,25 @@
     "stopped": "停止",
     "progress": "{{total}} 件中 {{completed}} 件完了"
   },
+  "subagent": {
+    "process": {
+      "title": "エージェントプロセス",
+      "prompt": "プロンプト",
+      "thought": "思考",
+      "filesRead_one": "{{count}} 件のファイルを読む",
+      "filesRead_other": "{{count}} 件のファイルを読む",
+      "otherTools": "その他ツール",
+      "result": "結果",
+      "showFullOutput": "出力全体を表示",
+      "loading": "エージェントプロセスを読み込み中…",
+      "unavailable": "セッションに id ができるまでプロセスログは利用できません。",
+      "reportGenerated": "構造化分析レポートを生成しました",
+      "unitMs": "ミリ秒",
+      "unitS": "秒",
+      "unitTools": "ツール",
+      "unitTokens": "トークン"
+    }
+  },
   "statusPanel": {
     "todoTab": "計画",
     "tasksTab": "タスク",
@@ -1256,7 +1394,9 @@
     "keepAllConfirmMessage": "現在の変更を新しい基準として保持します。今後の変更はゼロからカウントされます。",
     "discardAllSuccess": "すべての変更を元に戻しました",
     "discardAllFailed": "元に戻す失敗: {{error}}",
-    "keepAllSuccess": "すべて保持しました。変更記録をリセットしました"
+    "keepAllSuccess": "すべて保持しました。変更記録をリセットしました",
+    "multiAgentBadge": "複数エージェント",
+    "multiAgentEdited": "このセッションで {{count}} 個のエージェントがこのファイルを編集しました。ご注意ください"
   },
   "skills": {
     "title": "スキル",
@@ -1402,6 +1542,9 @@
     "searchPlaceholder": "モデルを検索",
     "noModelsFound": "モデルが見つかりません",
     "hiddenModelCount": "+ {{count}} 件のモデルがあります。入力して検索してください。",
+    "pinned": "ピン留め",
+    "pin": "ピン留め",
+    "unpin": "ピンを外す",
     "longContext": {
       "label": "1M",
       "shortLabel": "1Mコンテキスト",
@@ -1413,9 +1556,13 @@
         "label": "Sonnet 4.6",
         "description": "Sonnet 4.6 · デフォルトモデルを使用"
       },
-      "opus46": {
-        "label": "Opus 4.7",
-        "description": "Opus 4.7 · 前世代フラッグシップモデル"
+      "sonnet5": {
+        "label": "Sonnet 5",
+        "description": "Sonnet 5 · デフォルトモデルを使用"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · 最新の Opus アップグレード"
       },
       "opus46_1m": {
         "label": "Opus 4.6",
@@ -1427,7 +1574,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · 最新かつ最も優れたモデル"
+        "description": "Opus 4.8 · 前世代の Opus モデル"
       },
       "fable5": {
         "label": "Fable 5",
@@ -1435,9 +1582,17 @@
       }
     },
     "codex": {
-      "gpt53codex": {
-        "label": "GPT-5.3-Codex",
-        "description": "最新の最先端エージェントコーディングモデル（機能強化版）"
+      "gpt56sol": {
+        "label": "GPT-5.6 Sol",
+        "description": "複雑なプロフェッショナル業務向けのフロンティアモデル"
+      },
+      "gpt56terra": {
+        "label": "GPT-5.6 Terra",
+        "description": "知能とコストのバランスに優れた GPT-5.6 モデル"
+      },
+      "gpt56luna": {
+        "label": "GPT-5.6 Luna",
+        "description": "コスト重視のワークロードに最適化された GPT-5.6 モデル"
       },
       "gpt55": {
         "label": "GPT-5.5",
@@ -1446,30 +1601,6 @@
       "gpt54": {
         "label": "GPT-5.4",
         "description": "拡張された能力を備えた最新の最先端モデル"
-      },
-      "gpt52codex": {
-        "label": "GPT-5.2-Codex",
-        "description": "最先端のエージェントコーディングモデル"
-      },
-      "gpt51codexMax": {
-        "label": "GPT-5.1-Codex-Max",
-        "description": "Codex最適化のフラッグシップ、深い推論と高速処理を両立"
-      },
-      "gpt54mini": {
-        "label": "GPT-5.4-Mini",
-        "description": "より軽量な最先端エージェントコーディングモデル"
-      },
-      "gpt53codexSpark": {
-        "label": "GPT-5.3-Codex-Spark",
-        "description": "超高速コーディングモデル"
-      },
-      "gpt52": {
-        "label": "GPT-5.2",
-        "description": "プロ向け作業と長時間エージェント向けに最適化"
-      },
-      "gpt51codexMini": {
-        "label": "GPT-5.1-Codex-Mini",
-        "description": "Codex用に最適化。より安価で高速ですが、性能は低下"
       }
     }
   },
@@ -1498,7 +1629,7 @@
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
-      "tooltip": "Codex approval_policy=untrusted – prompts before editing files or running shell commands.",
+      "tooltip": "Codex approval_policy=on-request – prompts before editing files or running shell commands.",
       "description": "Safest option. Every write or command requires your approval."
     },
     "plan": {
@@ -1517,6 +1648,28 @@
       "description": "Hands-off mode. Codex executes edits and shell commands immediately."
     }
   },
+  "ompModes": {
+    "default": {
+      "label": "デフォルト",
+      "tooltip": "選択したモデルを使用（または OMP auto）",
+      "description": "モデルドロップダウンで選択したモデルを使用します。Auto の場合は OMP CLI のデフォルトを使用します。"
+    },
+    "smol": {
+      "label": "Smol",
+      "tooltip": "高速モデルロール (omp --model smol)",
+      "description": "omp の smol ロールに設定されたモデルでこの会話を実行します。モデルドロップダウンを上書きします。"
+    },
+    "slow": {
+      "label": "Slow",
+      "tooltip": "推論モデルロール (omp --model slow)",
+      "description": "omp の slow ロールに設定されたモデルでこの会話を実行します。モデルドロップダウンを上書きします。"
+    },
+    "plan": {
+      "label": "Plan",
+      "tooltip": "プランニングモデルロール (omp --model plan)",
+      "description": "omp の plan ロールに設定されたモデルでこの会話を実行します。モデルドロップダウンを上書きします。"
+    }
+  },
   "providers": {
     "claude": {
       "label": "Claude Code"
@@ -1529,6 +1682,12 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "omp": {
+      "label": "OMP CLI"
     }
   },
   "promptEnhancer": {
@@ -1543,7 +1702,18 @@
     "keepOriginal": "元のままにする",
     "enhanceFailed": "プロンプトの強化に失敗しました",
     "emptyPrompt": "最初にプロンプトを入力してください",
-    "copyEnhanced": "強化版をコピー"
+    "copyEnhanced": "強化版をコピー",
+    "modeLabel": "モード",
+    "modeAuto": "自動",
+    "modeManual": "手動",
+    "modeUnavailable": "利用不可",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI 未解決",
+    "modelLabel": "モデル",
+    "modelUnresolved": "デフォルトモデル",
+    "openSettings": "設定",
+    "openSettingsTooltip": "プロンプト強化の設定を開く",
+    "resolvingUsage": "実行設定を解決中…"
   },
   "fileContext": {
     "placeholder": "ファイルコンテキスト",

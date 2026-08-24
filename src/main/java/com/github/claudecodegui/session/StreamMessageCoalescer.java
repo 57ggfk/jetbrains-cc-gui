@@ -37,6 +37,8 @@ public class StreamMessageCoalescer {
     private static final int MEDIUM_INTERVAL_MS = 500;             // 100-200KB
     private static final int LARGE_INTERVAL_MS = 2_000;            // 200-500KB
     private static final int XLARGE_INTERVAL_MS = 5_000;           // >500KB
+    private static final int LONG_CONVERSATION_THRESHOLD = 300;
+    private static final int LONG_CONVERSATION_TAIL_SIZE = 180;
 
     // During streaming, delta channel (onContentDelta/onThinkingDelta) provides
     // real-time character-by-character updates.  updateMessages carries authoritative
@@ -66,8 +68,13 @@ public class StreamMessageCoalescer {
     // lock-protected fields.  This is intentional: a one-cycle stale read only means the
     // interval adapts one push later — acceptable for a best-effort throttling heuristic.
     private volatile int lastPayloadChars = 0;
+    // Highest sequence actually handed to the webview. Ordering is enforced against THIS,
+    // not against updateSequence: updateSequence only means "newer data is queued", which
+    // is not a reason to drop the in-flight frame. See sendToWebView for why that matters.
+    private volatile long lastPushedSequence = 0L;
     private volatile List<ClaudeSession.Message> pendingMessages = null;
     private volatile List<ClaudeSession.Message> lastSnapshot = null;
+    private volatile List<ClaudeSession.Message> lastDeliveredSnapshot = null;
 
     private final JsCallbackTarget callbackTarget;
 
@@ -79,7 +86,22 @@ public class StreamMessageCoalescer {
         JBCefBrowser getBrowser();
         boolean isDisposed();
         HandlerContext getHandlerContext();
+
+        /**
+         * Fired when the stream transitions to inactive (end of a turn's
+         * streaming segment). Lets the host run work that was deferred while the
+         * stream was active — e.g. a session_updated reload held back so it does
+         * not disturb the streaming bubble or race SessionState mutations.
+         * Default no-op so existing targets need not implement it.
+         */
+        default void onStreamEnded() {}
     }
+
+    record MessageTransport(
+            List<ClaudeSession.Message> messages,
+            int baseIndex,
+            boolean tailUpdate
+    ) {}
 
     public StreamMessageCoalescer(JsCallbackTarget callbackTarget) {
         this.callbackTarget = callbackTarget;
@@ -125,6 +147,11 @@ public class StreamMessageCoalescer {
             streamActive = false;
             lastPayloadChars = 0;  // Reset so post-stream flush uses normal interval
         }
+        // Notify the host that the stream went inactive, so it can drain work
+        // deferred during streaming (e.g. a background session_updated reload).
+        // Done outside the lock: the host may synchronously schedule EDT work,
+        // and holding `lock` across a foreign callback risks lock-ordering issues.
+        callbackTarget.onStreamEnded();
     }
 
     /**
@@ -146,9 +173,13 @@ public class StreamMessageCoalescer {
             updateScheduled = false;
             pendingMessages = null;
             lastSnapshot = null;
+            lastDeliveredSnapshot = null;
             lastUpdateAtMs = 0L;
             lastPayloadChars = 0;
-            return ++updateSequence;
+            // Raise the ordering floor as well: frames still in flight from the previous
+            // session carry a smaller sequence and must not repopulate the list we cleared.
+            lastPushedSequence = ++updateSequence;
+            return lastPushedSequence;
         }
     }
 
@@ -279,10 +310,19 @@ public class StreamMessageCoalescer {
             long sequence,
             LongConsumer afterSendOnEdt
     ) {
-        // Keep the snapshot for potential re-flush after webview reload/recreate
+        // Keep the snapshot for potential re-flush after webview reload/recreate.
+        // Only a snapshot actually dispatched to the WebView can prove whether
+        // the omitted prefix is stable enough for an indexed tail update.
+        final List<ClaudeSession.Message> deliveredSnapshot;
         synchronized (lock) {
+            deliveredSnapshot = lastDeliveredSnapshot;
             lastSnapshot = messages;
         }
+
+        MessageTransport transport = selectMessageTransport(messages, deliveredSnapshot);
+        final boolean tailUpdate = transport.tailUpdate();
+        final int tailBaseIndex = transport.baseIndex();
+        final List<ClaudeSession.Message> transportMessages = transport.messages();
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             final int payloadChars;
@@ -290,7 +330,7 @@ public class StreamMessageCoalescer {
             final String escapedMessagesJson;
             try {
                 long buildStartedAt = System.nanoTime();
-                String messagesJson = MessageJsonConverter.convertMessagesToJson(messages);
+                String messagesJson = MessageJsonConverter.convertMessagesToJson(transportMessages);
                 payloadChars = messagesJson.length();
                 escapedMessagesJson = JsUtils.escapeJs(messagesJson);
                 payloadBuildMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - buildStartedAt);
@@ -301,11 +341,14 @@ public class StreamMessageCoalescer {
                 if (payloadChars >= LARGE_UPDATE_PAYLOAD_CHARS || payloadBuildMs >= SLOW_PAYLOAD_BUILD_MS) {
                     LOG.info("[WebviewTransport] updateMessages payload chars=" + payloadChars
                             + ", messages=" + messages.size()
+                            + ", transportedMessages=" + transportMessages.size()
+                            + ", tailBaseIndex=" + tailBaseIndex
                             + ", buildMs=" + payloadBuildMs
                             + ", sequence=" + sequence);
                 } else if (LOG.isDebugEnabled()) {
                     LOG.debug("[WebviewTransport] updateMessages payload chars=" + payloadChars
                             + ", messages=" + messages.size()
+                            + ", transportedMessages=" + transportMessages.size()
                             + ", buildMs=" + payloadBuildMs
                             + ", sequence=" + sequence);
                 }
@@ -330,16 +373,37 @@ public class StreamMessageCoalescer {
                     return;
                 }
 
+                final long pushSequence;
                 synchronized (lock) {
-                    if (sequence != updateSequence) {
-                        // Message is stale — skip the webview push, but still
-                        // run the after-send callback (e.g. onStreamEnd cleanup)
-                        // so the frontend is not stuck in streaming state.
+                    // Drop ONLY genuinely out-of-order frames: a snapshot whose
+                    // (large-payload-delayed) invokeLater lands after a newer one already
+                    // reached the webview would roll the list backwards.
+                    //
+                    // A frame that is merely older than `updateSequence` is NOT stale.
+                    // Snapshots grow monotonically within a turn, so a frame whose
+                    // sequence is >= the last pushed one carries content that is a
+                    // superset of whatever the webview already shows — pushing it is
+                    // forward progress, never a regression, even if a newer one is still
+                    // queued. The previous `sequence != updateSequence` check treated
+                    // "newer data is queued" as "this frame is obsolete" and dropped it.
+                    // Because the payload serializes off-EDT, any enqueue arriving in
+                    // that window advanced updateSequence, so frame after frame was
+                    // discarded during dense streaming and structural blocks
+                    // (tool_use / tool_result) never reached the frontend until the
+                    // stream-end flush. Meanwhile onContentDelta kept flowing, so text
+                    // was appended to whichever assistant message the frontend last knew
+                    // about.
+                    //
+                    // The frontend's __minAcceptedUpdateSequence guard applies the same
+                    // ordering rule on its side, so this is not the only line of defence.
+                    if (sequence < lastPushedSequence) {
                         if (afterSendOnEdt != null) {
                             afterSendOnEdt.accept(sequence);
                         }
                         return;
                     }
+                    pushSequence = sequence;
+                    lastPushedSequence = sequence;
                 }
 
                 // FIX: Wrap callJavaScript in try-catch so that a JCEF failure
@@ -347,7 +411,24 @@ public class StreamMessageCoalescer {
                 // prevent afterSendOnEdt from running.  When afterSendOnEdt carries
                 // the onStreamEnd signal, failing to run it permanently freezes the UI.
                 try {
-                    callbackTarget.callJavaScript("updateMessages", escapedMessagesJson, String.valueOf(sequence));
+                    if (tailUpdate) {
+                        callbackTarget.callJavaScript(
+                                "updateMessageTail",
+                                escapedMessagesJson,
+                                String.valueOf(tailBaseIndex),
+                                String.valueOf(pushSequence));
+                    } else {
+                        callbackTarget.callJavaScript("updateMessages", escapedMessagesJson, String.valueOf(pushSequence));
+                    }
+                    synchronized (lock) {
+                        // Unconditional: this frame reached the webview, so it becomes the
+                        // prefix baseline for tail transport. Gating this on
+                        // `pushSequence == updateSequence` froze the baseline for as long as
+                        // newer data stayed queued, so hasSamePrefix never matched, tail
+                        // updates never engaged on long conversations, and every push kept
+                        // paying full-payload serialization cost.
+                        lastDeliveredSnapshot = messages;
+                    }
                     MessageJsonConverter.pushUsageUpdateFromMessages(
                             messages,
                             callbackTarget.getHandlerContext(),
@@ -360,10 +441,39 @@ public class StreamMessageCoalescer {
                 }
 
                 if (afterSendOnEdt != null) {
-                    afterSendOnEdt.accept(sequence);
+                    afterSendOnEdt.accept(pushSequence);
                 }
             });
         });
+    }
+
+    static MessageTransport selectMessageTransport(List<ClaudeSession.Message> messages,
+                                                    List<ClaudeSession.Message> previousMessages) {
+        boolean longConversation = messages.size() > LONG_CONVERSATION_THRESHOLD;
+        int candidateBaseIndex = longConversation
+                ? Math.max(0, messages.size() - LONG_CONVERSATION_TAIL_SIZE) : 0;
+        boolean stablePrefix = previousMessages != null
+                && (messages.size() >= previousMessages.size()
+                && hasSamePrefix(previousMessages, messages, candidateBaseIndex));
+        boolean tailUpdate = longConversation && stablePrefix;
+        int baseIndex = tailUpdate ? candidateBaseIndex : 0;
+        List<ClaudeSession.Message> transportMessages = tailUpdate
+                ? List.copyOf(messages.subList(baseIndex, messages.size())) : messages;
+        return new MessageTransport(transportMessages, baseIndex, tailUpdate);
+    }
+
+    private static boolean hasSamePrefix(List<ClaudeSession.Message> previousMessages,
+                                         List<ClaudeSession.Message> messages,
+                                         int prefixLength) {
+        if (previousMessages.size() < prefixLength) {
+            return false;
+        }
+        for (int i = 0; i < prefixLength; i++) {
+            if (previousMessages.get(i) != messages.get(i)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ===== Streaming heartbeat =====

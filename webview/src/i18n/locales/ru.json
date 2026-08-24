@@ -46,6 +46,7 @@
     "removeAttachment": "Удалить вложение",
     "closePreview": "Закрыть предпросмотр",
     "loadingDropdown": "Загрузка...",
+    "modelsLoadFailed": "Не удалось загрузить модели. Нажмите, чтобы повторить",
     "addAttachment": "Добавить вложение",
     "stopGeneration": "Остановить генерацию",
     "generatingResponse": "Генерирую ответ",
@@ -81,6 +82,8 @@
     "disabled": "Отключено",
     "sdkNotInstalled": "SDK {{provider}} не установлен. Установите SDK для начала работы.",
     "sdkStatusLoading": "Проверка статуса SDK...",
+    "sdkStatusUnavailable": "Не удалось проверить состояние SDK.",
+    "retrySdkStatus": "Повторить",
     "openSourceBanner": "Этот проект гарантированно 100% с открытым исходным кодом и бесплатный (остерегайтесь пиратских проектов)",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "Ссылка скопирована в буфер обмена — вставьте её в браузере, чтобы открыть ⭐",
@@ -93,9 +96,13 @@
     "attachmentsUploaded": "[Вложения загружены]",
     "streamingConnected": "{{provider}} обрабатывает запрос",
     "showEarlierMessages": "Показать предыдущие сообщения ({{count}})",
+    "showEarlierTurns": "Показать предыдущие ходы: {{count}} (загружено, осталось: {{remaining}})",
+    "loadEarlierTurns": "Загрузить с диска предыдущие ходы: {{count}} (осталось {{remaining}} из {{total}})",
+    "loadingEarlierTurns": "Загрузка предыдущих ходов...",
     "totalDuration": "Этот ответ занял",
     "tokenUsage": "вход {{input}} / выход {{output}}",
     "tokenUsageDetail": "Итог хода — вход {{input}} · запись кэша {{cacheWrite}} · чтение кэша {{cacheRead}} · выход {{output}}",
+    "cacheHitsWithRatio": " (попадания в кэш {{tokens}}, {{ratio}})",
     "search": {
       "ariaLabel": "Поиск в беседе",
       "placeholder": "Поиск в беседе…",
@@ -226,29 +233,79 @@
         "providerUnavailable": "Currently unavailable",
         "provider": {
           "claude": "Claude Code",
-          "codex": "Codex"
+          "codex": "Codex",
+          "grok": "Grok CLI",
+          "kimi": "Kimi CLI",
+          "opencode": "OpenCode",
+          "pi": "PI CLI",
+          "omp": "OMP CLI"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
-        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}"
+        "currentProviderUnavailable": "The selected provider is currently unavailable: {{provider}}",
+        "modeLabel": "Режим выбора",
+        "modeAuto": "Авто",
+        "modeManual": "Вручную",
+        "autoSummary": "Следует текущему чат CLI · сейчас {{provider}}",
+        "autoUnavailable": "Нет доступного CLI. Переключитесь на ручной выбор."
       },
       "diffExpanded": {
         "label": "Разворачивать diff по умолчанию",
-        "enabled": "Развёрнуто",
-        "disabled": "Свёрнуто",
+        "enabled": "Включено",
+        "disabled": "Выключено",
         "hint": "Diff-блоки в чате будут сразу развёрнуты. Можно свернуть кликом."
       },
       "taskCompletionNotification": {
-        "label": "Уведомление о завершении задачи",
+        "label": "Системное уведомление о завершении задачи",
         "enabled": "Включено",
         "disabled": "Выключено",
         "hint": "При включении показывает системное уведомление при завершении задачи AI. При выключении уведомление не появляется."
       },
       "askUserQuestionNotification": {
-        "label": "Уведомление о вопросе пользователю",
+        "label": "Системное уведомление о вопросе",
         "enabled": "Включено",
         "disabled": "Выключено",
         "hint": "При включении показывает системное уведомление, когда Claude задаёт вопрос, чтобы вы его не пропустили. При выключении уведомление не появляется."
+      },
+      "detailedOutput": {
+        "label": "Подробная информация о выводе",
+        "enabled": "Включено",
+        "disabled": "Отключено",
+        "hint": "Если включено, внизу сообщений при наличии данных показывается оценочная стоимость хода, а попадания в кэш отображаются внутри сводки входных Token. Расход Token всегда остаётся видимым."
+      },
+      "askUserQuestionSoundNotification": {
+        "label": "Звуковой сигнал при вопросе",
+        "enabled": "Включено",
+        "disabled": "Выключено",
+        "hint": "При включении воспроизводит настроенный звуковой сигнал, когда Claude задаёт вопрос. Использует выбор звука и правила фокуса ниже."
+      },
+      "systemNotificationOnlyWhenUnfocused": {
+        "label": "Показывать системные уведомления только когда IDE не в фокусе",
+        "enabled": "Включено",
+        "disabled": "Выключено",
+        "hint": "При включении системные уведомления о завершении задачи и вопросе показываются только когда IDE не в фокусе."
+      },
+      "soundNotification": {
+        "label": "Звуковой сигнал завершения задачи",
+        "enabled": "Включено",
+        "disabled": "Выключено",
+        "hint": "При включении звук уведомления воспроизводится, когда ИИ завершает задачу, чтобы вы узнали об этом даже вдали от экрана.",
+        "onlyWhenUnfocused": "Воспроизводить звуковые сигналы только когда IDE не в фокусе",
+        "onlyWhenUnfocusedHint": "При включении звуковые сигналы о завершении задачи и вопросе воспроизводятся только когда IDE не в фокусе.",
+        "selectSound": "Звук уведомления",
+        "soundDefault": "По умолчанию",
+        "soundChime": "Перезвон",
+        "soundBell": "Колокол",
+        "soundDing": "Динь",
+        "soundSuccess": "Успех",
+        "soundCustom": "Пользовательский...",
+        "customSound": "Пользовательский звуковой файл",
+        "customSoundPlaceholder": "Выберите или введите путь к аудиофайлу",
+        "customSoundHint": "Поддерживаются форматы WAV, MP3, AIFF",
+        "testSound": "Проверить",
+        "browse": "Обзор",
+        "useDefault": "Использовать по умолчанию",
+        "customSoundSaved": "Пользовательский звук сохранён"
       },
       "sendShortcut": {
         "label": "Клавиша отправки",
@@ -268,6 +325,12 @@
         "reset": "Сбросить",
         "hint": "Цвет фона чата. Оставьте пустым для цвета по умолчанию."
       },
+      "chatBarColor": {
+        "label": "Цвет заголовка и строки состояния",
+        "custom": "Свой цвет",
+        "reset": "Сбросить",
+        "hint": "Используйте общий цвет темы для заголовка сеанса и строки состояния задач. Оставьте пустым, чтобы следовать текущей теме интерфейса."
+      },
       "userMsgColor": {
         "label": "Цвет сообщений пользователя",
         "custom": "Пользовательский",
@@ -285,7 +348,8 @@
     "providersDesc": "Управление конфигурациями API-провайдеров Claude и Codex и переключение между ними",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "Пользовательские модели",
@@ -294,6 +358,7 @@
       "manage": "Управление моделями",
       "pricing": {
         "title": "Стоимость (USD за 1M токенов)",
+        "optionalLabel": "Необязательно",
         "hint": "Необязательно. Оставьте поле пустым, чтобы использовать ставку по умолчанию для этого типа токенов.",
         "inputLabel": "Ввод",
         "outputLabel": "Вывод",
@@ -305,6 +370,13 @@
         "cacheReadShort": "Чтение кэша",
         "invalidValue": "Стоимость должна быть неотрицательным числом",
         "defaultPricing": "Используется цена по умолчанию"
+      },
+      "contextWindow": {
+        "label": "Максимальный контекст (K токенов)",
+        "placeholder": "например, 500",
+        "hint": "Необязательно. Укажите целое число тысяч токенов (500 = 500 000 токенов). Используется только для отображения контекста в плагине.",
+        "invalidValue": "Максимальный контекст должен быть положительным целым числом в единицах K",
+        "summary": "Контекст: {{value}} токенов"
       },
       "configuredSectionTitle": "Настроенные модели Claude",
       "configuredSectionDesc": "Модели активного провайдера Claude или settings.json уже отображаются в списке выбора. Здесь можно изменить только стоимость.",
@@ -360,7 +432,12 @@
         "providerUnavailable": "Недоступно",
         "currentProviderAuto": "Сейчас используется автоматический выбор: {{provider}}",
         "currentProviderManual": "Сейчас используется выбранный вручную провайдер: {{provider}}",
-        "currentProviderUnavailable": "Выбранный провайдер сейчас недоступен: {{provider}}"
+        "currentProviderUnavailable": "Выбранный провайдер сейчас недоступен: {{provider}}",
+        "modeLabel": "Режим выбора",
+        "modeAuto": "Авто",
+        "modeManual": "Вручную",
+        "autoSummary": "Следует текущему чат CLI · сейчас {{provider}}",
+        "autoUnavailable": "Нет доступного CLI. Переключитесь на ручной выбор."
       },
       "prompt": {
         "label": "Дополнительный промпт",
@@ -593,6 +670,8 @@
         "modelMapping": "Маппинг моделей (будет добавлен в JSON env)",
         "mainModel": "Основная модель",
         "mainModelPlaceholder": "например, claude-sonnet-4-6",
+        "fableModel": "Модель Fable по умолчанию",
+        "fableModelPlaceholder": "например, claude-fable-5",
         "haikuModel": "Модель Haiku по умолчанию",
         "haikuModelPlaceholder": "например, claude-haiku-4-5",
         "sonnetModel": "Модель Sonnet по умолчанию",
@@ -619,12 +698,17 @@
       "presets": {
         "custom": "Своё",
         "zhipu": "Zhipu GLM",
-        "kimi": "Kimi K2",
+        "kimi": "Kimi",
+        "kimiCoding": "Kimi Coding",
         "deepseek": "DeepSeek",
         "minimax": "MiniMax",
         "xiaomi": "Xiaomi MiMo",
         "xiaomiPlan": "Xiaomi MiMo Plan",
         "qwen": "Alibaba Qwen",
+        "bailian": "Bailian",
+        "bailianCoding": "Bailian Coding",
+        "longcat": "LongCat",
+        "opencodeGo": "OpenCode Go",
         "openrouter": "OpenRouter"
       }
     },
@@ -643,6 +727,9 @@
         "editTitle": "Редактировать провайдер: {{name}}",
         "addDescription": "Настройте нового провайдера Codex, данные записываются в ~/.codex/",
         "editDescription": "Изменения будут немедленно применены к ~/.codex/",
+        "officialPreset": "Прямое подключение OpenAI",
+        "officialSectionHint": "Используйте вручную введенный OPENAI_API_KEY с официальной конечной точкой https://api.openai.com/v1.",
+        "presetHint": "Эти пресеты включают только сторонние или прокси-конечные точки, совпадающие с набором провайдеров Claude Code.",
         "providerName": "Имя провайдера",
         "providerNamePlaceholder": "например, Codex Official",
         "configJson": "Конфигурация",
@@ -751,6 +838,60 @@
         "confirmAdd": "Создать",
         "saveChanges": "Сохранить"
       }
+    },
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "Install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "Минималистичный терминальный агент для кодирования с поддержкой нескольких провайдеров"
+        },
+        "omp": {
+          "name": "OMP CLI",
+          "description": "Терминальный агент для кодирования Oh My Pi с поддержкой нескольких провайдеров"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "Локальные CLI-инструменты",
+      "summary": "{{installed}} / {{total}} установлено",
+      "moreComingSoon": "Скоро будет больше",
+      "copyPath": "Копировать путь"
     }
   },
   "history": {
@@ -779,7 +920,7 @@
     "loading": "Загрузка истории...",
     "loadFailed": "Ошибка загрузки",
     "noSessions": "Нет чатов в истории",
-    "noSessionsDesc": "В текущем проекте не найдено чатов с Claude",
+    "noSessionsDesc": "В текущем проекте не найдено записей сессий",
     "totalSessions": "{{count}} чатов · {{total}} сообщений",
     "messageCount": "{{count}} сообщений",
     "searchPlaceholder": "Поиск по чатам...",
@@ -848,7 +989,6 @@
     "dialogTitle": "Запрос разрешения",
     "allow": "Разрешить однократно",
     "allowAlways": "Разрешить всегда",
-    "allowAlwaysCommand": "Всегда разрешать эту команду",
     "deny": "Отклонить",
     "userDenied": "Пользователь отклонил запрос разрешения",
     "fromExternalProcess": "Запрос от внешнего процесса",
@@ -918,6 +1058,7 @@
   },
   "config": {
     "clickToCopy": "Нажмите для копирования",
+    "officialDocs": "Официальная документация",
     "switch": "Переключить",
     "switchProvider": "Переключить провайдер",
     "runtimeProvider": {
@@ -969,51 +1110,29 @@
   "markdown": {
     "copyCode": "Копировать код",
     "copyMessage": "Копировать сообщение",
-    "copySuccess": "Скопировано!"
+    "copySuccess": "Скопировано!",
+    "quoteMessage": "Цитировать сообщение",
+    "quoteSuccess": "Процитировано!"
+  },
+  "contextMenu": {
+    "copy": "Копировать",
+    "quote": "Цитировать"
   },
   "usage": {
-    "loading": "Загрузка статистики...",
-    "noData": "Нет данных статистики",
-    "loadData": "Загрузить данные",
-    "currentProject": "Текущий проект",
-    "allProjects": "Все проекты",
-    "last7Days": "Последние 7 дней",
-    "last30Days": "Последние 30 дней",
-    "allTime": "За всё время",
-    "refreshData": "Обновить данные",
-    "estimateNotice": "Статистика использования является приблизительной и может быть неточной. Используйте как ориентир по тенденциям, а не как фактический счёт.",
-    "overview": "Обзор",
-    "models": "Модели",
-    "sessions": "Чаты",
-    "timeline": "Временная шкала",
-    "totalCost": "Общие затраты",
-    "totalSessions": "Всего чатов",
-    "totalTokens": "Всего токенов",
-    "avgPerSession": "Среднее за чат",
-    "comparedToLastWeek": "по сравнению с прошлой неделей",
-    "tokenBreakdown": "Распределение токенов",
-    "input": "Ввод",
-    "output": "Вывод",
-    "cacheWrite": "Запись кэша",
-    "cacheRead": "Чтение кэша",
-    "topModels": "Топ моделей",
-    "byModel": "По модели",
-    "sessionCount": "Количество чатов",
-    "sessionList": "Список чатов",
-    "sortByCost": "По затратам",
-    "sortByTime": "По времени",
-    "dailyTrend": "Дневной тренд использования",
-    "noDataInRange": "Нет данных за выбранный период",
-    "sessionsCount": "чатов",
-    "lastUpdated": "Последнее обновление",
-    "today": "Сегодня",
-    "yesterday": "Вчера",
-    "daysAgo": "дней назад",
-    "justNow": "Только что",
-    "minutesAgo": "минут назад",
-    "hoursAgo": "часов назад",
-    "description": "Описание",
-    "command": "Команда"
+    "checkingLabel": "Проверка tokentracker-cli…",
+    "installingLabel": "Установка tokentracker-cli…",
+    "installingDesc": "Это может занять минуту. После установки приложение снова выполнит проверку и запустит локальный сервер.",
+    "startingLabel": "Запуск сервера tokentracker…",
+    "guideTitle": "Установите tokentracker-cli, чтобы видеть статистику использования",
+    "guideDesc": "Статистику использования предоставляет tokentracker-cli. Он запускает локальный сервер, который собирает данные об использовании токенов из ваших AI-инструментов и показывает их на дашборде.",
+    "guideInstallLabel": "Команда установки",
+    "guideCopy": "Копировать",
+    "guideCopied": "Скопировано",
+    "guideInstallNow": "Установить",
+    "guideNoteHooks": "При первом запуске сервер tokentracker записывает hooks в установленные AI-инструменты (так он собирает данные об использовании).",
+    "guideNoteTelemetry": "Это приложение отключило анонимную телеметрию.",
+    "errorTitle": "Не удалось запустить сервер tokentracker",
+    "errorRetry": "Повторить"
   },
   "mcp": {
     "title": "MCP-серверы",
@@ -1249,6 +1368,25 @@
     "allCompleted": "Все завершены {{completed}}/{{total}} задач",
     "stopped": "Остановлено"
   },
+  "subagent": {
+    "process": {
+      "title": "Процесс агента",
+      "prompt": "Промпт",
+      "thought": "Размышление",
+      "filesRead_one": "Прочитан {{count}} файл",
+      "filesRead_other": "Прочитано {{count}} файлов",
+      "otherTools": "Другие инструменты",
+      "result": "Результат",
+      "showFullOutput": "Показать полный вывод",
+      "loading": "Загрузка процесса агента…",
+      "unavailable": "Журнал процесса недоступен, пока у сессии нет id.",
+      "reportGenerated": "Сформирован структурированный аналитический отчёт",
+      "unitMs": "мс",
+      "unitS": "с",
+      "unitTools": "инструментов",
+      "unitTokens": "токенов"
+    }
+  },
   "statusPanel": {
     "todoTab": "План",
     "tasksTab": "Задачи",
@@ -1277,7 +1415,9 @@
     "keepAllConfirmMessage": "Принять изменения как базу. Дальнейшие правки будут отслеживаться заново.",
     "discardAllSuccess": "Все изменения отменены",
     "discardAllFailed": "Ошибка отмены: {{error}}",
-    "keepAllSuccess": "Все изменения сохранены, отслеживание сброшено"
+    "keepAllSuccess": "Все изменения сохранены, отслеживание сброшено",
+    "multiAgentBadge": "Несколько агентов",
+    "multiAgentEdited": "{{count}} агентов изменили этот файл в сессии — проверьте внимательно"
   },
   "skills": {
     "title": "Навыки",
@@ -1423,14 +1563,21 @@
     "searchPlaceholder": "Поиск моделей",
     "noModelsFound": "Модели не найдены",
     "hiddenModelCount": "+ {{count}} дополнительных моделей. Введите текст для поиска.",
+    "pinned": "Закреплённые",
+    "pin": "Закрепить",
+    "unpin": "Открепить",
     "claude": {
       "sonnet46": {
         "label": "Sonnet 4.6",
         "description": "Sonnet 4.6 · Модель по умолчанию"
       },
-      "opus46": {
-        "label": "Opus 4.7",
-        "description": "Opus 4.7 · Предыдущая флагманская модель"
+      "sonnet5": {
+        "label": "Sonnet 5",
+        "description": "Sonnet 5 · Модель по умолчанию"
+      },
+      "opus5": {
+        "label": "Opus 5",
+        "description": "Opus 5 · Последнее обновление Opus"
       },
       "opus46_1m": {
         "label": "Opus 4.6",
@@ -1442,7 +1589,7 @@
       },
       "opus48": {
         "label": "Opus 4.8",
-        "description": "Opus 4.8 · Новейшая и самая мощная"
+        "description": "Opus 4.8 · Предыдущее поколение Opus"
       },
       "fable5": {
         "label": "Fable 5",
@@ -1456,9 +1603,17 @@
       "tooltipDisabled": "1M контекст недоступен для Haiku"
     },
     "codex": {
-      "gpt53codex": {
-        "label": "GPT-5.3-Codex",
-        "description": "Новейшая агентная модель для кодинга с улучшенными возможностями."
+      "gpt56sol": {
+        "label": "GPT-5.6 Sol",
+        "description": "Передовая модель для сложной профессиональной работы."
+      },
+      "gpt56terra": {
+        "label": "GPT-5.6 Terra",
+        "description": "Модель GPT-5.6, сочетающая интеллект и экономичность."
+      },
+      "gpt56luna": {
+        "label": "GPT-5.6 Luna",
+        "description": "Модель GPT-5.6, оптимизированная для экономичных рабочих нагрузок."
       },
       "gpt55": {
         "label": "GPT-5.5",
@@ -1467,30 +1622,6 @@
       "gpt54": {
         "label": "GPT-5.4",
         "description": "Новейшая модель с расширенными возможностями."
-      },
-      "gpt52codex": {
-        "label": "GPT-5.2-Codex",
-        "description": "Агентная модель для кодинга класса frontier."
-      },
-      "gpt51codexMax": {
-        "label": "GPT-5.1-Codex-Max",
-        "description": "Флагманская модель Codex для глубоких и быстрых рассуждений."
-      },
-      "gpt54mini": {
-        "label": "GPT-5.4-Mini",
-        "description": "Более лёгкая агентная модель для кодинга класса frontier."
-      },
-      "gpt53codexSpark": {
-        "label": "GPT-5.3-Codex-Spark",
-        "description": "Сверхбыстрая модель для кодинга."
-      },
-      "gpt52": {
-        "label": "GPT-5.2",
-        "description": "Оптимизирована для профессиональной работы и длительных агентных задач."
-      },
-      "gpt51codexMini": {
-        "label": "GPT-5.1-Codex-Mini",
-        "description": "Оптимизирована для Codex. Дешевле, быстрее, но менее мощная."
       }
     }
   },
@@ -1519,7 +1650,7 @@
   "codexModes": {
     "default": {
       "label": "Предложение (одобрение)",
-      "tooltip": "Codex approval_policy=untrusted — запрашивает перед редактированием файлов или выполнением команд.",
+      "tooltip": "Codex approval_policy=on-request - запрашивает перед редактированием файлов или выполнением команд.",
       "description": "Самый безопасный вариант. Каждая запись или команда требует вашего одобрения."
     },
     "plan": {
@@ -1538,6 +1669,28 @@
       "description": "Режим без вмешательства. Codex выполняет правки и команды немедленно."
     }
   },
+  "ompModes": {
+    "default": {
+      "label": "По умолчанию",
+      "tooltip": "Использовать выбранную модель (или OMP auto)",
+      "description": "Использует модель, выбранную в выпадающем списке, или модель OMP CLI по умолчанию при значении Auto."
+    },
+    "smol": {
+      "label": "Smol",
+      "tooltip": "Быстрая роль модели (omp --model smol)",
+      "description": "Запускает этот диалог с моделью, настроенной для роли smol в omp. Переопределяет выбор в списке моделей."
+    },
+    "slow": {
+      "label": "Slow",
+      "tooltip": "Роль модели для рассуждений (omp --model slow)",
+      "description": "Запускает этот диалог с моделью, настроенной для роли slow в omp. Переопределяет выбор в списке моделей."
+    },
+    "plan": {
+      "label": "Plan",
+      "tooltip": "Роль модели для планирования (omp --model plan)",
+      "description": "Запускает этот диалог с моделью, настроенной для роли plan в omp. Переопределяет выбор в списке моделей."
+    }
+  },
   "providers": {
     "claude": {
       "label": "Claude Code"
@@ -1550,6 +1703,12 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "omp": {
+      "label": "OMP CLI"
     }
   },
   "promptEnhancer": {
@@ -1564,7 +1723,18 @@
     "keepOriginal": "Оставить исходный",
     "enhanceFailed": "Не удалось улучшить",
     "emptyPrompt": "Сначала введите промпт",
-    "copyEnhanced": "Копировать улучшенный"
+    "copyEnhanced": "Копировать улучшенный",
+    "modeLabel": "Режим",
+    "modeAuto": "Авто",
+    "modeManual": "Вручную",
+    "modeUnavailable": "Недоступно",
+    "providerLabel": "CLI",
+    "providerUnresolved": "CLI не определён",
+    "modelLabel": "Модель",
+    "modelUnresolved": "Модель по умолчанию",
+    "openSettings": "Настроить",
+    "openSettingsTooltip": "Открыть настройки улучшения промпта",
+    "resolvingUsage": "Определение конфигурации…"
   },
   "fileContext": {
     "placeholder": "Файловый контекст",

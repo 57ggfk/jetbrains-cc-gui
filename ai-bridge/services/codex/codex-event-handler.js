@@ -8,6 +8,7 @@
  *
  * Exports:
  *   - createInitialEventState(emitMessage) — factory for the mutable state bag
+ *   - prepareSessionReplayBoundary(state, threadId) — captures the pre-turn JSONL baseline
  *   - processCodexEventStream(events, state, config) — the main event loop
  */
 
@@ -17,6 +18,7 @@ import { readFile, unlink, writeFile } from 'fs/promises';
 import { requestPermissionFromJava } from '../../permission-handler.js';
 import { findSessionFileByThreadId } from './codex-agents-loader.js';
 import { extractPatchFromResponseItemPayload, parseApplyPatchToOperations } from './codex-patch-parser.js';
+import { extractUpdatePlanFromResponseItemPayload } from './codex-plan-parser.js';
 import {
   truncateForDisplay, getStableItemId, extractCommand,
   smartToolName, smartDescription, mapCommandToolNameToPermissionToolName,
@@ -35,6 +37,71 @@ import {
 } from './codex-tool-normalization.js';
 
 const COMMAND_DENIED_ABORT_ERROR = '__CODEX_COMMAND_DENIED_ABORT__';
+const CODEX_USAGE_FIELDS = [
+  'input_tokens',
+  'cached_input_tokens',
+  'cache_write_input_tokens',
+  'output_tokens',
+  'reasoning_output_tokens',
+  'total_tokens',
+];
+
+function normalizeCodexUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  const normalized = {};
+  let hasNumericField = false;
+  for (const field of CODEX_USAGE_FIELDS) {
+    const value = Number(usage[field]);
+    if (Number.isFinite(value)) {
+      normalized[field] = Math.max(0, value);
+      hasNumericField = true;
+    }
+  }
+  return hasNumericField ? normalized : null;
+}
+
+function subtractCodexUsage(total, baseline) {
+  if (!total || !baseline) return null;
+  const delta = {};
+  for (const field of CODEX_USAGE_FIELDS) {
+    delta[field] = Math.max(0, (total[field] || 0) - (baseline[field] || 0));
+  }
+  return delta;
+}
+
+function handleTokenCountEvent(event, state) {
+  const info = event?.payload?.info;
+  if (!info || typeof info !== 'object') return false;
+
+  const totalUsage = normalizeCodexUsage(info.total_token_usage);
+  const lastUsage = normalizeCodexUsage(info.last_token_usage);
+  if (!totalUsage && !lastUsage) return false;
+
+  if (!state.turnUsageBaseline && totalUsage && lastUsage) {
+    state.turnUsageBaseline = subtractCodexUsage(totalUsage, lastUsage);
+  }
+  if (totalUsage) {
+    state.latestTotalTokenUsage = totalUsage;
+  }
+
+  const forwardedInfo = {};
+  if (totalUsage) forwardedInfo.total_token_usage = totalUsage;
+  if (lastUsage) forwardedInfo.last_token_usage = lastUsage;
+  const contextWindow = Number(info.model_context_window);
+  if (Number.isFinite(contextWindow) && contextWindow > 0) {
+    forwardedInfo.model_context_window = contextWindow;
+  }
+
+  state.emitMessage({
+    type: 'event_msg',
+    payload: { type: 'token_count', info: forwardedInfo },
+  });
+  return true;
+}
+
+function resolveCompletedTurnUsage(state) {
+  return subtractCodexUsage(state.latestTotalTokenUsage, state.turnUsageBaseline);
+}
 
 export function isWindowsTaskkillParseNoise(message) {
   if (typeof message !== 'string') return false;
@@ -104,6 +171,149 @@ function handleFunctionCallOutputPayload(payload, state) {
   return true;
 }
 
+function getResponseItemCallId(payload) {
+  const id = payload?.call_id ?? payload?.id;
+  return typeof id === 'string' && id.trim() ? id : '';
+}
+
+function createPatchBatchFromPayload(payload, config, fallbackCallId = '') {
+  const patchText = extractPatchFromResponseItemPayload(payload);
+  if (!patchText) return null;
+
+  const callId = getResponseItemCallId(payload) || fallbackCallId;
+  if (!callId) return null;
+
+  const operations = parseApplyPatchToOperations(patchText)
+    .map((op) => ({ ...op, filePath: resolveFilePath(op.filePath, config.cwd) }))
+    .filter((op) => op.filePath && (op.oldString !== '' || op.newString !== ''));
+  return operations.length > 0 ? { callId, operations } : null;
+}
+
+function emitSyntheticPatchToolUses(state, batch) {
+  if (!batch || !Array.isArray(batch.operations)) return 0;
+  let emittedCount = 0;
+  batch.operations.forEach((op, index) => {
+    const toolUseId = `codex_patch_${batch.callId}_${index}`;
+    const toolName = op.toolName === 'write' ? 'write' : 'edit';
+    if (state.emittedToolUseIds.has(toolUseId)) return;
+    state.emitMessage(toolUseMsg(toolUseId, toolName, {
+      file_path: op.filePath,
+      old_string: op.oldString,
+      new_string: op.newString,
+      start_line: op.startLine,
+      end_line: op.endLine,
+      replace_all: false,
+      source: 'codex_session_patch'
+    }));
+    state.emittedToolUseIds.add(toolUseId);
+    emittedCount += 1;
+  });
+  return emittedCount;
+}
+
+function emitSyntheticPatchToolResults(state, batch, isError) {
+  if (!batch || !Array.isArray(batch.operations)) return 0;
+  let emittedCount = 0;
+  batch.operations.forEach((_, index) => {
+    const toolUseId = `codex_patch_${batch.callId}_${index}`;
+    if (!state.emittedToolUseIds.has(toolUseId) || state.emittedToolResultIds.has(toolUseId)) return;
+    state.emitMessage(toolResultMsg(toolUseId, isError, isError ? 'Patch apply failed' : 'Patch applied'));
+    state.emittedToolResultIds.add(toolUseId);
+    emittedCount += 1;
+  });
+  return emittedCount;
+}
+
+function handleCustomToolCallPayload(payload, state, config) {
+  if (!payload || payload.type !== 'custom_tool_call') return false;
+
+  let handled = false;
+  const callId = getResponseItemCallId(payload);
+  const planInput = extractUpdatePlanFromResponseItemPayload(payload);
+  if (callId && planInput) {
+    const toolUseId = `codex_plan_${callId}`;
+    if (!state.processedCustomPlanCallIds.has(callId)) {
+      state.processedCustomPlanCallIds.add(callId);
+      if (!state.emittedToolUseIds.has(toolUseId)) {
+        state.emitMessage(toolUseMsg(toolUseId, 'update_plan', planInput));
+        state.emittedToolUseIds.add(toolUseId);
+      }
+      state.pendingCustomPlanToolUseIds.set(callId, toolUseId);
+    }
+    handled = true;
+  }
+
+  const batch = createPatchBatchFromPayload(payload, config);
+  if (!batch) return handled;
+  if (state.processedPatchCallIds.has(batch.callId)) return true;
+
+  state.processedPatchCallIds.add(batch.callId);
+  state.pendingCustomPatchBatches.set(batch.callId, batch);
+  emitSyntheticPatchToolUses(state, batch);
+  return true;
+}
+
+function extractCustomToolOutputText(output) {
+  if (typeof output === 'string') return output;
+  if (Array.isArray(output)) {
+    return output.map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item.text === 'string') return item.text;
+      return JSON.stringify(item ?? '');
+    }).join('\n');
+  }
+  if (output && typeof output.text === 'string') return output.text;
+  return JSON.stringify(output ?? '');
+}
+
+function handleCustomToolCallOutputPayload(payload, state) {
+  if (!payload || payload.type !== 'custom_tool_call_output') return false;
+
+  const callId = getResponseItemCallId(payload);
+  const output = extractCustomToolOutputText(payload.output);
+  // Plan outputs are short status texts, so an any-line match is safe here.
+  const planErrorOutput = /(?:^|\n)\s*(?:error:|failed to parse|permission denied|command denied|script failed\b|script error:|exit code:\s*[1-9]\d*)/i;
+  // apply_patch output can echo command output containing e.g. "exit code: 1"
+  // even when the patch itself succeeded, so keep the original strict
+  // start-of-output prefixes for the patch path.
+  const patchErrorOutput = /^(?:error:|failed to parse|permission denied|command denied)/i;
+  let handled = false;
+  const planToolUseId = callId ? state.pendingCustomPlanToolUseIds.get(callId) : null;
+  if (planToolUseId) {
+    const isPlanError = payload.status === 'error' || payload.is_error === true || planErrorOutput.test(output);
+    if (!state.emittedToolResultIds.has(planToolUseId)) {
+      state.emitMessage(toolResultMsg(planToolUseId, isPlanError, isPlanError ? 'Plan update failed' : 'Plan updated'));
+      state.emittedToolResultIds.add(planToolUseId);
+    }
+    state.pendingCustomPlanToolUseIds.delete(callId);
+    handled = true;
+  }
+
+  const batch = callId ? state.pendingCustomPatchBatches.get(callId) : null;
+  if (!batch) return handled;
+
+  const isPatchError = payload.status === 'error' || payload.is_error === true || patchErrorOutput.test(output);
+  emitSyntheticPatchToolResults(state, batch, isPatchError);
+  state.pendingCustomPatchBatches.delete(callId);
+  return true;
+}
+
+function flushPendingCustomPatchBatches(state, isError = false) {
+  for (const batch of state.pendingCustomPatchBatches.values()) {
+    emitSyntheticPatchToolResults(state, batch, isError);
+  }
+  state.pendingCustomPatchBatches.clear();
+}
+
+function flushPendingCustomPlanCalls(state, isError = false) {
+  for (const toolUseId of state.pendingCustomPlanToolUseIds.values()) {
+    if (state.emittedToolResultIds.has(toolUseId)) continue;
+    state.emitMessage(toolResultMsg(toolUseId, isError, isError ? 'Plan update failed' : 'Plan updated'));
+    state.emittedToolResultIds.add(toolUseId);
+  }
+  state.pendingCustomPlanToolUseIds.clear();
+}
+
 
 /** Creates the initial mutable state bag consumed by processCodexEventStream. */
 export function createInitialEventState(emitMessage) {
@@ -118,18 +328,30 @@ export function createInitialEventState(emitMessage) {
     emittedDeniedCommandToolResultIds: new Set(),
     sessionFilePath: null,
     sessionLineCursor: 0,
-    sessionFunctionCursor: 0,
-    sessionTurnStartCursor: 0,
+    sessionReplayBaselineCursor: null,
+    sessionReplayBaselinePrepared: false,
+    sessionFunctionCursor: null,
+    sessionTurnStartCursor: null,
+    sessionTurnBoundaryReady: false,
+    sessionTurnBoundaryWarningLogged: false,
     processedPatchCallIds: new Set(),
+    pendingCustomPatchBatches: new Map(),
+    processedCustomPlanCallIds: new Set(),
+    pendingCustomPlanToolUseIds: new Map(),
     processedSessionFunctionCallIds: new Set(),
     processedSessionFunctionOutputIds: new Set(),
+    processedSessionCustomToolCallIds: new Set(),
+    processedSessionCustomToolOutputIds: new Set(),
     reasoningTextCache: new Map(),
     assistantTextCache: new Map(),
     reasoningObserved: false,
     commandApprovalAbortRequested: false,
     runtimePolicyLogged: false,
     suppressNoResponseFallback: false,
+    turnStarted: false,
     turnCompleted: false,
+    turnUsageBaseline: null,
+    latestTotalTokenUsage: null,
     currentThreadId: null,
     finalResponse: '',
     assistantText: '',
@@ -181,6 +403,85 @@ function countSessionJsonlLines(content) {
   return splitSessionJsonlEntries(content).length;
 }
 
+/**
+ * Captures the end of the existing session before the current Codex turn starts.
+ * A later replay boundary is only accepted when a new turn_context appears at or
+ * after this cursor, so historical function calls can never become replay candidates.
+ */
+export async function prepareSessionReplayBoundary(state, threadId) {
+  state.sessionReplayBaselinePrepared = true;
+  state.sessionReplayBaselineCursor = threadId ? null : 0;
+  state.sessionFunctionCursor = null;
+  state.sessionTurnStartCursor = null;
+  state.sessionTurnBoundaryReady = false;
+  state.sessionTurnBoundaryWarningLogged = false;
+
+  if (!threadId) {
+    state.sessionLineCursor = 0;
+    return;
+  }
+
+  const sessionPath = ensureSessionFilePath(state, threadId);
+  if (!sessionPath) {
+    logWarn('SESSION_REPLAY', `Unable to locate resumed session ${threadId}; JSONL function replay is disabled for this turn.`);
+    return;
+  }
+
+  try {
+    const content = await readFile(sessionPath, 'utf8');
+    const baseline = countSessionJsonlLines(content);
+    state.sessionReplayBaselineCursor = baseline;
+    state.sessionLineCursor = baseline;
+  } catch (error) {
+    logWarn('SESSION_REPLAY', 'Unable to capture the pre-turn session boundary; JSONL function replay is disabled for this turn:', error?.message || error);
+  }
+}
+
+function getSessionThreadId(state, config) {
+  return config.threadId || state.currentThreadId || null;
+}
+
+async function ensureSessionTurnBoundary(state, config) {
+  if (state.sessionTurnBoundaryReady) return true;
+  if (!state.sessionReplayBaselinePrepared || !Number.isInteger(state.sessionReplayBaselineCursor)) {
+    return false;
+  }
+
+  const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
+  if (!sessionPath) return false;
+
+  let content = '';
+  try {
+    content = await readFile(sessionPath, 'utf8');
+  } catch (error) {
+    logDebug('SESSION_REPLAY', 'Failed to read session file while locating the current turn boundary:', error?.message || error);
+    return false;
+  }
+
+  const lines = splitSessionJsonlEntries(content);
+  const baseline = state.sessionReplayBaselineCursor;
+  for (let i = baseline; i < lines.length; i++) {
+    let parsed;
+    try { parsed = JSON.parse(lines[i]); } catch { continue; }
+    if (parsed?.type !== 'turn_context') continue;
+
+    const boundaryCursor = i + 1;
+    state.sessionTurnStartCursor = boundaryCursor;
+    state.sessionFunctionCursor = boundaryCursor;
+    state.sessionTurnBoundaryReady = true;
+    logDebug('SESSION_REPLAY', `Established current turn boundary at session line ${boundaryCursor}.`);
+    return true;
+  }
+
+  return false;
+}
+
+function warnSessionTurnBoundaryNotReady(state) {
+  if (state.sessionTurnBoundaryWarningLogged) return;
+  state.sessionTurnBoundaryWarningLogged = true;
+  logWarn('SESSION_REPLAY', 'Skipping JSONL function replay until a verified current-turn turn_context is available.');
+}
+
 async function readLatestTurnContextFromSession(state, threadId) {
   const sessionPath = ensureSessionFilePath(state, threadId);
   if (!sessionPath) return null;
@@ -204,8 +505,42 @@ async function readLatestTurnContextFromSession(state, threadId) {
   return null;
 }
 
+/**
+ * Recover raw token_count events that the public Codex SDK stream omits. Only
+ * entries after the verified current-turn boundary are accepted, preventing a
+ * resumed thread from reusing the previous turn's context snapshot.
+ */
+async function replayCurrentTurnTokenCountsFromSession(state, config) {
+  if (state.latestTotalTokenUsage) return 0;
+  if (!await ensureSessionTurnBoundary(state, config)) return 0;
+
+  const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
+  if (!sessionPath) return 0;
+
+  let content = '';
+  try {
+    content = await readFile(sessionPath, 'utf8');
+  } catch (error) {
+    logDebug('CONTEXT_USAGE', 'Failed to read current-turn token usage:', error?.message || error);
+    return 0;
+  }
+
+  const lines = splitSessionJsonlEntries(content);
+  const startIndex = Number.isInteger(state.sessionTurnStartCursor)
+    ? state.sessionTurnStartCursor
+    : lines.length;
+  let replayed = 0;
+  for (let i = startIndex; i < lines.length; i++) {
+    let parsed;
+    try { parsed = JSON.parse(lines[i]); } catch { continue; }
+    if (parsed?.type !== 'event_msg' || parsed?.payload?.type !== 'token_count') continue;
+    if (handleTokenCountEvent(parsed, state)) replayed += 1;
+  }
+  return replayed;
+}
+
 async function collectPatchOperationsFromSession(state, config) {
-  const sessionPath = ensureSessionFilePath(state, config.threadId);
+  const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
   if (!sessionPath) return [];
   let content = '';
   try { content = await readFile(sessionPath, 'utf8'); } catch (error) {
@@ -231,22 +566,21 @@ async function collectPatchOperationsFromSession(state, config) {
     const callId = String(payload.call_id ?? payload.id ?? `line_${i}`);
     if (state.processedPatchCallIds.has(callId)) continue;
 
-    const patchText = extractPatchFromResponseItemPayload(payload);
-    if (!patchText) continue;
-
-    const operations = parseApplyPatchToOperations(patchText)
-      .map((op) => ({ ...op, filePath: resolveFilePath(op.filePath, config.cwd) }))
-      .filter((op) => op.filePath && (op.oldString !== '' || op.newString !== ''));
+    const batch = createPatchBatchFromPayload(payload, config, callId);
+    if (!batch) continue;
     state.processedPatchCallIds.add(callId);
-    if (operations.length === 0) continue;
-    batches.push({ callId, operations });
+    batches.push(batch);
   }
   state.sessionLineCursor = lines.length;
   return batches;
 }
 
 async function replayMissingFunctionCallsFromSession(state, config) {
-  const sessionPath = ensureSessionFilePath(state, config.threadId);
+  if (!state.sessionTurnBoundaryReady || !Number.isInteger(state.sessionTurnStartCursor)) {
+    return { toolUses: 0, toolResults: 0 };
+  }
+
+  const sessionPath = ensureSessionFilePath(state, getSessionThreadId(state, config));
   if (!sessionPath) return { toolUses: 0, toolResults: 0 };
 
   let content = '';
@@ -257,14 +591,10 @@ async function replayMissingFunctionCallsFromSession(state, config) {
   if (!content.trim()) return { toolUses: 0, toolResults: 0 };
 
   const lines = splitSessionJsonlEntries(content);
-  const candidateStartIndexes = [
-    state.sessionFunctionCursor > 0 ? state.sessionFunctionCursor : null,
-    state.sessionTurnStartCursor > 0 ? state.sessionTurnStartCursor : null,
-    Math.max(0, lines.length - SESSION_PATCH_SCAN_MAX_LINES),
-  ].filter((value) => Number.isInteger(value) && value >= 0);
-  const startIndex = candidateStartIndexes.length > 0
-    ? Math.max(...candidateStartIndexes)
-    : Math.max(0, lines.length - SESSION_PATCH_SCAN_MAX_LINES);
+  const startIndex = Math.max(
+    state.sessionTurnStartCursor,
+    Number.isInteger(state.sessionFunctionCursor) ? state.sessionFunctionCursor : state.sessionTurnStartCursor,
+  );
 
   let toolUses = 0;
   let toolResults = 0;
@@ -296,6 +626,26 @@ async function replayMissingFunctionCallsFromSession(state, config) {
       if (handleFunctionCallOutputPayload(payload, state)) {
         toolResults += 1;
       }
+      continue;
+    }
+
+    if (payloadType === 'custom_tool_call') {
+      const callId = getResponseItemCallId(payload) || `line_${i}`;
+      if (state.processedSessionCustomToolCallIds.has(callId)) continue;
+      state.processedSessionCustomToolCallIds.add(callId);
+      if (handleCustomToolCallPayload(payload, state, config)) {
+        toolUses += 1;
+      }
+      continue;
+    }
+
+    if (payloadType === 'custom_tool_call_output') {
+      const callId = getResponseItemCallId(payload) || `line_${i}`;
+      if (state.processedSessionCustomToolOutputIds.has(callId)) continue;
+      state.processedSessionCustomToolOutputIds.add(callId);
+      if (handleCustomToolCallOutputPayload(payload, state)) {
+        toolResults += 1;
+      }
     }
   }
 
@@ -304,7 +654,11 @@ async function replayMissingFunctionCallsFromSession(state, config) {
 }
 
 async function replayMissingFunctionCallsDuringStream(state, config) {
-  await replayMissingFunctionCallsFromSession(state, config);
+  if (!await ensureSessionTurnBoundary(state, config)) {
+    warnSessionTurnBoundaryNotReady(state);
+    return { toolUses: 0, toolResults: 0 };
+  }
+  return replayMissingFunctionCallsFromSession(state, config);
 }
 
 function buildPermissionInputForPatchOperation(operation) {
@@ -389,21 +743,9 @@ function emitSyntheticPatchOperations(state, patchBatches, isError, deniedCallId
   let emittedCount = 0;
   for (const batch of patchBatches) {
     if (!batch || !Array.isArray(batch.operations)) continue;
+    emitSyntheticPatchToolUses(state, batch);
     batch.operations.forEach((op, index) => {
       const toolUseId = `codex_patch_${batch.callId}_${index}`;
-      const toolName = op.toolName === 'write' ? 'write' : 'edit';
-      if (!state.emittedToolUseIds.has(toolUseId)) {
-        state.emitMessage(toolUseMsg(toolUseId, toolName, {
-          file_path: op.filePath,
-          old_string: op.oldString,
-          new_string: op.newString,
-          start_line: op.startLine,
-          end_line: op.endLine,
-          replace_all: false,
-          source: 'codex_session_patch'
-        }));
-        state.emittedToolUseIds.add(toolUseId);
-      }
       const deniedByUser = deniedCallIds instanceof Set && deniedCallIds.has(batch.callId);
       const rollbackResult = rollbackByCallId instanceof Map ? rollbackByCallId.get(batch.callId) : null;
       const rollbackSucceeded = !deniedByUser || rollbackResult?.success !== false;
@@ -413,8 +755,11 @@ function emitSyntheticPatchOperations(state, patchBatches, isError, deniedCallId
       else if (deniedByUser) {
         resultText = rollbackSucceeded ? 'Patch denied by user and rolled back' : 'Patch denied by user but rollback failed';
       }
-      state.emitMessage(toolResultMsg(toolUseId, opIsError, resultText));
-      emittedCount += 1;
+      if (!state.emittedToolResultIds.has(toolUseId)) {
+        state.emitMessage(toolResultMsg(toolUseId, opIsError, resultText));
+        state.emittedToolResultIds.add(toolUseId);
+        emittedCount += 1;
+      }
     });
   }
   return emittedCount;
@@ -660,35 +1005,24 @@ export async function processCodexEventStream(events, state, config) {
       switch (event.type) {
       case 'thread.started': {
         state.currentThreadId = event.thread_id;
-        state.sessionFilePath = null;
-        state.sessionLineCursor = 0;
-        state.sessionFunctionCursor = 0;
-        state.sessionTurnStartCursor = 0;
-        state.processedPatchCallIds.clear();
-        state.processedSessionFunctionCallIds.clear();
-        state.processedSessionFunctionOutputIds.clear();
         console.log('[THREAD_ID]', state.currentThreadId);
         break;
       }
 
       case 'turn.started': {
+        state.turnStarted = true;
         state.turnCompleted = false;
-        const sessionPath = ensureSessionFilePath(state, config.threadId);
-        if (sessionPath && existsSync(sessionPath)) {
-          try {
-            const content = await readFile(sessionPath, 'utf8');
-            state.sessionTurnStartCursor = countSessionJsonlLines(content);
-          } catch {
-            state.sessionTurnStartCursor = state.sessionFunctionCursor;
-          }
-        } else {
-          state.sessionTurnStartCursor = state.sessionFunctionCursor;
-        }
+        state.turnUsageBaseline = null;
+        state.latestTotalTokenUsage = null;
+        await ensureSessionTurnBoundary(state, config);
         console.log('[DEBUG] Turn started');
         break;
       }
 
       case 'event_msg': {
+        if (state.turnStarted && event?.payload?.type === 'token_count') {
+          handleTokenCountEvent(event, state);
+        }
         await replayMissingFunctionCallsDuringStream(state, config);
         break;
       }
@@ -744,17 +1078,24 @@ export async function processCodexEventStream(events, state, config) {
       case 'turn.completed': {
         state.turnCompleted = true;
         console.log('[DEBUG] Turn completed');
-        const replayed = await replayMissingFunctionCallsFromSession(state, config);
+        const replayed = await replayMissingFunctionCallsDuringStream(state, config);
         if (replayed.toolUses > 0 || replayed.toolResults > 0) {
           console.log('[DEBUG] Replayed session function calls:', JSON.stringify(replayed));
         }
-        if (event.usage) {
-          console.log('[DEBUG] Token usage:', event.usage);
+        const replayedTokenCounts = await replayCurrentTurnTokenCountsFromSession(state, config);
+        if (replayedTokenCounts > 0) {
+          logDebug('CONTEXT_USAGE', `Replayed current-turn token_count events: ${replayedTokenCounts}`);
+        }
+        flushPendingCustomPatchBatches(state);
+        flushPendingCustomPlanCalls(state);
+        const completedTurnUsage = resolveCompletedTurnUsage(state);
+        if (completedTurnUsage) {
+          console.log('[DEBUG] Token usage:', completedTurnUsage);
           const claudeUsage = {
-            input_tokens: event.usage.input_tokens || 0,
-            output_tokens: event.usage.output_tokens || 0,
+            input_tokens: completedTurnUsage.input_tokens || 0,
+            output_tokens: completedTurnUsage.output_tokens || 0,
             cache_creation_input_tokens: 0,
-            cache_read_input_tokens: event.usage.cached_input_tokens || 0
+            cache_read_input_tokens: completedTurnUsage.cached_input_tokens || 0
           };
           state.emitMessage({
             type: 'result', subtype: 'usage', is_error: false,
@@ -765,6 +1106,7 @@ export async function processCodexEventStream(events, state, config) {
         if (typeof config.onTurnCompleted === 'function') {
           config.onTurnCompleted(event, state);
         }
+        state.turnStarted = false;
         break;
       }
 
@@ -822,6 +1164,18 @@ export async function processCodexEventStream(events, state, config) {
           if (handleFunctionCallOutputPayload(payload, state)) {
             if (payloadCallId) {
               state.processedSessionFunctionOutputIds.add(payloadCallId);
+            }
+            break;
+          }
+          if (handleCustomToolCallPayload(payload, state, config)) {
+            if (payloadCallId) {
+              state.processedSessionCustomToolCallIds.add(payloadCallId);
+            }
+            break;
+          }
+          if (handleCustomToolCallOutputPayload(payload, state)) {
+            if (payloadCallId) {
+              state.processedSessionCustomToolOutputIds.add(payloadCallId);
             }
             break;
           }

@@ -1,3 +1,471 @@
+##### **2026年8月21日（v0.5.3）**
+
+English:
+
+✨ Features
+- Add **DeepSeek Harness (DSH) CLI Provider**: connect the DSH daemon through a WebSocket bridge with streaming text / thinking, tool calls and results, approval and question handling, model discovery, persistent multi-turn sessions, history list / load / delete, and provider-aware session routing (by @zhukunpenglinyutong)
+- Add **DSH settings and provider UI**: configure the DSH host and binary, start / stop the daemon, inspect status, select DSH models, and use DSH from the chat and history views with localized UI (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Improve **DSH bridge reliability and lifecycle management**: drain subprocess stderr, validate and atomically persist host settings, guard lifecycle re-entry, release finished-turn resources promptly, and return best-effort responses when approval or question forwarding fails (by @zhukunpenglinyutong)
+- Add **compact transcript restoration**: reopening a compacted conversation restores the full pre-compaction history instead of only the compact summary (by @Gadfly)
+- Improve **OpenCode model loading on Windows**: recover from empty model lists, use a private temporary directory for redirects, and avoid inlining file contents into model requests (by @zhukunpenglinyutong)
+- Restore the **Star History chart** and add the official documentation entry, with dashboard popovers rendered correctly in IDE themes (by @FaintFlower, @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **multi-tab webview rendering** so open tabs keep their content and render updates independently (by @Gadfly)
+- Fix **Codex approval policy compatibility**: stop passing the retired `approval_policy=untrusted` value to the Codex CLI (by @hebulin)
+- Fix **DSH protocol and process edge cases**: reject malformed fragmented WebSocket messages, cap aggregate frame sizes, guard against PID reuse, clear stale timers, handle foreign-turn idle backstops, and include useful stderr tails in failures (by @zhukunpenglinyutong)
+- Fix **conversation event attribution and history backfilling**: keep sidechain rows out of parent links, preserve parent conversation chains, and ensure turn results are not stranded when an event is skipped (by @zhukunpenglinyutong)
+- Harden **Grok permission and edit reporting** on error paths by requiring exact permission methods, sequence-safe ledger keys, and evidence-backed edit results (by @zhukunpenglinyutong)
+
+中文：
+
+✨ 新功能
+- 新增 **DeepSeek Harness（DSH）CLI Provider**：通过 WebSocket bridge 连接 DSH daemon，支持流式文本 / 思考、工具调用与结果、权限与提问处理、模型发现、持久化多轮会话，以及按 provider 路由的会话历史（列表 / 加载 / 删除）（by @zhukunpenglinyutong）
+- 新增 **DSH 设置与 Provider 界面**：可配置 DSH host 与 binary、启动 / 停止 daemon、查看状态、选择 DSH 模型，并在聊天与历史视图中使用 DSH；界面文案支持多语言（by @zhukunpenglinyutong）
+
+🔧 优化
+- 加固 **DSH bridge 可靠性与生命周期管理**：排空子进程 stderr、校验并原子化保存 host 设置、防止生命周期重复进入、及时释放已完成轮次资源；权限或提问转发失败时也会尽力返回响应，避免 host 长时间等待（by @zhukunpenglinyutong）
+- 新增 **紧凑会话记录恢复**：重新打开被压缩的对话时恢复压缩前的完整历史，而不再只显示压缩摘要（by @Gadfly）
+- 改进 **Windows 上的 OpenCode 模型加载**：修复模型列表为空时的恢复逻辑，重定向使用私有临时目录，并避免将文件内容直接内联到模型请求中（by @zhukunpenglinyutong）
+- 恢复 **Star History 图表**并新增官方文档入口，同时修复 dashboard 弹出层在 IDE 主题下的显示（by @FaintFlower、@zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **多 Tab webview 渲染**：打开的 Tab 能保留各自内容，并彼此独立接收渲染更新（by @Gadfly）
+- 修复 **Codex 权限策略兼容性**：不再向 Codex CLI 传递已废弃的 `approval_policy=untrusted` 值（by @hebulin）
+- 修复 **DSH 协议与进程边界问题**：拒绝格式错误的分片 WebSocket 消息、限制聚合帧大小、防止 PID 复用误判、清理过期定时器、为外部轮次增加空闲兜底，并在失败信息中携带有用的 stderr 尾部内容（by @zhukunpenglinyutong）
+- 修复 **会话事件归属与历史回填**：侧链记录不再错误建立父消息关联，父会话链保持完整；事件被跳过时，轮次结果也不会遗失（by @zhukunpenglinyutong）
+- 加固 **Grok 权限与编辑结果上报**：错误路径仅接受精确的权限方法，权限 ledger 使用序列安全的 key，编辑成功状态必须有实际证据支持（by @zhukunpenglinyutong）
+
+---
+
+##### **2026年8月12日（v0.5.2）**
+
+English:
+
+✨ Features
+- Show the **subagent's original prompt** in its process details: the Agent group / task execution blocks pass the tool_use input prompt into the details view, rendered as a dedicated section above the thought section, with translations for all 10 UI languages (by @gadfly3173)
+
+🔧 Improvements
+- Update the **contribution branch model**: community PRs now target the current `feature/vX.Y.Z` version branch instead of `main` / `develop`, and README contributor credits switch to the auto-updating contrib.rocks wall (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **streaming frame starvation in dense turns**: StreamMessageCoalescer no longer drops an in-flight frame just because newer data is queued — ordering is enforced against the last pushed sequence (and reset together with the stream state), so tool_use / tool_result blocks reach the webview during the stream instead of only at the stream-end flush; message content / raw snapshots are now volatile to close the cross-thread reassignment race (by @gadfly3173)
+- Fix **Claude async subagent report delivery (dual carrier)**: `<task-notification>` XML is now recognized both as a plain user message and as a queued_command attachment, live and on history reload — history reshapes attachment rows into user messages so the subagent card receives the final report instead of staying stuck on the launch ack text (by @gadfly3173)
+- Fix **subagent thought section content**: the process model collects assistant thinking blocks (the agent's actual reasoning) instead of text blocks, so the terminal report no longer duplicates between the thought and result sections (by @gadfly3173)
+- Fix **JCEF OSR IME composition for CJK input methods**: a repaired input-method listener forwards the real caret position to Blink (Bopomofo / Pinyin candidate picking), terminates the composition when the IME aborts mid-composition, and falls back to the platform adapter when the browser is unavailable; can be disabled with `-Dccg.disable.osr.ime.fix=true` (by @OmarHung)
+- Fix **chat input stuck in composing state**: a non-composition input event while the composing flag is still set proves JCEF dropped compositionEnd (e.g. input source switched mid-composition) and resets the state; tag rendering is now composition-safe (never scheduled during composition, re-checked when the debounced callback runs), and zero-width IME residue no longer blocks the `/` and `#` trigger menus (by @OmarHung, @jianhong-li, refs #1650)
+- Fix **`@` file tag rebuilds erasing existing chips**: only an actually renderable reference in raw text authorizes a DOM rebuild — existing file / quote chips and unrelated raw `@` text (e.g. `@GetMapping`) no longer trigger one (by @jianhong-li, closes #1650)
+- Fix **AskUserQuestion / permission dialogs lost on watcher restart**: the Java permission watcher now only purges session IPC files older than 2 hours on start so fresh in-flight requests survive, ask / plan response files are included in cleanup, and the daemon's stable session routing key is pinned by a regression test (by @zhukunpenglinyutong)
+- Fix **Codex skill toggle stuck spinning**: the toggle result echoes the requested skill name so the frontend can clear its in-progress flag (by @hebulin, closes #1438)
+
+中文：
+
+✨ 新功能
+- 子代理进程详情新增 **原始 prompt 展示**：Agent 分组 / 任务执行块把 tool_use 输入中的 prompt 传入详情视图，在「思考」区块上方以独立区块展示，并补齐全部 10 种界面语言的翻译（by @gadfly3173）
+
+🔧 优化
+- 更新 **贡献分支模型**：社区 PR 改为合入当前 `feature/vX.Y.Z` 版本分支（而非 `main` / `develop`）；README 贡献者名单切换为自动更新的 contrib.rocks 墙（by @zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **密集流式输出时的帧饥饿**：StreamMessageCoalescer 不再仅因已有更新数据排队就丢弃在途帧——顺序改为以「最后已推送序号」为准（并随流状态一起重置），tool_use / tool_result 块在流式过程中即可到达 webview，不再只等流末冲刷；消息 content / raw 快照改为 volatile，消除跨线程重赋值竞态（by @gadfly3173）
+- 修复 **Claude 异步子代理报告投递（双载体）**：`<task-notification>` XML 现在同时识别普通 user 消息与 queued_command attachment 两种载体（实时 + 历史加载），历史加载会把 attachment 行改写为 user 消息，子代理卡片可收到最终报告，不再停在启动确认文本（by @gadfly3173）
+- 修复 **子代理「思考」区块内容**：进程模型改为收集 assistant thinking 块（真实推理过程）而非 text 块，最终报告不再在「思考」与「结果」两个区块重复出现（by @gadfly3173）
+- 修复 **JCEF OSR 中文输入法组合态**：修复后的输入法监听器会把真实光标位置转发给 Blink（注音 / 拼音选字）、在 IME 中途取消时正确结束组合态，并在无法解析 browser 时回退平台适配器；可用 `-Dccg.disable.osr.ime.fix=true` 关闭（by @OmarHung）
+- 修复 **输入框卡在组合态**：组合标记仍存在时收到非组合类输入事件，即证明 JCEF 丢失了 compositionEnd（如输入法中途切换），此时自动重置状态；标签渲染改为组合态安全（组合中不调度、防抖回调执行前二次检查）；零宽 IME 残留字符不再阻挡 `/` 与 `#` 触发菜单（by @OmarHung、@jianhong-li，关联 #1650）
+- 修复 **`@` 文件标签重建误删已有 chip**：只有原始文本中确实存在可渲染引用时才允许 DOM 重建——已渲染的 file / quote chip 和无关的 `@` 文本（如 `@GetMapping`）不再触发重建（by @jianhong-li，关闭 #1650）
+- 修复 **watcher 重启丢失 AskUserQuestion / 权限弹窗**：Java 权限 watcher 启动时只清理 2 小时前的会话 IPC 文件，刚写入的在途请求得以保留；清理范围补全 ask / plan 响应文件；守护进程的稳定会话路由键由回归测试锁定（by @zhukunpenglinyutong）
+- 修复 **Codex skill 开关一直转圈**：开关结果回显请求的 skill 名称，前端可据此清除进行中状态（by @hebulin，关闭 #1438）
+
+---
+
+##### **2026年8月11日（v0.5.1）**
+
+English:
+
+✨ Features
+- Add **session history for PI / OpenCode / Kimi**: list, open, and delete on-disk CLI sessions the same way Claude / Codex / Grok already do, with provider-specific readers (PI JSONL, OpenCode storage, Kimi `state.json` + `wire.jsonl`, including legacy Kimi paths) and reconstructed chat (text, thinking, tool calls / results) (by @zhukunpenglinyutong)
+- Add **OpenCode 1.x SQLite history**: prefer `opencode.db` for list / load / delete while still merging the legacy JSON storage tree so unmigrated installs stay visible (by @zhukunpenglinyutong)
+- Add **history model / agent restore and multi-provider export**: reopening a history row restores the session model (and agent when known); export routes through Claude / Codex / Grok / OpenCode / Kimi / Pi readers and records the row provider (by @zhukunpenglinyutong)
+- Add **Grok dynamic model discovery via `listModels`**: the Grok model picker loads the live CLI catalog instead of a static built-in list (by @toxeh)
+- Add **conversation quote-into-input**: quote selected assistant / user text into the chat bar as removable inline chips via a message button, context menu, or `Ctrl/Cmd+Shift+Q`, then expand chips back to Markdown blockquotes on send (by @Merzley)
+- Expand **Prompt Enhancer and Commit AI to Grok / Kimi / OpenCode / Pi**: session-less one-shot `cli-ask` runs the same CLI set as chat; Auto mode prefers the current chat provider, and settings / model panels cover all six engines (by @zhukunpenglinyutong)
+- Add **CLI image attachments** for Grok / Kimi / OpenCode / Pi chat sends (materialized files, ACP image blocks, path injection / `-f` flags as needed), including a Grok image-only fallback text block (by @zhukunpenglinyutong)
+- Add the **`/mcp` built-in slash command** to Claude suggestion list so MCP server status and remote OAuth entry work from the plugin (by @hebulin, closes #1521)
+- Surface **prompt-enhancer usage meta** (mode · CLI · model) while enhancement runs, with a shortcut into Prompt Enhancer settings (by @zhukunpenglinyutong)
+- Add **model pin / provider grouping** in the model selector: pin favorites per provider, group large vendor-prefixed catalogs, lower the search threshold, and keep the search row sticky (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Stabilize **CLI model UI across navigation**: cache CLI model catalogs when leaving chat for history / settings, keep showing the selected model id while catalogs load, and use proximity-based toolbar compact mode for all CLI providers (by @zhukunpenglinyutong)
+- Soften the **toolbar selector compact threshold** from 20px to 10px so model / mode / provider labels stay expanded longer before collapsing to icon-only (by @zhukunpenglinyutong)
+- Prefer the **chat-selected model in prompt-enhancer Auto mode** when the provider matches, and extract nested OpenCode 1.x CLI error payloads so failures show the real message (by @zhukunpenglinyutong)
+- Offload **Commit AI generation off the EDT**: snapshot selected Changes on the UI thread, then run git4idea diff / repo lookup / AI setup on a pooled thread (by @zhukunpenglinyutong)
+- Harden **session-less CLI asks and model parsing**: Grok one-shot asks use deny-all permissions (no tools from third-party prompt text), drop model ids that look like CLI flags, expand Grok sentinel normalization (`default` / `auto` / … → `grok-4.5`), scope TOML default model lookup to `[models]`, clean up temp image paths after Kimi / OpenCode sends, and place OpenCode prompts before `-f` (by @zhukunpenglinyutong, @toxeh)
+- Share a **HistoryPathMatcher** across CLI history readers (`/tmp` vs `/private/tmp`, parent / child cwd, case-insensitive Windows paths) so sessions under subfolders are listed reliably (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **daemon idle probes after system resume**: generation-scoped lifecycle, wall-time suspend detection, and heartbeat-version-bound probes prevent coordinated restart storms and late death decisions against replacement processes (by @jianhong-li, refs #1601)
+- Fix **IDE theme repaint for every open session**: ThemeConfigService keeps a set of registered callbacks so all open chat windows repaint instead of only the last one (by @hebulin, closes #1586)
+- Fix **completion sound / success toast on manual Stop** for Claude and Codex — interrupted turns no longer play the finished-task cue (by @hebulin, closes #1597)
+- Fix **Claude async subagent report delivery**: recover `<task-notification>` user messages as task events (live + history), keep launch-ack agents running until a terminal event, and keep StatusPanel scoped to the full conversation while any async agent is alive (by @gadfly3173)
+- Fix **`@` file search ranking and dropdown flicker**: IDE-style fuzzy scoring (name / relative path only), requestId correlation, optimistic local re-filter, and a dropdown that keeps prior items while loading (by @zhukunpenglinyutong)
+- Fix **Codex model picker dropping built-ins**: always merge plugin custom models + dynamic catalog + built-in `CODEX_MODELS` so Sol / Terra / Luna / 5.x stay selectable when a custom provider returns only a single default (by @zhukunpenglinyutong)
+- Fix **Grok default / sentinel model ids** normalizing to `grok-4.5` (not remapping to a bare `grok`), including saved-state migration for `default` / `(default)` / case variants (by @toxeh, @zhukunpenglinyutong)
+- Fix **Windows CLI binary resolution** for extensionless npm shims: prefer `.exe` / `.cmd` / `.bat` so PI / OpenCode / Kimi no longer fail with false CLI-not-found / `ENOENT` (by @zhukunpenglinyutong)
+- Fix **assistant markdown horizontal overflow** in JCEF: add `word-break: break-word` so long URLs / identifiers wrap inside the message container (by @hebulin, closes #1508)
+- Fix **streaming connection status** to use the provider dynamic display name (by @toxeh)
+- Fix **changelog dialog inline emphasis**: render bold, italic, bold-italic, and inline code instead of showing raw `**` markers (by @gadfly3173)
+
+中文：
+
+✨ 新功能
+- 新增 **PI / OpenCode / Kimi 会话历史**：与 Claude / Codex / Grok 一样可列表、打开、删除本地 CLI 会话；按 provider 读取磁盘格式（PI JSONL、OpenCode storage、Kimi `state.json` + `wire.jsonl`，含旧版 Kimi 路径），并重建文本 / 思考 / 工具调用与结果（by @zhukunpenglinyutong）
+- 新增 **OpenCode 1.x SQLite 历史**：优先读取 `opencode.db` 做列表 / 加载 / 删除，同时合并旧版 JSON storage，未迁移安装仍可见（by @zhukunpenglinyutong）
+- 新增 **历史恢复模型 / Agent 与多 provider 导出**：重新打开历史行会恢复该会话使用的模型（以及已知的 agent）；导出走 Claude / Codex / Grok / OpenCode / Kimi / Pi 各自 reader，并写入该行的 provider（by @zhukunpenglinyutong）
+- 新增 **Grok 动态模型发现（`listModels`）**：Grok 模型选择器加载 CLI 实时目录，而不再只依赖静态内置列表（by @toxeh）
+- 新增 **对话引用到输入框**：可通过消息按钮、右键菜单或 `Ctrl/Cmd+Shift+Q` 将选中文本以可移除的引用 chip 插入聊天栏，发送时再展开为 Markdown 引用块（by @Merzley）
+- 扩展 **Prompt Enhancer 与 Commit AI 至 Grok / Kimi / OpenCode / Pi**：通过无会话的 `cli-ask` 使用与聊天相同的 CLI 集合；Auto 模式优先当前聊天 provider，设置与模型面板覆盖全部六个引擎（by @zhukunpenglinyutong）
+- 新增 **CLI 图片附件** 支持 Grok / Kimi / OpenCode / Pi 发送（落盘文件、ACP 图片块、路径注入 / `-f` 等），Grok 纯图片消息会补兜底文本块（by @zhukunpenglinyutong）
+- 新增 Claude 内置斜线命令 **`/mcp`**，可在插件中查看 MCP 服务器状态并进入远程 OAuth 入口（by @hebulin，关闭 #1521）
+- 展示 **Prompt 增强运行元信息**（模式 · CLI · 模型），增强过程中可见，并提供跳转 Prompt Enhancer 设置的快捷入口（by @zhukunpenglinyutong）
+- 模型选择器支持 **置顶收藏与按 provider 分组**：按 provider 固定收藏、对大体量 vendor 前缀目录分组、降低搜索触发阈值，并保持搜索行 sticky（by @zhukunpenglinyutong）
+
+🔧 优化
+- 稳定 **跨页面 CLI 模型 UI**：从聊天切到历史 / 设置再返回时缓存模型目录；目录加载中仍显示当前选中模型 id；所有 CLI provider 统一为基于间距的工具栏紧凑模式（by @zhukunpenglinyutong）
+- 将 **工具栏选择器紧凑阈值** 从 20px 放宽到 10px，模型 / 模式 / provider 标签在更窄宽度下仍尽量显示文字（by @zhukunpenglinyutong）
+- Prompt Enhancer Auto 模式在 provider 匹配时 **优先聊天所选模型**，并解析 OpenCode 1.x 嵌套错误字段，失败时展示真实错误信息（by @zhukunpenglinyutong）
+- **Commit AI 生成移出 EDT**：在 UI 线程快照选中 Changes，再在后台线程执行 git4idea diff / 仓库查找 / AI 调用（by @zhukunpenglinyutong）
+- 加固 **无会话 CLI 请求与模型解析**：Grok 一次性请求使用 deny-all（第三方 prompt 文本不可驱动工具）、丢弃形如 CLI flag 的 model id、扩展 Grok sentinel 归一化（`default` / `auto` / … → `grok-4.5`）、TOML 默认模型仅在 `[models]` 范围查找、Kimi / OpenCode 发送后清理临时图片路径，并将 OpenCode prompt 放在 `-f` 之前（by @zhukunpenglinyutong、@toxeh）
+- CLI 历史 reader 共用 **HistoryPathMatcher**（`/tmp` vs `/private/tmp`、父子 cwd、Windows 大小写路径），子目录下的会话也能稳定列出（by @zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **系统休眠唤醒后的 daemon 空闲探测**：按 generation 隔离生命周期，用墙钟检测 suspend，并用 heartbeat 版本绑定探测结果，避免协同重启风暴与误杀替代进程（by @jianhong-li，关联 #1601）
+- 修复 **IDE 主题切换只刷新最后一个会话**：ThemeConfigService 改为维护回调集合，所有打开的聊天窗同步重绘（by @hebulin，关闭 #1586）
+- 修复 Claude / Codex **手动 Stop 仍播放完成音 / 成功 toast**，中断轮次不再当作任务完成（by @hebulin，关闭 #1597）
+- 修复 **Claude 异步子代理报告投递**：从 `<task-notification>` 用户消息恢复 task 事件（实时 + 历史），启动 ack 的 agent 保持运行直到终态事件，且存在异步 agent 时 StatusPanel 始终覆盖整段会话（by @gadfly3173）
+- 修复 **`@` 文件搜索排序与下拉闪烁**：IDE 风格模糊打分（仅文件名 / 相对路径）、requestId 关联、按键乐观本地过滤，以及加载时保留旧结果避免闪空（by @zhukunpenglinyutong）
+- 修复 **Codex 模型选择器丢掉内置模型**：始终合并插件自定义模型 + 动态 catalog + 内置 `CODEX_MODELS`，自定义 provider 只返回单一默认时仍可选 Sol / Terra / Luna / 5.x（by @zhukunpenglinyutong）
+- 修复 **Grok 默认 / sentinel 模型 id** 归一化为 `grok-4.5`（不再映射成裸 `grok`），并迁移 `default` / `(default)` / 大小写变体的已存状态（by @toxeh、@zhukunpenglinyutong）
+- 修复 **Windows 上无扩展名 npm shim 的 CLI 解析**：优先 `.exe` / `.cmd` / `.bat`，避免 PI / OpenCode / Kimi 误报 CLI not found / `ENOENT`（by @zhukunpenglinyutong）
+- 修复 JCEF 中 **助手 Markdown 横向溢出**：补充 `word-break: break-word`，长 URL / 标识符可在消息容器内换行（by @hebulin，关闭 #1508）
+- 修复 **流式连接状态** 使用 provider 的动态 displayName（by @toxeh）
+- 修复 **更新日志对话框行内强调**：正确渲染粗体 / 斜体 / 粗斜体与行内代码，不再原样显示 `**`（by @gadfly3173）
+
+---
+
+##### **2026年8月9日（v0.5）**
+
+English:
+
+✨ Features
+- Add **Grok / Kimi / OpenCode / Pi CLI providers**: local CLI-based providers sit alongside Claude and Codex, with bridge channels, Java session routing, CLI status detection, webview provider selection, a beta notice, and a dedicated CLI section in settings (by @zhukunpenglinyutong)
+- Add a **Persistent Multi-Turn ACP Daemon for Grok**: Grok no longer spawns a fresh CLI process per turn. A warm multi-turn JSON-RPC daemon streams text / thinking deltas, tool_use and tool_result natively, with prewarm / lifecycle coordination and history tools instead of polling `chat_history.jsonl` (by @toxeh)
+- Add a **500k Grok Context Ring**: Grok models resolve native 500k context capacity (legacy grok-2 stays 128k). Usage is synthesized into the IDE ring / grid dialog (Conversation vs Free space) from ACP totals and persistent usage, so the context UI matches Claude / Codex (by @toxeh)
+- Add **Codex custom model context windows**: users can set per-model context limits (k-unit input) for Codex custom models; the input bar shows live current-context usage, and recovery prefers the real current-turn snapshot over session-cumulative totals (by @EzioX1459)
+- Add **Codex models from `config.toml` / model catalog**: the Codex model picker uses the same dynamic `listModels` path as other CLI providers — top-level `model` / `model_provider` / `model_catalog_json` plus defensive catalog JSON shapes — so catalog-only ids (e.g. kimi-k3) can be selected and restored after restart (by @zhukunpenglinyutong)
+- Add **compact clickable `@file` references** in user messages: `@path` tokens render as compact links that open the file in the IDE, with path spaces, Windows / POSIX paths, line numbers, `@@` escapes, and hover titles for the full path (by @Cyber0xFE, @zhukunpenglinyutong)
+- Add **AskUserQuestion sound alerts** and a **"system notifications only when IDE is unfocused"** toggle: permission / question prompts can play a sound; system notifications can be limited to unfocused / minimized IDE windows, with focused-window detection and multi-language settings copy (by @adminkk)
+- Add **streaming AI commit-message generation**: Commit AI streams partial results into the VCS commit panel (Git4Idea-backed real diffs), cancels in-flight runs on re-trigger, and restores the user's draft if generation fails (by @azurewy)
+- Add **chat bar theme color customization**: the chat input bar accent color is user-configurable from the webview theme settings (by @elexiang)
+- Improve **streaming markdown fidelity**: replace the lightweight streaming renderer with per-block memoization of the full marked pipeline so mid-stream tables / lists match the final render (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Enlarge **CLI section controls** in settings for better touch / click targets (by @zhukunpenglinyutong)
+- Resolve **Grok effective auth** across the Java / Node bridge: empty `~/.grok/auth.json` no longer forces OAuth or ambient host keys; falls back to plugin key then `~/.grok/config.toml` api_key / base_url, while real OAuth tokens stay key-free (by @zhukunpenglinyutong)
+- Surface **CLI model-load failures** in the model dropdown with a clickable retry row and i18n strings (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **Webview watchdog recovery memory leak**: soft recovery uses `CefBrowser.reload()` instead of re-`loadHTML()` on every cycle (which retained generated file-URL payloads in JCEF and drove memory / CPU up after multi-project startup or sleep/wake storms) (by @jianhong-li)
+- Fix **hidden-tab recovery storms**: only active unready tabs run bridge fallback timers / startup watchdog work; inactive tabs pause recovery so multi-project multi-tab startup no longer burns config reads and reload loops in the background (by @jianhong-li)
+- Fix **first-tab OSR blank history**: restored history is published through OSR frame fences (`history_dom_committed` + content revision) so the Remote JCEF surface gets a full frame after multi-project startup instead of a blank / partial backing image until hover or resize (by @jianhong-li)
+- Fix **daemon heartbeat restart storms** after sleep/wake: reset the heartbeat baseline when restarting so a stale `lastHeartbeatResponse` from the dead process cannot immediately kill the freshly spawned daemon (by @hebulin, closes #1512)
+- Fix **Webview startup bridge recovery** staying alive through readiness and settling **SDK status query failures** without leaving the UI stuck (by @GGMGG)
+- Fix **Codex context usage accuracy**: treat `last_token_usage` + `model_context_window` as the authoritative current-context snapshot (not session-cumulative `total_token_usage`); recover from JSONL when the SDK omits `token_count`, and keep turn usage as a delta from the current-turn baseline (by @EzioX1459, @jianhong-li)
+- Fix **Codex subagent history and stable anchors**: restore Codex history correctly and keep message anchors stable across subagent turns (by @GGMGG)
+- Fix **Claude large session-query JSON truncation**: flush session-query stdout before process exit so payloads above the pipe high-water mark are not cut mid-JSON (`MalformedJsonException` on `$.messages[N].cwd`) (by @gadfly3173)
+- Fix **npm ≥9 nested `versions --json` arrays**: unwrap array-of-array layers so the SDK version dropdown receives remote versions instead of falling back to built-ins with a false "remote versions unavailable" banner (by @PctAIGM)
+- Fix **anchor-dot scroll under CSS zoom**: convert zoom-scaled `getBoundingClientRect` deltas into layout space so one click lands on the target instead of converging after 3–4 tries (by @gadfly3173)
+- Fix **StatusPanel Edits file count / diff stats**: large equal-line replacements no longer collapse to net-line estimates; MultiEdit / `edits[]` and subagent sidechain edits are included; cache keys use full-content hashes (by @hpstream)
+- Fix **per-turn cost billed on Claude slot id**: resolve the provider-mapped model (same path as context limits) before pricing so custom DeepSeek / relay rates are used instead of built-in Claude tables (by @EzioX1459)
+- Fix **Windows `.cmd` / `.bat` CLI shims**: resolve PATHEXT-aware shims and shell-spawn them (CVE-2024-27980-safe) so npm-global CLI tools start correctly on Windows (by @zhukunpenglinyutong)
+
+中文：
+
+✨ 新功能
+- 新增 **Grok / Kimi / OpenCode / Pi CLI Provider**：在 Claude / Codex 之外接入本地 CLI 类 provider，涵盖 bridge 通道、Java 会话路由、CLI 状态检测、webview provider 选择、beta 提示，以及设置页独立的 CLI 分区（by @zhukunpenglinyutong）
+- 新增 **Grok 持久化多轮 ACP Daemon**：Grok 不再每轮冷启动 CLI，改为常驻多轮 JSON-RPC daemon，原生流式推送 text / thinking delta、tool_use 与 tool_result，并配合 prewarm / 生命周期协调与历史工具，替代对 `chat_history.jsonl` 的轮询（by @toxeh）
+- 新增 **Grok 50 万 Context Ring**：Grok 模型按原生 500k 上下文容量解析（旧版 grok-2 仍为 128k）；用量由 ACP 总量与持久化 usage 合成为 IDE 圆环 / 网格对话框（对话 vs 空闲），与 Claude / Codex 上下文 UI 对齐（by @toxeh）
+- 新增 **Codex 自定义模型上下文窗口**：可为 Codex 自定义模型设置上下文上限（k 单位输入）；输入栏展示当前上下文用量，恢复时优先使用真实当前轮快照而非会话累计 token（by @EzioX1459）
+- 新增 **从 `config.toml` / model catalog 发现 Codex 模型**：Codex 模型选择器走与其他 CLI provider 相同的动态 `listModels` 路径——解析顶层 `model` / `model_provider` / `model_catalog_json` 及多种 catalog JSON 形态，catalog 专有 id（如 kimi-k3）可被选择并在重启后恢复（by @zhukunpenglinyutong）
+- 新增用户消息中的 **紧凑可点击 `@file` 引用**：`@path` 渲染为可在 IDE 打开的紧凑链接，支持路径空格、Windows / POSIX 路径、行号、`@@` 转义，以及 hover 显示完整路径（by @Cyber0xFE、@zhukunpenglinyutong）
+- 新增 **AskUserQuestion 声音提醒** 与 **「仅在 IDE 未聚焦时显示系统通知」开关**：权限 / 提问提示可播放声音；系统通知可限制为 IDE 未聚焦 / 最小化时弹出，并完善焦点检测与多语言设置文案（by @adminkk）
+- 新增 **流式 AI Commit Message 生成**：Commit AI 将部分结果流式写入 VCS 提交面板（基于 Git4Idea 的真实 diff），再次触发时取消进行中的生成，失败时恢复用户草稿（by @azurewy）
+- 新增 **聊天栏主题色自定义**：可在 webview 主题设置中配置聊天输入栏强调色（by @elexiang）
+- 改进 **流式 Markdown 保真度**：用完整 marked 管线的按块 memo 替换轻量流式渲染器，使流式过程中的表格 / 列表与最终渲染一致（by @zhukunpenglinyutong）
+
+🔧 优化
+- 放大设置页 **CLI 分区控件**，提升点击 / 触控命中区域（by @zhukunpenglinyutong）
+- 贯通 Java / Node 的 **Grok 有效鉴权解析**：空的 `~/.grok/auth.json` 不再强行走 OAuth 或继承宿主环境密钥；依次回退到插件配置密钥与 `~/.grok/config.toml` 的 api_key / base_url，真实 OAuth token 仍保持无 key 路径（by @zhukunpenglinyutong）
+- 在模型下拉中 **展示 CLI 模型加载失败**，提供可点击重试行与 i18n 文案（by @zhukunpenglinyutong）
+
+🐛 修复
+- 修复 **Webview 看门狗恢复内存泄漏**：软恢复改为 `CefBrowser.reload()`，避免每次 `loadHTML()` 在 JCEF 中堆积 file-URL payload，导致多项目启动或休眠唤醒后内存 / CPU 飙升（by @jianhong-li）
+- 修复 **隐藏 Tab 恢复风暴**：仅对当前激活且未就绪的 Tab 跑 bridge 回退定时器 / 启动看门狗；非激活 Tab 暂停恢复，避免多项目多 Tab 启动时后台狂刷配置读取与 reload（by @jianhong-li）
+- 修复 **首个 Tab OSR 历史空白**：经 OSR 帧栅栏（`history_dom_committed` + 内容 revision）发布恢复后的历史，使 Remote JCEF 在多项目启动后拿到完整帧，而不再直到 hover / 缩放才出现内容（by @jianhong-li）
+- 修复休眠唤醒后 **daemon 心跳重启风暴**：重启时重置心跳基线，避免已死进程的陈旧 `lastHeartbeatResponse` 立刻杀死刚拉起的 daemon（by @hebulin，关闭 #1512）
+- 修复 **Webview 启动 bridge 恢复** 能持续到就绪，并妥善处理 **SDK 状态查询失败**，避免 UI 卡住（by @GGMGG）
+- 修复 **Codex 上下文用量准确性**：以 `last_token_usage` + `model_context_window` 为当前上下文权威快照（而非会话累计 `total_token_usage`）；SDK 省略 `token_count` 时从 JSONL 恢复，单轮用量按当前轮基线差分（by @EzioX1459、@jianhong-li）
+- 修复 **Codex 子代理历史与锚点稳定性**：正确恢复 Codex 历史，并在 subagent 轮次间保持消息锚点稳定（by @GGMGG）
+- 修复 **Claude 大会话 session-query JSON 截断**：进程退出前 flush session-query stdout，避免超过管道高水位的 payload 被截断成半截 JSON（`$.messages[N].cwd` 的 `MalformedJsonException`）（by @gadfly3173）
+- 修复 **npm ≥9 嵌套的 `versions --json` 数组**：展开 array-of-array 层，使 SDK 版本下拉能拿到远端版本，而不再误报「remote versions unavailable」并回退到内置列表（by @PctAIGM）
+- 修复 **CSS zoom 下锚点滚动偏差**：将 zoom 缩放后的 `getBoundingClientRect` 差值换算回 layout 空间，一次点击即可落到目标，无需 3–4 次收敛（by @gadfly3173）
+- 修复 **StatusPanel 编辑文件数 / diff 统计**：大段等行替换不再塌缩为净行估算；纳入 MultiEdit / `edits[]` 与 subagent 侧链编辑；缓存键使用全文 hash（by @hpstream）
+- 修复 **按 Claude 槽位 id 计费**：计费前解析 provider 映射后的真实模型（与上下文上限同一路径），自定义 DeepSeek / 中转价格生效，不再误用内置 Claude 价表（by @EzioX1459）
+- 修复 **Windows `.cmd` / `.bat` CLI 垫片启动**：按 PATHEXT 解析垫片并以 shell 方式 spawn（兼容 CVE-2024-27980），确保 npm 全局 CLI 在 Windows 上可正常启动（by @zhukunpenglinyutong）
+
+---
+
+##### **2026年7月29日（v0.4.9）**
+
+English:
+
+✨ Features
+- Add a **built-in TokenTracker usage dashboard**, replacing the in-house usage statistics: the usage panel now embeds a vendored `tokentracker-dashboard` (usage overview, cost trends, an activity heatmap with a 3D view, per-model and per-project / date-range breakdowns), backed by a local server gateway that auto-detects / installs `tokentracker-cli`, runs a serialized server on `127.0.0.1`, and whitelist-proxies requests. The old overview / models / sessions / timeline tabs and the `ClaudeUsageAggregator` / `CodexUsageAggregator` backends are removed (by @GGMGG)
+- Add **isolated MCP provider tabs**: the MCP settings panel now has separate Claude and Codex tabs, each mounting its own provider panel with its own server list, tool set, cache keys and a dedicated `updateCodexMcpServerTools` callback channel, so the two providers no longer clobber each other's MCP tool state. The selected tab is persisted and is independent of the active chat provider (by @GGMGG)
+- Add **importing Codex providers from cc-switch and provider help dialogs**: the Codex provider panel gains its own cc-switch import menu and an isolated preview / save channel (so the Claude and Codex panels mounted at the same time don't cross-talk), and the Claude / Codex provider lists add "What's this?" help dialogs for the "Use local settings.json" and "Use CLI login" options (by @zhukunpenglinyutong)
+- Add **OpenAI official direct connection and expanded provider presets**: the Codex provider dialog now opens with the OpenAI official direct config by default, and the preset list expands to Zhipu GLM, Kimi, Kimi Coding, DeepSeek, MiniMax, Xiaomi MiMo / MiMo Plan, Bailian / Bailian Coding, LongCat, OpenCode Go and OpenRouter, with corrected Kimi naming and new vendor icons (by @zhukunpenglinyutong)
+- Add **in-message math rendering**: math output from the model is now rendered with KaTeX. Bracket-style delimiters (`\[...\]`, `\(...\)`) and indented display math are normalized to the `$$...$$` / `$...$` the renderer expects, while fenced and inline code keep their literals untouched and LaTeX code blocks get a dedicated preview style (by @zhukunpenglinyutong)
+- Add the **`/goal` built-in slash command**: Claude's built-in command list now includes `/goal`, which keeps the assistant working across turns until the stated goal condition is met (by @zhukunpenglinyutong)
+- Add **nested Codex skill discovery**: the Codex skill scanner now recursively discovers skills nested inside subdirectories / collections (previously only top-level children were read), with safety bounds — caps on depth / visited nodes / discovered count, skipping generated dirs (`node_modules`, `build`, `target`, `dist`, `out`, `coverage`), treating a detected skill package as a traversal boundary, and not following symlinked `SKILL.md` files (by @GGMGG)
+- Add a **Claude SDK 0.3.182+ requirement for the Fable tier**: the SDK floor moves from 0.2.58 to 0.3.182 so the `fable` model alias is recognized (older 0.2.x CLIs passed it through literally and 401'd on third-party relays with "model fable" / "No available channel"). SDK status now reports whether it meets the minimum, and selecting a Fable model on an older SDK shows a one-time warning toast with an "Update SDK" shortcut to the dependencies settings (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Improve **provider brand icons by base URL**: provider / model icons now resolve the brand from the `ANTHROPIC_BASE_URL` host first (priority: baseUrl > modelId > providerId), so an endpoint proxying another vendor's models shows that vendor's logo — e.g. an OpenRouter endpoint serving `anthropic/claude-*` or an OpenCode-Go endpoint serving `deepseek-*`. Covers zhipu, kimi, deepseek, minimax, xiaomi, bailian, longcat, opencode, openrouter, claude, gemini and openai (by @zhukunpenglinyutong)
+- Make the **pricing section in the custom-model dialog collapsible**: optional pricing fields are collapsed by default and expand only on a validation error or when editing a model that already has rates, keeping the "Add model" form tidy (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Fix **streaming UI stability**: completed content blocks (tables, lists, text) now render as soon as each block finishes instead of being held back until the whole assistant turn ends, and the message list no longer twitches, collapses or loses expand state when tool calls ripple through mid-stream. Root causes addressed — the streaming thinking block swapping renderers on a non-rendered `TodoWrite` / `TaskCreate`, React-key churn on backend UUID arrival, single→multiple edit transitions unmounting `EditToolBlock`, and innerHTML rebuilds dropping the selection — via stable render keys, a memoized `EditToolBlock`, `memo()`-wrapped tool blocks, a breaks-aligned streaming prose renderer and a selection re-anchor (by @gadfly3173)
+- Fix **context-usage display overflow**: the token ring, percentage label and `ContextUsageDialog` geometry broke when usage exceeded 100% or went negative; values are now clamped to 0–100% for rendering (raw token counts stay intact), and malformed / incomplete SDK usage payloads can no longer push negative token counts across the JS bridge (normalized to non-negative in the session callback) (by @GGMGG)
+- Fix **Webview watchdog startup recovery**: startup recovery could retry forever when the frontend never signalled readiness; retries are now capped (max 2) and gated on frontend readiness / tab activation, the watchdog resets on the `frontend_ready` signal and on tab activation, the recovery reload runs before readiness while preserving the tab's provider / model state, and a failed reload escalates to a full recreate (by @GGMGG)
+- Fix **ConfigSelect closing under a confirm dialog**: clicking Confirm / Cancel inside a `ConfirmDialog` (e.g. restarting a Node process) fired `mousedown` before `click`, so the outside-click handler unmounted the dialog before `onConfirm` ran and the action always behaved as Cancel. The outside-click handler is now skipped while a `.confirm-dialog-overlay` is present (by @hebulin, closes #1522)
+- Fix **new tabs always reusing the "AI1" name**: `getNextTabName` required the whole suffix after "AI" to be numeric, so tabs in the answering (`AI1 ...`) or completed (`AI1 (...)`) state failed to parse and were skipped, leaving every new tab as `AI1`; leading digits are now extracted via regex so the counter increments correctly (by @zhukunpenglinyutong)
+- Fix **stale proxy env leaking into the Codex CLI**: IDE-configured HTTP/SOCKS proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NPM_CONFIG_PROXY`, `NPM_CONFIG_HTTPS_PROXY`) were inherited by the Codex CLI subprocess, which connects directly (including via OS-level TUN routing) and broke. They are now stripped by default and re-enabled only via the `CC_GUI_CODEX_INHERIT_PROXY` opt-in (by @InferKing, closes #1454)
+- Fix **Codex weekly-only subscription quota mapping**: the window→slot mapping was positional (`primary_window`→5h, `secondary_window`→weekly), so an account whose only window was a 7-day weekly window in the `primary_window` slot was misclassified into the 5-hour slot. Windows are now matched by their duration metadata (5h vs 7d), with positional mapping retained as a fallback for older payloads (by @elexiang, closes #1470)
+- Fix **the last background-turn answer staying invisible**: the deferred background-turn reload (from v0.4.7) drained only on the `onStreamEnded` edge and could race across the daemon-event and stream-reader threads, so the last fan-out answer had no later event to rescue its orphaned reload and never rendered until the session was reopened. A pooled safety alarm now re-checks and drains the parked reload the moment the stream is idle (by @toxeh, closes #1435)
+- Fix **"Environment Check Failed" after an in-place plugin update**: `rm -rf` + `unzip` removed the extracted `ai-bridge/` directory but left `extractionState=COMPLETED` in memory; the CAS chain only allowed `NOT_STARTED` / `FAILED → IN_PROGRESS`, so re-extraction was blocked and `findSdkDir` kept returning null. `COMPLETED → IN_PROGRESS` is now an allowed transition (by @toxeh, closes #1415)
+- Fix **npm resolution for mise / Volta Node.js on Windows**: `getNpmPath` hard-coded `npm.cmd` as the only candidate, so installs that only shim `npm.exe` (mise, Volta) failed with `CreateProcess error=2` during SDK installation. It now looks up `npm.cmd` first and falls back to `npm.exe` (by @hebulin, closes #1503)
+- Fix **retired saved models resetting to the list head**: v0.4.8 removed `claude-sonnet-4-6`, so a saved `sonnet-4-6` failed validation and silently fell back to `CLAUDE_MODELS[0]` (`fable-5`), which API relays without a fable-5 channel reject. Retired models now migrate through legacy aliases (`sonnet-4-6 → sonnet-4-7`, `opus-4-6 → opus-4-8`) and fall back to `DEFAULT_CLAUDE_MODEL_ID` (`sonnet-4-7`); Java-side defaults are synced to `sonnet-4-7` (by @zhukunpenglinyutong)
+- Fix **MCP tool panel accuracy**: when a server enters a terminal state (`failed` / `needs-auth` / `disabled`) its tools are now removed from the panel, runtime state and persistent cache — including the startup cache-restore path; toggling a server also invalidates its prior tool results so a reconnect re-issues `tools/list`. Separately, a server that connected and loaded but exposed no tools now shows a warning icon, color and explicit "no tools" note instead of a green success state (the warning is suppressed during loading, after a load failure, and for disconnected / disabled servers) (by @GGMGG)
+- Fix **Codex history loading correctness**: a new `CodexExecHistoryReplay` statically parses the client `exec` JS wrappers persisted in Codex JSONL (without evaluating JS) and recreates the nested shell commands as the same grouped Bash tool-use / tool-result cards the live bridge renders, while hiding client-only orchestration calls (`exec`, `wait`, `write_stdin`); opening a history session that records no provider now falls back to the currently active provider instead of forcing `claude`; `<image path="...">` placeholders are converted back to local image blocks (instead of being stripped with system tags); and filesystem-root project paths (`/`, `C:\`, UNC share roots) fall back to "Root" instead of crashing with an NPE (by @MrHuapen, @zhukunpenglinyutong, @GGMGG)
+- Fix **Codex subagent sessions polluting the history list**: Codex subagent rollouts (sessions whose `session_meta` carries `source.subagent`) are now skipped by both the lite reader and the full `CodexHistoryParser`; the session index version is bumped to 6 to flush subagent entries persisted before the fix (by @GGMGG)
+- Fix **agent config migration failures**: `agent.json` carries migration metadata during the move to Skills (`_deprecated` markers, an `agents: true` node, non-object entries like `"migration-marker": true`, and string / object-typed `createdAt`). `AgentManager` now tolerates all of these — skipping non-object entries, recovering an invalid `agents` node instead of crashing, and parsing `createdAt` defensively — so loading, querying and adding agents no longer breaks mid-migration (by @GGMGG)
+
+中文：
+
+✨ 新功能
+- 新增**内置 TokenTracker 用量仪表盘**，替换自建用量统计：用量统计区现已内嵌开源的 `tokentracker-dashboard`（用量概览、成本趋势、活跃度热力图含 3D 视图、按模型拆分、按项目 / 日期范围明细），底层由本地 server gate 托管——插件会自动检测 / 安装 `tokentracker-cli`、在 `127.0.0.1` 串行启动本地服务并对请求做白名单代理（原有的概览 / 模型 / 会话 / 时间线四个 Tab，以及 `ClaudeUsageAggregator` / `CodexUsageAggregator` 后端已移除）（by @GGMGG）
+- 新增**隔离的 MCP provider 标签页**：MCP 设置面板新增 Claude / Codex 独立标签页，每个标签挂载各自的 provider 面板，拥有独立的服务器列表、工具集、缓存键，以及专用的 `updateCodexMcpServerTools` 回调通道——两个 provider 不再互相覆盖 MCP 工具状态（此前 Claude 与 Codex 的 `tools/list` 更新都走同一个回调，后挂载的 provider 会顶掉另一个）。所选标签会持久化，且与当前聊天 provider 的选择解耦（by @GGMGG）
+- 新增**从 cc-switch 导入 Codex provider 及 provider 帮助说明**：Codex provider 面板新增独立的 cc-switch 导入菜单与隔离的预览 / 保存通道（避免 Claude 与 Codex 两个面板同时挂载时回调互相串扰），Claude / Codex provider 列表为「使用本地 settings.json」和「使用 CLI 登录信息」选项新增「这是什么？」帮助说明（by @zhukunpenglinyutong）
+- 新增 **OpenAI 官方直连并扩展 provider 预设**：Codex provider 对话框新增模式下默认填入 OpenAI 官方直连配置，预设列表扩展至智谱 GLM、Kimi、Kimi Coding、DeepSeek、MiniMax、小米 MiMo / MiMo Plan、百炼 / 百炼 Coding、LongCat、OpenCode Go、OpenRouter，并修正了 Kimi 命名、补齐新厂商图标（by @zhukunpenglinyutong）
+- 新增**消息内数学公式渲染**：模型输出的数学公式现在用 KaTeX 渲染；`\[...\]`、`\(...\)` 等括号式分隔符和缩进式展示公式会被归一化为渲染器所需的 `$$...$$` / `$...$`，同时围栏代码块和行内代码保留字面分隔符不被转换，LaTeX 代码块还配有专属预览样式（by @zhukunpenglinyutong）
+- 新增 **`/goal` 内置斜线命令**：Claude 内置斜线命令列表新增 `/goal`，让助手跨轮持续工作，直到达成设定的目标条件（by @zhukunpenglinyutong）
+- 新增 **Codex 嵌套 skill 发现**：Codex skill 扫描器现在会递归发现嵌套在子目录 / collection 中的 skill（之前只读取一级直接子目录），并加入安全边界——限制扫描深度 / 访问节点数 / 发现数量，跳过 `node_modules`、`build`、`target`、`dist`、`out`、`coverage` 等生成目录，识别到 skill 包后不再下钻其内部，且不跟随 symlink 指向的 `SKILL.md`（by @GGMGG）
+- 新增 **Fable 层级要求 Claude SDK 0.3.182+**：Claude SDK 最低版本从 0.2.58 提升到 0.3.182，确保 `fable` 模型别名能被识别（旧的 0.2.x CLI 会把别名原样透传，导致第三方中转返回 401「model fable」/「No available channel」）；SDK 状态现在会上报是否达到最低版本要求，当 SDK 版本不足却选了 Fable 模型时，会弹出一次性警告 toast，并提供「Update SDK」按钮直达依赖设置页（by @zhukunpenglinyutong）
+
+🔧 优化
+- 改进 **按 base URL 显示 provider 品牌图标**：provider / 模型图标现在优先根据 `ANTHROPIC_BASE_URL` 的域名解析品牌（优先级：baseUrl > modelId > providerId），这样即使是代理别家模型的端点也能显示正确品牌——例如 OpenRouter 代理 `anthropic/claude-*`、OpenCode-Go 代理 `deepseek-*` 时都会显示各自的 Logo（覆盖 zhipu、kimi、deepseek、minimax、xiaomi、bailian、longcat、opencode、openrouter、claude、gemini、openai）（by @zhukunpenglinyutong）
+- 改进 **自定义模型对话框定价区可折叠**：可选的定价字段默认折叠，只有在校验报错或编辑已有价格模型时才展开，让「添加模型」表单更清爽（by @zhukunpenglinyutong）
+
+🐛 修复
+- 修复**流式 UI 稳定性**：每个内容块（表格、列表、文本）完成时立即渲染，不再等到整轮助手回复结束才一并显示；工具调用穿插进来时消息列表也不再抖动、塌缩或丢失展开状态。根因：流式 thinking 块的渲染器在收到不渲染的 `TodoWrite` / `TaskCreate` 时来回切换、后端 UUID 到达导致 React key 抖动、单次 / 多次 edit 切换让 `EditToolBlock` 卸载、innerHTML 重建丢选区——本次带来稳定 render key、memo 化的 `EditToolBlock` 与工具块、对齐 marked breaks 的流式 prose 渲染器，以及选区重锚定（by @gadfly3173）
+- 修复**上下文用量显示越界**：当用量百分比超过 100% 或为负时，token 环、百分比标签与 `ContextUsageDialog` 的几何会错乱——现在渲染前夹紧到 0–100%（原始 token 数仍保留）；并阻止畸形 / 不完整的 SDK 用量 payload 把负数 token 越过 JS 桥塞进上下文浮窗（会话回调层归一化为非负）（by @GGMGG）
+- 修复 **Webview 看门狗启动恢复**：前端迟迟未上报 ready 时启动恢复会无限重试——现在重试次数封顶（最多 2 次），在前端就绪或 tab 激活前不再重试；看门狗在 `frontend_ready` 信号和 tab 激活时都会重置；恢复 reload 本身提前到前端就绪之前执行，会保留该 tab 的 provider / model 状态（此前 reload 时丢失），并在 reload 失败时升级为整体重建（by @GGMGG）
+- 修复**确认对话框下方 ConfigSelect 被关闭**：在 `ConfirmDialog` 里点击「确认 / 取消」（例如重启 Node 进程）时，`mousedown` 先于 `click` 触发，由于点击目标在 ConfigSelect 下拉外部，outside-click 处理器会关闭 ConfigSelect，导致对话框在 `onConfirm` 执行前就卸载——结果动作永远表现为「取消」。现在检测到 `.confirm-dialog-overlay` 存在时跳过 outside-click 处理（by @hebulin，关闭 #1522）
+- 修复**新 tab 始终复用「AI1」名称**：`getNextTabName` 要求「AI」前缀后的整段显示名都是数字，于是处于 answering（`AI1 ...`）或 completed（`AI1 (...)`）状态的 tab 解析失败被忽略，导致每个新 tab 都叫 `AI1`。现在改用正则提取前导数字，计数器能正确递增（by @zhukunpenglinyutong）
+- 修复**陈旧代理环境变量泄漏进 Codex CLI**：IDE 配置的 HTTP/SOCKS 代理变量（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NPM_CONFIG_PROXY`、`NPM_CONFIG_HTTPS_PROXY`）被 Codex CLI 子进程继承，而 Codex 本应直连（含系统级 TUN 路由），导致连接异常。现在默认剥离这些变量，仅当显式设置 `CC_GUI_CODEX_INHERIT_PROXY` 时才透传（by @InferKing，关闭 #1454）
+- 修复**Codex 仅按周计费的订阅配额映射**：配额窗口→槽位的映射原先按位置写死（`primary_window`→5h，`secondary_window`→weekly），当账户只有一个 7 天的 weekly 窗口且落在 `primary_window` 时，它会被误分到 5 小时槽位。现在改为按窗口时长元数据（5h vs 7d）匹配，对缺失时长字段的旧 payload 仍保留位置映射作为兜底（by @elexiang，关闭 #1470）
+- 修复**后台轮次最后一条回答不显示**：v0.4.7 引入的「后台轮次 reload 延迟到 stream end 排空」只在 `onStreamEnded` 边沿触发，会在 daemon 事件线程与流读取线程之间发生竞争，fan-out 的最后一个后台轮次没有后续事件来挽救那条被挂起的 reload，于是它永不执行，最终回答要重开会话才出现。现在新增一个池化安全定时器，在流一旦空闲时就重新检查并排空挂起的 reload（by @toxeh，关闭 #1435）
+- 修复**插件原地升级后报「Environment Check Failed」**：升级时 `rm -rf` + `unzip` 删除了旧的 `ai-bridge/` 目录，但内存里 `extractionState` 仍是 `COMPLETED`；CAS 状态机只允许 `NOT_STARTED` / `FAILED → IN_PROGRESS`，于是重新解压被挡住，`findSdkDir` 持续返回 null。现在新增 `COMPLETED → IN_PROGRESS` 这一合法迁移，目录失效时可重新解压 `ai-bridge.zip`（by @toxeh，关闭 #1415）
+- 修复 **mise / Volta 管理的 Node.js 在 Windows 上找不到 npm**：`getNpmPath` 硬编码只找 `npm.cmd`，而 mise / Volta 这类安装只提供 `npm.exe` 垫片，SDK 安装时报 `CreateProcess error=2`。现在优先找 `npm.cmd`，找不到再回退到 `npm.exe`（by @hebulin，关闭 #1503）
+- 修复**已下线的已保存模型被重置到列表首位**：v0.4.8 移除了 `claude-sonnet-4-6`，已保存的 `sonnet-4-6` 校验失败后静默回退到 `CLAUDE_MODELS[0]`（`fable-5`），而没有 fable-5 通道的 API 中转会直接拒绝。现在已下线模型会经遗留别名迁移（`sonnet-4-6 → sonnet-4-7`、`opus-4-6 → opus-4-8`），并回退到 `DEFAULT_CLAUDE_MODEL_ID`（`sonnet-4-7`）而非列表首位；Java 侧默认值也同步到 `sonnet-4-7`（by @zhukunpenglinyutong）
+- 修复 **MCP 工具面板准确性**：当服务器进入终态（`failed` / `needs-auth` / `disabled`）时，其工具会从面板移除，并从运行时状态和持久化缓存中一并清除——包括启动时从缓存恢复这条路径；切换服务器开关也会作废旧的工具结果，确保重连后重新发起 `tools/list`。同时，已连接且加载完成但工具数为零的服务器，现在会显示警告图标、警告色和明确的「无工具」提示，而不再显示为绿色成功状态（加载中、加载失败以及断连 / 禁用的服务器不会触发该警告）（by @GGMGG）
+- 修复 **Codex 历史加载正确性**：新增 `CodexExecHistoryReplay`，静态解析 Codex JSONL 中持久化的客户端 `exec` JavaScript 外壳（不执行 JS），把其中嵌套的 shell 命令重建为与实时桥接一致的分组 Bash tool-use / tool-result 卡片，并隐藏 `exec`、`wait`、`write_stdin` 等仅客户端使用的编排调用；打开没有记录 provider 的历史会话时，现在回退到当前激活的 provider 而非固定回退到 `claude`；`<image path="...">` 占位符会还原为本地图片块（不再随系统标签被一并移除）；文件系统根目录（`/`、`C:\`、UNC 共享根）回退为「Root」而不再 NPE 崩溃（by @MrHuapen、@zhukunpenglinyutong、@GGMGG）
+- 修复**Codex 子代理会话污染历史列表**：Codex 子代理 rollout（`session_meta` 中带 `source.subagent` 的会话）现在会被 lite reader 和完整 `CodexHistoryParser` 同时跳过；会话索引版本升至 6，触发一次性重建，清掉在解析器修复之前已经落盘的子代理条目（by @GGMGG）
+- 修复**agent 配置迁移失败**：向 Skills 迁移期间 `agent.json` 会留下迁移元数据（如 `_deprecated` 标记、`agents: true` 节点、`"migration-marker": true` 之类的非对象条目，以及字符串 / 对象型的 `createdAt`）；`AgentManager` 现在能容忍这些情况——跳过非对象条目、遇到无效的 `agents` 节点时自动恢复而不是崩溃、容错解析 `createdAt`——迁移期间加载、查询、新增 agent 不再报错（by @GGMGG）
+
+---
+
+##### **2026年7月27日（v0.4.8）**
+
+English:
+
+✨ Features
+- Add **async subagent lifecycle tracking** in the frontend: background Agent / Task runs now receive both in-turn and inter-turn task events, keep subagent internals out of the main chat stream, and show completion metadata such as duration, tokens and usage instead of staying stuck on "running" until reload (by @gadfly3173)
+- Add **Fable model tier support** across Claude provider configuration: `ANTHROPIC_DEFAULT_FABLE_MODEL` now flows through backend model mapping, provider presets, frontend model / reasoning selectors and localized labels (by @zhukunpenglinyutong)
+- Add **Codex GPT-5.6 max reasoning** and **Codex model alias** support, preserving native `max` reasoning effort for GPT-5.6 models and letting Codex configs resolve model aliases without losing user settings (by @EzioX1459, @GGMGG)
+
+🐛 Fixes
+- Fix **Codex custom exec patch file changes** not being restored correctly, so generated file diffs and Apply Patch results are preserved for review / accept flows (by @elexiang)
+- Fix **Codex history and long-stream stability**: complete user turns stay intact during pagination, prepended pages remain aligned, large webview transports and long conversation updates are bounded, and dense message anchors are capped (by @GGMGG)
+- Fix **Codex session and config safety**: session trees are deleted safely, interrupt-state races are guarded, provider updates preserve Codex config, prompt handlers remain backward-compatible, and Codex MCP stdio servers now run from the project working directory (by @GGMGG)
+- Fix **provider bridge output pollution** by moving diagnostics to stderr and keeping stdout reserved for JSON protocol responses, with safer Node service path loading and clearer Windows npm permission guidance (by @GGMGG)
+- Fix **JCEF / WebView lifecycle failures**: prevent false JCEF startup failures, support Android Studio remote browser, stop leaking JCEF JS bridges, serialize webview dispatch against disposal, free the JCEF UI thread from dispose deadlocks, and stop the watchdog from spinning on a dead CefServer (by @gadfly3173, @anjiemo, @zhukunpenglinyutong)
+- Fix **Claude same-session resume and replay edge cases**: same-session resume now soft-reloads, replay status panels cover the right scope, Claude session file paths are unified, and family-specific model mappings are preferred (by @gadfly3173, @GGMGG)
+- Fix **tab and session lifecycle races**: new tabs preserve provider preferences without copying old conversation state, history restore waits until the webview is ready, empty tabs repaint on activation, and cleared sessions no longer resurrect stale lists (by @GGMGG, @gadfly3173)
+- Fix **message rendering and action polish**: empty Bash tool placeholders are hidden, terminal selection actions update on a background thread, commit diffs normalize line endings, and Codex AskUserQuestion prompts are labeled correctly (by @GGMGG)
+
+中文：
+
+✨ 新功能
+- 新增**异步 subagent 生命周期跟踪**：后台 Agent / Task 现在可同时接收当前轮次与轮次外的 task 事件，subagent 内部消息不会污染主聊天流，并能显示耗时、token、用量等完成元数据，不再需要手动 reload 才从「running」恢复（by @gadfly3173）
+- 新增 **Fable 模型层级支持**：`ANTHROPIC_DEFAULT_FABLE_MODEL` 贯通 Claude provider 的后端模型映射、provider 预设、前端模型 / reasoning 选择器与本地化标签（by @zhukunpenglinyutong）
+- 新增 **Codex GPT-5.6 max reasoning** 与 **Codex 模型别名**支持：GPT-5.6 模型会原生保留 `max` 推理力度，Codex 配置也能解析模型别名且不丢失用户设置（by @EzioX1459、@GGMGG）
+
+🐛 修复
+- 修复 **Codex custom exec patch 的文件变更**未正确恢复，确保生成的文件 diff 与 Apply Patch 结果能进入 review / accept 流程（by @elexiang）
+- 修复 **Codex 历史与长流稳定性**：分页时保留完整用户轮次，前置分页保持对齐，大型 webview 传输与长对话更新被限制在安全范围内，并限制高密度消息锚点数量（by @GGMGG）
+- 修复 **Codex 会话与配置安全性**：安全删除 session tree，保护 interrupt 状态竞争，provider 更新时保留 Codex 配置，恢复 prompt handler 兼容性，并让 Codex MCP stdio server 在项目工作目录中运行（by @GGMGG）
+- 修复 **provider bridge 输出污染**：诊断日志改走 stderr，stdout 只保留 JSON 协议响应，同时更安全地加载 Node service 路径，并提供更清晰的 Windows npm 权限指引（by @GGMGG）
+- 修复 **JCEF / WebView 生命周期问题**：避免误报 JCEF 启动失败，支持 Android Studio remote browser，停止泄漏 JCEF JS bridge，串行化 webview dispatch 与 dispose，解除 JCEF UI 线程 dispose 死锁，并阻止 watchdog 在已死亡的 CefServer 上空转（by @gadfly3173、@anjiemo、@zhukunpenglinyutong）
+- 修复 **Claude 同会话 resume 与 replay 边界问题**：同会话 resume 改为 soft reload，replay 状态面板覆盖正确范围，统一 Claude session 文件路径，并优先使用 family-specific 模型映射（by @gadfly3173、@GGMGG）
+- 修复 **tab 与 session 生命周期竞争**：新 tab 只继承 provider 偏好而不复制旧会话状态，历史恢复会等待 webview ready，空 tab 激活时会重绘，已清空的 session 不再复活陈旧列表（by @GGMGG、@gadfly3173）
+- 修复**消息渲染与 action 细节**：隐藏空 Bash tool 占位块，终端选择 action 改到后台线程更新，commit diff 统一换行符，并为 Codex AskUserQuestion 提示补上正确标签（by @GGMGG）
+
+---
+
+##### **2026年7月19日（v0.4.7-fix2）**
+
+English:
+
+✨ Features
+- Add a **Detailed output in message footer** setting: users can choose whether per-message footers show expanded metadata such as model, duration and working directory, while token/cost essentials stay easy to scan (by @EzioX1459)
+
+🐛 Fixes
+- Restore **IntelliJ 2026.2 plugin loading** by registering tool-window/editor actions with the platform-compatible extension points (by @zkpaiminmin)
+- Fix **Codex resumed-session replay leaking historical tool calls**: JSONL replay now captures a pre-turn baseline and waits for the current turn's `turn_context`, so old commands/results are not re-emitted as if they belonged to the new turn (by @MrHuapen)
+- Fix **multi-tab and streaming transcript merge edge cases**: empty assistant placeholders are filled in place, final snapshots are pushed to the right tab/session, and current-turn metadata is reconstructed more reliably after reloads (by @gadfly3173, @vitas13)
+- Fix **message rendering regressions** across collapsed text, normalized content blocks, Read/Bash/generic tool output, ANSI stripping, copied text, and image-bearing tool results (by @vitas13)
+- Fix **usage and cost display drift**: Claude/Codex costs now come from shared pricing tables, Codex cached-token aliases are accepted, cache hits and per-turn USD cost are preserved in frontend transport, and custom/unpriced models avoid bogus costs (by @EzioX1459, @zkpaiminmin)
+- Fix the **Codex quota popup being clipped** by the provider dropdown container (by @elexiang)
+- Fix **Keep All** using stale file-change state and resurrecting old changes after the user accepted the current set (by @hebulin)
+
+中文：
+
+✨ 新功能
+- 新增**消息底部详细输出**设置：用户可选择是否在每条消息底部显示模型、耗时、工作目录等扩展元数据，同时保留 token / 费用等核心信息的可读性（by @EzioX1459）
+
+🐛 修复
+- 恢复 **IntelliJ 2026.2 插件加载**：将工具窗口 / 编辑器 action 注册到兼容新版平台的扩展点（by @zkpaiminmin）
+- 修复 **Codex 恢复会话时历史工具调用被重新回放**：JSONL replay 现在会记录当前轮次开始前的基线，并等待本轮 `turn_context` 后才回放，避免旧命令 / 旧结果被当成本轮内容再次下发（by @MrHuapen）
+- 修复**多标签页与流式转录合并边界问题**：空的助手占位块会原地填充，最终快照会推送到正确 tab / session，reload 后也能更可靠地重建当前轮次元数据（by @gadfly3173、@vitas13）
+- 修复**消息渲染回归**，覆盖折叠文本、标准化 content block、Read / Bash / 通用工具输出、ANSI 清理、复制文本以及带图片的工具结果（by @vitas13）
+- 修复**用量与费用显示不一致**：Claude / Codex 费用统一走共享定价表，Codex 兼容 cached-token 别名，cache hit 与单轮美元费用会保留到前端传输，自定义 / 未定价模型不会显示虚假费用（by @EzioX1459、@zkpaiminmin）
+- 修复 **Codex 配额弹窗被 provider 下拉容器裁剪**（by @elexiang）
+- 修复 **Keep All** 使用过期文件变更状态，导致接受当前变更后旧变更又被带回来的问题（by @hebulin）
+
+---
+
+##### **2026年7月9日（v0.4.7-fix1）**
+
+English:
+
+✨ Features
+- Add the **GPT-5.6 model family** (Sol / Terra / Luna) as built-in Codex models: 1.05M context windows, usage pricing for cost estimation, `gpt-5.6` prefix/alias matching resolving to Sol, and localized labels and descriptions across all 10 languages (by @zkpaiminmin)
+
+🔧 Improvements
+- Trim the built-in Codex model dropdown to the current lineup — GPT-5.6 Sol / Terra / Luna, GPT-5.5 and GPT-5.4 — removing the retired `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2` and `gpt-5.1-codex-mini` entries (by @zkpaiminmin)
+
+中文：
+
+✨ 新功能
+- 新增 **GPT-5.6 系列模型**（Sol / Terra / Luna）为 Codex 内置模型：1.05M 上下文窗口、用于费用估算的用量计价、`gpt-5.6` 前缀/别名匹配解析到 Sol，以及覆盖全部 10 种语言的本地化标签与描述（by @zkpaiminmin）
+
+🔧 优化
+- Codex 内置模型下拉列表精简为当前阵容——GPT-5.6 Sol / Terra / Luna、GPT-5.5 与 GPT-5.4，移除已下线的 `gpt-5.2-codex`、`gpt-5.1-codex-max`、`gpt-5.4-mini`、`gpt-5.3-codex`、`gpt-5.3-codex-spark`、`gpt-5.2` 和 `gpt-5.1-codex-mini`（by @zkpaiminmin）
+
+---
+
+##### **2026年7月9日（v0.4.7）**
+
+English:
+
+✨ Features
+- Add an **MCP Marketplace**: a new "Add from MCP market" entry in the MCP add menu, with switchable sources (built-in presets, the official MCP Registry, the GitHub MCP Registry, the official GitHub org). The selected source is persisted and restored on reopen, responses are disk-cached with stale fallback, and registry entries now render their real package / runtime arguments, environment variables and transport type instead of a bare `uvx <package>` — previously every registry entry mapped to a null name and was silently dropped (by @Miguel0888)
+- Add **Import from GitHub Copilot** for MCP servers: paste a Copilot MCP config, preview it, and save through the same path as a manual add — `requestInit.headers` merged with `headers`, transport type inferred (command → stdio, `/sse` URL → sse, else http), conflicting ids renamed instead of overwritten (by @Miguel0888)
+- Add **custom pricing for custom models**: configure input / output / cache rates for Claude and Codex custom models, persisted to the plugin config and used by usage aggregation. Routed Claude model ids such as `ppio/pa/gpt-5.5` now match history usage recorded under the routed id (`pa/gpt-5.5`), preserving exact-match precedence rather than guessing between candidates (by @EzioX1459)
+- Add an **"Ask User Question notification" toggle** to Basic Settings → Behavior: when enabled, an opt-in system toast (same slide-in style as the task-completion notification) fires whenever Claude triggers an AskUserQuestion, so you won't miss a pending question. Defaults to off; localized for all 10 languages (by @adminkk)
+
+🔒 Security Hardening
+- Default permission mode no longer yields every tool to the SDK. Read-only tools (now including `NotebookRead` and `BashOutput`) still yield, so `settings.json` deny-rules such as `Read(./.env)` keep applying, while side-effect tools (`Bash` / `Write` / `Agent`) return `ask`, which takes precedence over allow-rules. Since `settingSources` includes the project and local scopes, a malicious repository's `.claude/settings.json` could otherwise silently auto-approve `Bash` (by @zkpaiminmin)
+
+🐛 Fixes
+- Fix **Auto (`bypassPermissions`) having no effect when switched mid-session**: `allowDangerouslySkipPermissions` is an argv flag frozen at process launch, so a live `set_permission_mode` control request could never add it to an already-running subprocess. Switching into or out of Auto now forces a runtime rebuild instead of endlessly re-prompting (by @toxeh)
+- Fix the **permission mode resetting to Default after a plugin reinstall**: boot no longer pushes the wiped webview `localStorage` snapshot over Java's app-level `PropertiesComponent`, which survives reinstall and is the real source of truth (by @toxeh)
+- Fix **background-turn answers never rendering live**: when the agent delegates a sub-agent to the background, its prompts and replies were persisted to the session JSONL but held back until the long foreground stream ended. The reload is now deferred to stream end and routed as a live update (by @toxeh)
+- Fix the **1M-context toggle silently doing nothing on a live runtime**: the `[1m]` state is now part of the runtime signature, so toggling it rebuilds the runtime with a fresh env snapshot, and `setModel` receives the resolved model id rather than the SDK short name — so settings-side model remaps (`sonnet` → `"MiniMax-M2.5"`) also reach subprocesses whose env was frozen at spawn (by @toxeh)
+- Fix three chat-transcript rendering glitches, each with a distinct root cause in the optimistic-add / streaming / snapshot-reconcile interaction: a user message not shown though the agent answered it, a duplicated assistant answer, and a hidden "API request failed" bubble (by @toxeh)
+- Fix the same swallowed error bubble on Codex: `CodexMessageHandler.onError` pushed the error snapshot before signalling stream-end, so the webview's `onStreamEnd` rAF-cancel could drop it. Stream-end is now emitted first on streaming turns (by @zkpaiminmin)
+- Fix an **empty History panel whenever the custom working directory is a relative path** such as `..`: the GUI keyed history on the IDE project base path while Claude/Codex key sessions on the normalized working directory they actually run in, and `..` was never collapsed. History now resolves against the canonical normalized directory (by @tc-imba)
+- Fix **plugin skills and slash commands missing when the project, Node.js and `~/.claude` live in WSL** but the IDE runs on Windows: the Java-side `~/.claude` scan resolved the wrong paths across the `\\wsl.localhost\<distro>\...` UNC share and silently returned nothing, leaving only the built-in commands in the `/` menu (by @tikitaka721, closes #1400)
+- Fix a **WSL-style `HOME` (`/mnt/c/Users/<user>`) leaking into the daemon on native Windows**, where it is inherited by every subprocess. The Bash tool there is Git Bash (MSYS), whose mount prefix is `/c/...` — most visibly `git` could not lock `<HOME>/.gitconfig` and kept reporting "credentials incorrect or have expired" on push (by @Mickyzh)
+- Fix `HOME` / `CODEX_HOME` not being normalized against the selected Node runtime before bridge child processes launch: polluted `/mnt/<drive>/...` values are converted back to native Windows paths for native Windows Node/Codex processes, and WSL path conversion stays scoped to WSL runtimes (by @selfdcl)
+- Fix **Codex custom models showing no reasoning**: the Codex SDK only enables reasoning for models on its hardcoded allowlist, so custom models sent a null thinking parameter. `model_supports_reasoning_summaries` is now forced on for all models (by @codexvn, closes #1375)
+- Fix a **partial custom price wildly over-estimating cost**: dimensions the user left unset now fall back to that model's own built-in rate instead of 0, so custom pricing overrides only what was explicitly configured. Also fix an Escape-key listener leak in the MCP import dialog (by @zkpaiminmin, closes #1450)
+- Fix **"Always allow" re-prompting every turn for Bash/Agent**: restore tool-level approval memory and honor user-configured `settings.json` allow-rules, reverting the parts of the v0.4.6 hardening that broke permissions for normal users. `acceptEdits` command confirmation is unchanged (by @zkpaiminmin)
+
+🔧 Improvements
+- `ServerToolsPanel` now shows the concrete `toolsInfo.error` text under "Load failed" instead of a generic message (by @Miguel0888)
+- Complete the custom-model pricing translations for es / fr / hi / ja / ko / pt-BR / ru, and drop the dead `getCustomModelPricing` chain in `CodemossSettingsService` (by @zkpaiminmin)
+
+中文：
+
+✨ 新功能
+- 新增 **MCP 应用市场**：MCP 添加菜单新增「Add from MCP market」入口，可在内置预设、官方 MCP Registry、GitHub MCP Registry 和官方 GitHub 组织之间切换数据源。选中的数据源会持久化并在重新打开时恢复，请求结果落盘缓存并支持过期回退；注册表条目现在会渲染真实的 package / runtime 参数、环境变量和传输类型，而不是一条干瘪的 `uvx <package>`——此前每个注册表条目都会映射出空名称并被静默丢弃（by @Miguel0888）
+- MCP 新增**从 GitHub Copilot 导入**：粘贴 Copilot 的 MCP 配置，预览确认后走与手动添加相同的保存路径——合并 `requestInit.headers` 与 `headers`、推断传输类型（command → stdio、`/sse` URL → sse、其余 http）、id 冲突时重命名而非覆盖（by @Miguel0888）
+- 新增**自定义模型的自定义计价**：可为 Claude 和 Codex 自定义模型配置输入 / 输出 / 缓存单价，持久化到插件配置并用于用量统计。形如 `ppio/pa/gpt-5.5` 的路由模型 id 现在能匹配到历史中按路由 id（`pa/gpt-5.5`）记录的用量，且保留精确匹配优先，不在多个候选间瞎猜（by @EzioX1459）
+- 基础设置 → 行为设置新增 **「AskUserQuestion 提醒通知」开关**：开启后，Claude 每次触发 AskUserQuestion 都会弹出系统通知（与任务完成通知同样的滑入样式），不再错过待回答的问题。默认关闭，已覆盖全部 10 种语言（by @adminkk）
+
+🔒 安全加固
+- 默认权限模式不再把所有工具一律交给 SDK 评估。只读工具（新增 `NotebookRead` 和 `BashOutput`）仍然交由 SDK，以便 `settings.json` 中 `Read(./.env)` 这类 deny 规则继续生效；而有副作用的工具（`Bash` / `Write` / `Agent`）返回 `ask`，优先级高于 allow 规则。由于 `settingSources` 包含 project 与 local 作用域，否则一个恶意仓库的 `.claude/settings.json` 就能静默自动放行 `Bash`（by @zkpaiminmin）
+
+🐛 修复
+- 修复**会话中途切到 Auto（`bypassPermissions`）不生效**：`allowDangerouslySkipPermissions` 是进程启动时冻结的 argv 参数，运行时的 `set_permission_mode` 控制请求无法给已启动的子进程补上它。现在切入 / 切出 Auto 会强制重建 runtime，不再每一步都继续弹确认（by @toxeh）
+- 修复**重装插件后权限模式被重置为 Default**：启动时不再用被清空的 webview `localStorage` 快照去覆盖 Java 应用级 `PropertiesComponent`——后者能在重装后存活，才是真正的事实来源（by @toxeh）
+- 修复**后台轮次的回答不实时渲染**：agent 把子任务派发到后台运行时，其提问与回复虽已写入会话 JSONL，却要等前台长流结束才一次性刷出。现在把 reload 推迟到 stream end 并作为实时更新下发（by @toxeh）
+- 修复 **1M 上下文开关在运行中的 runtime 上静默失效**：`[1m]` 状态现已纳入 runtime 签名，切换后会以新的环境快照重建 runtime；同时 `setModel` 接收解析后的完整模型 id 而非 SDK 短名，使设置侧的模型重映射（`sonnet` → `"MiniMax-M2.5"`）也能送达那些环境已在 spawn 时冻结的子进程（by @toxeh）
+- 修复三个聊天记录渲染异常（根因各自独立，位于乐观插入 / 流式 / 快照对账的交互处）：用户消息未显示但 agent 已作答、助手回答重复、「API request failed」气泡被吞（by @toxeh）
+- 修复 Codex 侧同样的错误气泡被吞：`CodexMessageHandler.onError` 先推错误快照再发 stream-end，导致 webview 的 `onStreamEnd` rAF 取消把它丢掉。流式轮次现在先发 stream-end（by @zkpaiminmin）
+- 修复**自定义工作目录为 `..` 这类相对路径时历史面板恒为空**：GUI 按 IDE 项目根路径读取历史，而 Claude/Codex 按其实际运行的规范化工作目录存储会话，且 `..` 从未被折叠。历史现在按规范化后的目录解析（by @tc-imba）
+- 修复 **IDE 跑在 Windows、而项目 / Node.js / `~/.claude` 都在 WSL 时插件技能与斜杠命令全部消失**：Java 侧扫描 `~/.claude` 时无法正确解析 `\\wsl.localhost\<distro>\...` UNC 路径，静默返回空，`/` 菜单里只剩内置命令（by @tikitaka721，关闭 #1400）
+- 修复 **WSL 风格的 `HOME`（`/mnt/c/Users/<user>`）泄漏进原生 Windows 的 daemon**，并被所有子进程继承。这里的 Bash 工具是 Git Bash（MSYS），挂载前缀是 `/c/...`——最直观的表现是 `git` 无法锁定 `<HOME>/.gitconfig`，push 时反复报「credentials incorrect or have expired」（by @Mickyzh）
+- 修复启动 bridge 子进程前未按所选 Node runtime 规范化 `HOME` / `CODEX_HOME`：被污染的 `/mnt/<drive>/...` 会为原生 Windows 的 Node/Codex 进程转回原生 Windows 路径，WSL 路径转换则限定在 WSL runtime 内（by @selfdcl）
+- 修复 **Codex 自定义模型不显示思考过程**：Codex SDK 只对硬编码白名单中的模型启用 reasoning，自定义模型的 thinking 参数因此为 null。现在对所有模型强制开启 `model_supports_reasoning_summaries`（by @codexvn，关闭 #1375）
+- 修复**只填了部分维度的自定义单价会把费用估算撑爆**：未填写的维度现在回退到该模型自身的内置单价而非 0，自定义计价只覆盖用户显式设置的部分。同时修复 MCP 导入对话框 Escape 监听器泄漏（by @zkpaiminmin，关闭 #1450）
+- 修复 **Bash/Agent 的「始终允许」每轮都重新弹窗**：恢复工具级授权记忆，并重新尊重用户在 `settings.json` 中配置的 allow 规则，回退 v0.4.6 中影响正常用户的过度加固。`acceptEdits` 的命令确认保持不变（by @zkpaiminmin）
+
+🔧 优化
+- `ServerToolsPanel` 的「Load failed」下方改为展示具体的 `toolsInfo.error` 文案，不再只给一句通用提示（by @Miguel0888）
+- 补齐 es / fr / hi / ja / ko / pt-BR / ru 七种语言的自定义模型定价文案，并删除 `CodemossSettingsService` 中无人调用的 `getCustomModelPricing` 死代码链（by @zkpaiminmin）
+
+---
+
+##### **2026年7月6日（v0.4.6-fix1）**
+
+English:
+
+🐛 Fixes
+- Fix Claude CLI login being treated as a host-managed provider: when `access` is `cli_login`, the bridge now leaves `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` unset, avoiding the host-managed credential path for users already authenticated through the Claude CLI (by @zkpaiminmin)
+- Fix Claude model metadata after the lineup update: replace the retired `claude-opus-4-7` built-in option with `claude-opus-4-8`, and add `claude-sonnet-5` with 200K / 1M context handling, max reasoning support, usage pricing, model mapping, and localized labels across all supported languages (by @zkpaiminmin)
+
+中文：
+
+🐛 修复
+- 修复 Claude CLI 登录被误判为 host-managed provider：当认证状态为 `cli_login` 时，bridge 不再设置 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`，避免已通过 Claude CLI 登录的用户走错 host-managed 凭证路径（by @zkpaiminmin）
+- 修复 Claude 模型清单与元数据滞后：内置模型移除已下线的 `claude-opus-4-7`，切换到 `claude-opus-4-8`，并新增 `claude-sonnet-5` 的 200K / 1M 上下文、max reasoning、用量计价、模型映射和全语言本地化标签（by @zkpaiminmin）
+
+---
+
 ##### **2026年6月28日（v0.4.6）**
 
 English:
@@ -5,7 +473,6 @@ English:
 ✨ Features
 - Add live permission-mode hot-swap: switching the permission mode mid-turn now takes effect immediately for the current turn's subsequent tool calls — no runtime restart, no waiting for the next message. Claude pushes the new mode straight to the live runtime; Codex rebuilds thread options per turn (by @gadfly3173, closes #1380)
 - Add a GitHub Star button to the open-source promo banner: click to copy the repository URL for pasting into a browser; the main copy now reads "100% open-source and free", with full localization across 10 languages (by @zkpaiminmin)
-- Add an "Ask User Question notification" toggle to Basic Settings → Behavior: when enabled, an opt-in system toast (same slide-in style as the task-completion notification) fires whenever Claude triggers an AskUserQuestion, so you won't miss a pending question. Defaults to off; localized for all 10 languages.
 
 🔒 Security Hardening
 - Change the default permission mode from `bypassPermissions` to `default`, so tool calls are confirmed by default instead of auto-approved

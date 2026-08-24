@@ -109,6 +109,126 @@ describe('MarkdownBlock linkify integration', () => {
     expect(markdownLink.classList.contains('url-link')).toBe(true);
   });
 
+  it('renders LaTeX math while preserving dollar signs in code blocks', () => {
+    render(
+      <MarkdownBlock
+        content={[
+          'Inline math $S_0 + PV(D)$ works.',
+          '',
+          '$$',
+          'F(T) \\approx S_0 \\exp\\left((r(T)-q(T))T\\right)',
+          '$$',
+          '',
+          '```text',
+          '$S_0 should stay literal inside code$',
+          '```',
+        ].join('\n')}
+      />,
+    );
+
+    const mathNodes = document.querySelectorAll('.katex');
+    expect(mathNodes.length).toBeGreaterThan(0);
+    expect(document.querySelector('.katex-display')).toBeTruthy();
+    expect(document.querySelector('.markdown-content')?.textContent).toContain('F(T)');
+
+    const codeBlock = document.querySelector('pre code');
+    expect(codeBlock?.textContent).toContain('$S_0 should stay literal inside code$');
+    expect(codeBlock?.querySelector('.katex')).toBeNull();
+  });
+
+  it('renders latex code fences as math previews', () => {
+    render(
+      <MarkdownBlock
+        content={[
+          '```latex',
+          'E = mc^2',
+          '```',
+        ].join('\n')}
+      />,
+    );
+
+    expect(document.querySelector('.katex-display')).toBeTruthy();
+    expect(document.querySelector('pre code')?.textContent?.trim()).toBe('E = mc^2');
+  });
+
+  it('renders indented LaTeX blocks from assistant history as math', () => {
+    render(
+      <MarkdownBlock
+        content={[
+          '可以直接用这个 LaTeX 自测:',
+          '',
+          '    $$',
+          '    F(T) \\approx S_0 \\exp\\left((r(T)-q(T))T\\right)',
+          '    $$',
+        ].join('\n')}
+      />,
+    );
+
+    expect(document.querySelector('.katex-display')).toBeTruthy();
+    expect(document.querySelector('pre code')).toBeNull();
+  });
+
+  it('renders bracket-style LaTeX delimiters (\\[...\\] and \\(...\\)) as math', () => {
+    render(
+      <MarkdownBlock
+        content={[
+          '行内公式 \\(E = mc^2\\) 结束。',
+          '',
+          '\\[',
+          'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}',
+          '\\]',
+        ].join('\n')}
+      />,
+    );
+
+    expect(document.querySelector('.katex-display')).toBeTruthy();
+    const mathNodes = document.querySelectorAll('.katex');
+    expect(mathNodes.length).toBeGreaterThan(1);
+  });
+
+  it('keeps bracket-style math delimiters literal inside code', () => {
+    render(
+      <MarkdownBlock
+        content={[
+          'Inline code `\\(x+1\\)` stays literal.',
+          '',
+          '```text',
+          '\\[ x = 1 \\]',
+          '```',
+        ].join('\n')}
+      />,
+    );
+
+    expect(document.querySelector('.katex')).toBeNull();
+    const inlineCode = document.querySelector('.markdown-content .md-block > p > code');
+    expect(inlineCode?.textContent).toBe('\\(x+1\\)');
+    expect(document.querySelector('pre code')?.textContent).toContain('\\[ x = 1 \\]');
+  });
+
+  it('renders indented bracket-style LaTeX blocks as math', () => {
+    render(
+      <MarkdownBlock
+        content={[
+          '公式如下:',
+          '',
+          '    \\[',
+          '    x = \\frac{1}{2}',
+          '    \\]',
+        ].join('\n')}
+      />,
+    );
+
+    expect(document.querySelector('.katex-display')).toBeTruthy();
+    expect(document.querySelector('pre code')).toBeNull();
+  });
+
+  it('does not linkify file-looking text inside rendered math', () => {
+    render(<MarkdownBlock content={'$\\text{src/App.tsx}$'} />);
+
+    expect(document.querySelector('.katex')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'src/App.tsx' })).toBeNull();
+  });
+
   it('strips unsafe markdown link protocols during sanitization', () => {
     render(<MarkdownBlock content={'[bad](javascript:alert(1)) and [good](https://example.com/docs)'} />);
 
@@ -533,5 +653,118 @@ describe('MarkdownBlock linkify integration', () => {
     const finalCodes = document.querySelectorAll('code');
     expect(finalCodes[0].textContent).toBe('Array<T>');
     expect(finalCodes[1].textContent).toBe('Map<string, number>');
+  });
+
+  it('renders tables and lists fully during streaming, identical to final output', () => {
+    // Regression: the old lightweight streaming renderer knew no tables/lists,
+    // so a streamed table showed as raw pipe text until the stream ended.
+    const content = [
+      '| # | Mechanism | Note |',
+      '|---|---|---|',
+      '| 1 | Page generation | injected by Java |',
+      '| 2 | Load kinds | INITIAL_LOAD |',
+      '',
+      '- first item',
+      '- second item with **bold**',
+      '',
+      'Closing paragraph.',
+    ].join('\n');
+
+    const { rerender } = render(<MarkdownBlock content={content} isStreaming />);
+
+    // Table and list render immediately, mid-stream
+    expect(document.querySelector('table')).toBeTruthy();
+    expect(document.querySelectorAll('tbody tr').length).toBe(2);
+    expect(document.querySelectorAll('li').length).toBe(2);
+    expect(document.querySelector('li strong')?.textContent).toBe('bold');
+
+    const streamingHtml = document.querySelector('.markdown-content')!.innerHTML;
+
+    rerender(<MarkdownBlock content={content} isStreaming={false} />);
+
+    // Single pipeline: streaming and final HTML are identical by construction
+    expect(document.querySelector('.markdown-content')!.innerHTML).toBe(streamingHtml);
+  });
+
+  it('renders a partial table mid-stream without breaking once completed', () => {
+    // Header row alone is not yet a table — marked renders it as a paragraph;
+    // once the delimiter row arrives the block flips to a real table.
+    const { rerender } = render(
+      <MarkdownBlock content={'| a | b |'} isStreaming />,
+    );
+    expect(document.querySelector('table')).toBeNull();
+
+    rerender(
+      <MarkdownBlock content={'| a | b |\n|---|---|\n| 1 | 2 |'} isStreaming />,
+    );
+    expect(document.querySelector('table')).toBeTruthy();
+    expect(document.querySelectorAll('td').length).toBe(2);
+  });
+
+  it('renders an unclosed code fence as a live code block during streaming', () => {
+    const { rerender } = render(
+      <MarkdownBlock content={'Before\n\n```ts\nconst a = 1;'} isStreaming />,
+    );
+
+    const code = document.querySelector('pre code');
+    expect(code?.className).toContain('language-ts');
+    expect(code?.textContent).toContain('const a = 1;');
+
+    // Prose before the fence is its own stable block
+    expect(document.querySelector('.md-block > p')?.textContent).toBe('Before');
+
+    // Closing the fence keeps the rendered output stable
+    const htmlBefore = document.querySelector('.markdown-content')!.innerHTML;
+    rerender(
+      <MarkdownBlock content={'Before\n\n```ts\nconst a = 1;\n```'} isStreaming />,
+    );
+    expect(document.querySelector('.markdown-content')!.innerHTML).toBe(htmlBefore);
+  });
+
+  it('never rewrites stable blocks while streaming appends tokens', () => {
+    // Block-level memoization: earlier blocks keep their DOM nodes untouched
+    // across streaming deltas — only the tail block is re-rendered.
+    const { rerender } = render(
+      <MarkdownBlock content={'Stable paragraph one.\n\nGrowing tail'} isStreaming />,
+    );
+
+    const stableBlock = document.querySelector('.md-block')!;
+    const stableParagraph = stableBlock.querySelector('p')!;
+
+    rerender(
+      <MarkdownBlock
+        content={'Stable paragraph one.\n\nGrowing tail with more tokens'}
+        isStreaming
+      />,
+    );
+
+    // Same DOM node — React never touched the memoized stable block
+    expect(document.querySelector('.md-block')).toBe(stableBlock);
+    expect(document.querySelector('.md-block > p')).toBe(stableParagraph);
+    expect(document.querySelectorAll('.md-block').length).toBe(2);
+    expect(document.querySelectorAll('.md-block')[1].textContent).toContain(
+      'more tokens',
+    );
+  });
+
+  it('does not split blocks inside display math containing blank lines', () => {
+    const content = [
+      'Intro.',
+      '',
+      '$$',
+      'F(T) \\approx S_0',
+      '',
+      '+ \\exp(x)',
+      '$$',
+      '',
+      'Outro.',
+    ].join('\n');
+
+    render(<MarkdownBlock content={content} />);
+
+    expect(document.querySelector('.katex-display')).toBeTruthy();
+    const paragraphs = document.querySelectorAll('.md-block > p');
+    expect(paragraphs[0].textContent).toBe('Intro.');
+    expect(paragraphs[paragraphs.length - 1].textContent).toBe('Outro.');
   });
 });

@@ -4,6 +4,8 @@ import com.github.claudecodegui.permission.PermissionManager;
 import com.github.claudecodegui.permission.PermissionRequest;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
+import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -11,8 +13,10 @@ import com.intellij.openapi.project.Project;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 /**
  * Session management for Claude conversations.
@@ -22,13 +26,18 @@ public class ClaudeSession {
 
     private static final Logger LOG = Logger.getInstance(ClaudeSession.class);
 
-    /**
-     * Maximum file size for Codex context injection (100KB)
-     */
-    private static final int MAX_FILE_SIZE_BYTES = 100 * 1024;
-
     private final Gson gson = new Gson();
     private final Project project;
+    /** Start time of the latest submitted turn, retained across Webview rebuilds. */
+    private volatile long lastTurnStartedAtMillis;
+
+    /**
+     * Flag set when the user manually interrupts the current turn (clicks Stop).
+     * Checked by {@link com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow#onStreamEnded()}
+     * to suppress the task-completion notification sound for manual stops.
+     * Reset to {@code false} at the start of each new {@link #send} call.
+     */
+    private volatile boolean manuallyInterrupted = false;
 
     // Session state manager
     private final com.github.claudecodegui.session.SessionState state;
@@ -40,6 +49,7 @@ public class ClaudeSession {
     // Context collector
     private final com.github.claudecodegui.session.EditorContextCollector contextCollector;
     private final SessionContextService contextService;
+    private final GrokSDKBridge grokSDKBridge;
     private final SessionProviderRouter providerRouter;
     private final SessionSendService sendService;
     private final SessionMessageOrchestrator messageOrchestrator;
@@ -63,9 +73,20 @@ public class ClaudeSession {
         }
 
         public Type type;
-        public String content;
+        // The streaming handler thread reassigns these on every assistant update
+        // (e.g. `raw = mergedRaw`, `content = builder.toString()`) while
+        // StreamMessageCoalescer serializes the same Message off-EDT — enqueue only
+        // shallow-copies the list, so elements are shared across threads. Without
+        // volatile the serializer could read a stale reference and publish a snapshot
+        // predating a just-reassigned tool_use block, which the frontend's structural
+        // merge (it takes blocks from the new snapshot only) would then freeze as
+        // missing.
+        // This covers the reassignment race, the dominant mutation pattern. Note:
+        // a few call sites still mutate the JsonObject in place (turnUsage / uuid /
+        // usage stamps in ClaudeMessageHandler); those are a separate concern.
+        public volatile String content;
         public long timestamp;
-        public JsonObject raw; // Raw message data from SDK
+        public volatile JsonObject raw; // Raw message data from SDK
 
         public Message(Type type, String content) {
             this.type = type;
@@ -129,9 +150,39 @@ public class ClaudeSession {
 
         default void onUserMessageUuidPatched(String content, String uuid) {
         }
+
+        /**
+         * Called when a Claude Code task_* SDK system event is received
+         * (task_started / task_progress / task_notification).
+         *
+         * <p>Async subagents (Agent/Task tool invoked with run_in_background:true) run
+         * in a background sidechain whose detailed
+         * messages never enter the main SDK stream. The main stream only carries these
+         * lightweight system events, which carry the agent's lifecycle signals: launch,
+         * per-tool progress, and terminal completion (with result + usage). Forwarding
+         * them to the frontend lets the subagent list reflect real running/completed
+         * state instead of being stuck on the launch summary.</p>
+         */
+        default void onTaskEvent(String eventJson) {
+        }
     }
 
-    public ClaudeSession(Project project, ClaudeSDKBridge claudeSDKBridge, CodexSDKBridge codexSDKBridge) {
+    public ClaudeSession(
+            Project project,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges
+    ) {
+        this(project, claudeSDKBridge, codexSDKBridge, cliBridges, null);
+    }
+
+    public ClaudeSession(
+            Project project,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            GrokSDKBridge grokSDKBridge
+    ) {
         this.project = project;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
@@ -142,8 +193,9 @@ public class ClaudeSession {
         this.messageMerger = new com.github.claudecodegui.session.MessageMerger();
         this.contextCollector = new com.github.claudecodegui.session.EditorContextCollector(project);
         this.callbackFacade = new SessionCallbackFacade(project);
-        this.contextService = new SessionContextService(project, MAX_FILE_SIZE_BYTES);
-        this.providerRouter = new SessionProviderRouter(claudeSDKBridge, codexSDKBridge);
+        this.contextService = new SessionContextService(project);
+        this.grokSDKBridge = grokSDKBridge;
+        this.providerRouter = new SessionProviderRouter(claudeSDKBridge, codexSDKBridge, cliBridges, this.grokSDKBridge);
         this.sendService = new SessionSendService(
                 project,
                 state,
@@ -153,8 +205,9 @@ public class ClaudeSession {
                 gson,
                 claudeSDKBridge,
                 codexSDKBridge,
-                contextService
-        );
+                cliBridges,
+                contextService,
+                this.grokSDKBridge);
         this.messageOrchestrator = new SessionMessageOrchestrator(
                 project,
                 state,
@@ -206,6 +259,16 @@ public class ClaudeSession {
 
     public String getError() {
         return state.getError();
+    }
+
+    /**
+     * Returns whether the current (or most recent) turn was manually interrupted
+     * by the user clicking Stop. Used to suppress the task-completion sound.
+     *
+     * @return {@code true} if the user manually interrupted the current turn
+     */
+    public boolean isManuallyInterrupted() {
+        return manuallyInterrupted;
     }
 
     public List<Message> getMessages() {
@@ -386,7 +449,24 @@ public class ClaudeSession {
             String requestedReasoningEffort,
             String requestedCodexFastMode
     ) {
-        return send(input, null, agentPrompt, fileTagPaths, requestedPermissionMode, requestedReasoningEffort, requestedCodexFastMode);
+        return send(input, null, agentPrompt, fileTagPaths, requestedPermissionMode,
+                requestedReasoningEffort, requestedCodexFastMode, null);
+    }
+
+    /**
+     * Send a message with an optional DSH agent preset.
+     */
+    public CompletableFuture<Void> send(
+            String input,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String requestedPermissionMode,
+            String requestedReasoningEffort,
+            String requestedCodexFastMode,
+            String requestedDshPreset
+    ) {
+        return send(input, null, agentPrompt, fileTagPaths, requestedPermissionMode,
+                requestedReasoningEffort, requestedCodexFastMode, requestedDshPreset);
     }
 
     /**
@@ -455,6 +535,27 @@ public class ClaudeSession {
             String requestedReasoningEffort,
             String requestedCodexFastMode
     ) {
+        return send(input, attachments, agentPrompt, fileTagPaths, requestedPermissionMode,
+                requestedReasoningEffort, requestedCodexFastMode, null);
+    }
+
+    /**
+     * Send a message with attachments and an optional DSH agent preset.
+     */
+    public CompletableFuture<Void> send(
+            String input,
+            List<Attachment> attachments,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String requestedPermissionMode,
+            String requestedReasoningEffort,
+            String requestedCodexFastMode,
+            String requestedDshPreset
+    ) {
+        lastTurnStartedAtMillis = System.currentTimeMillis();
+        // Reset the manual-interrupt flag at the start of a new turn so that
+        // a fresh send is not mistaken for a user-initiated stop.
+        manuallyInterrupted = false;
         String normalizedInput = (input != null) ? input.trim() : "";
         Message userMessage = contextService.buildUserMessage(normalizedInput, attachments);
         sendService.updateSessionStateForSend(userMessage, normalizedInput);
@@ -464,6 +565,7 @@ public class ClaudeSession {
         final String finalRequestedPermissionMode = requestedPermissionMode;
         final String finalRequestedReasoningEffort = requestedReasoningEffort;
         final String finalRequestedCodexFastMode = requestedCodexFastMode;
+        final String finalRequestedDshPreset = requestedDshPreset;
 
         return launchClaude().thenCompose(chId -> {
             sendService.prepareContextCollector(contextCollector);
@@ -478,7 +580,8 @@ public class ClaudeSession {
                             finalFileTagPaths,
                             finalRequestedPermissionMode,
                             finalRequestedReasoningEffort,
-                            finalRequestedCodexFastMode
+                            finalRequestedCodexFastMode,
+                            finalRequestedDshPreset
                     )
             ).thenCompose(v -> syncUserMessageUuidsAfterSend());
         }).exceptionally(ex -> {
@@ -498,13 +601,22 @@ public class ClaudeSession {
      * Interrupt the current execution.
      */
     public CompletableFuture<Void> interrupt() {
-        if (state.getChannelId() == null) {
+        // Mark this turn as manually interrupted so the stream-end handler
+        // suppresses the task-completion notification sound.
+        manuallyInterrupted = true;
+
+        String provider = state.getProvider();
+        String channelId = state.getChannelId();
+        if (channelId == null) {
             return CompletableFuture.completedFuture(null);
         }
 
         return CompletableFuture.runAsync(() -> {
             try {
-                providerRouter.interruptChannel(state.getProvider(), state.getChannelId());
+                providerRouter.interruptChannel(provider, channelId);
+                if (!isCurrentChannel(provider, channelId)) {
+                    return;
+                }
                 state.setError(null);  // Clear previous error state
                 state.setBusy(false);
                 state.setLoading(false);  // Also reset loading state
@@ -517,11 +629,19 @@ public class ClaudeSession {
 
                 callbackFacade.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
             } catch (Exception e) {
-                state.setError(e.getMessage());
-                state.setLoading(false);  // Also reset loading on error
-                callbackFacade.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
+                if (isCurrentChannel(provider, channelId)) {
+                    state.setError(e.getMessage());
+                    state.setLoading(false);  // Also reset loading on error
+                    callbackFacade.notifyStateChange(state.isBusy(), state.isLoading(), state.getError());
+                }
+                throw new CompletionException(e);
             }
         });
+    }
+
+    private boolean isCurrentChannel(String provider, String channelId) {
+        return Objects.equals(provider, state.getProvider())
+                && Objects.equals(channelId, state.getChannelId());
     }
 
     /**
@@ -616,6 +736,14 @@ public class ClaudeSession {
      */
     public String getModel() {
         return state.getModel();
+    }
+
+    /**
+     * Returns the start time of the latest submitted turn, or {@code 0} when
+     * no turn has been submitted yet.
+     */
+    public long getLastTurnStartedAtMillis() {
+        return lastTurnStartedAtMillis;
     }
 
     /**

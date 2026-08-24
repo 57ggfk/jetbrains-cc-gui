@@ -578,6 +578,16 @@ public class DependencyManager {
                 String version = getInstalledVersion(sdk.getId());
                 status.addProperty("installedVersion", version);
                 status.addProperty("version", version); // Also add the version field
+
+                // Surface whether the installed version meets the SDK's minimum required
+                // version (e.g. Claude SDK >= 0.3.182 for the Fable tier). The frontend uses
+                // this to warn users before they hit a "model fable" 401 on old CLIs that
+                // don't recognize the alias.
+                String minRequired = sdk.getMinRequiredVersion();
+                if (minRequired != null && version != null && !version.isEmpty()) {
+                    status.addProperty("minimumVersion", minRequired);
+                    status.addProperty("meetsMinimumVersion", compareVersions(version, minRequired) >= 0);
+                }
             }
 
             result.add(sdk.getId(), status);
@@ -628,27 +638,27 @@ public class DependencyManager {
             return resolveWslNpmPath(nodePath);
         }
 
-        String npmName = PlatformUtils.isWindows() ? "npm.cmd" : "npm";
+        boolean windows = PlatformUtils.isWindows();
 
         // 1. Try to find npm in the same directory as Node.js
         if (nodePath != null && !"node".equals(nodePath)) {
             File nodeFile = new File(nodePath);
             String dir = nodeFile.getParent();
             if (dir != null) {
-                File npmFile = new File(dir, npmName);
-                if (npmFile.exists()) {
+                File npmFile = findNpmFile(new File(dir), windows);
+                if (npmFile != null) {
                     return npmFile.getAbsolutePath();
                 }
             }
         }
 
-        // 2. Windows: try to find the full path to npm.cmd from the PATH environment variable
-        if (PlatformUtils.isWindows()) {
+        // 2. Windows: try to find the full path to npm from the PATH environment variable
+        if (windows) {
             String pathEnv = System.getenv("PATH");
             if (pathEnv != null) {
                 for (String pathDir : pathEnv.split(File.pathSeparator)) {
-                    File npmFile = new File(pathDir, npmName);
-                    if (npmFile.exists()) {
+                    File npmFile = findNpmFile(new File(pathDir), windows);
+                    if (npmFile != null) {
                         LOG.info("[DependencyManager] Found npm in PATH: " + npmFile.getAbsolutePath());
                         return npmFile.getAbsolutePath();
                     }
@@ -657,7 +667,31 @@ public class DependencyManager {
         }
 
         // 3. Fall back to the bare command name (usually works on Unix)
-        return PlatformUtils.isWindows() ? npmName : "npm";
+        return windows ? "npm.cmd" : "npm";
+    }
+
+    /**
+     * 在指定目录中查找 npm 可执行文件。
+     * <p>Windows 上 npm 可能以 {@code npm.cmd}（标准 Node.js 安装）或
+     * {@code npm.exe}（mise、Volta 等版本管理器）形式存在，需按优先级依次查找；
+     * 其他平台查找 {@code npm}。
+     *
+     * @param dir     待查找的目录，为 {@code null} 时返回 {@code null}
+     * @param windows 是否在 Windows 平台查找，决定候选文件名集合
+     * @return 找到的 npm 文件，未找到返回 {@code null}
+     */
+    static File findNpmFile(File dir, boolean windows) {
+        if (dir == null) {
+            return null;
+        }
+        String[] candidates = windows ? new String[]{"npm.cmd", "npm.exe"} : new String[]{"npm"};
+        for (String name : candidates) {
+            File candidate = new File(dir, name);
+            if (candidate.exists()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     /**
@@ -842,7 +876,7 @@ public class DependencyManager {
      *
      * @return negative if v1 < v2, 0 if equal, positive if v1 > v2
      */
-    private int compareVersions(String v1, String v2) {
+    static int compareVersions(String v1, String v2) {
         if (v1 == null || v2 == null) {
             return 0;
         }
@@ -910,7 +944,7 @@ public class DependencyManager {
         return packages;
     }
 
-    private List<String> parseVersionList(String rawJson) {
+    static List<String> parseVersionList(String rawJson) {
         List<String> versions = new ArrayList<>();
 
         try {
@@ -919,7 +953,21 @@ public class DependencyManager {
                 return versions;
             }
 
-            for (com.google.gson.JsonElement item : element.getAsJsonArray()) {
+            // npm >= 9 wraps the version list in an extra array layer
+            // (`[["0.0.4", ..., "0.3.221"]]`), while older npm emits a flat array
+            // (`["0.0.4", ..., "0.3.221"]`). Unwrap leading array-of-array layers so
+            // both shapes reach the same primitive-version leaves; otherwise every
+            // element is itself an array, `isJsonPrimitive()` is false, and the whole
+            // list is silently dropped (causing the misleading "remote versions
+            // unavailable" fallback).
+            com.google.gson.JsonArray array = element.getAsJsonArray();
+            while (!array.isEmpty()
+                    && array.get(0).isJsonArray()
+                    && array.size() == 1) {
+                array = array.get(0).getAsJsonArray();
+            }
+
+            for (com.google.gson.JsonElement item : array) {
                 if (!item.isJsonPrimitive()) {
                     continue;
                 }
@@ -941,7 +989,7 @@ public class DependencyManager {
     /**
      * Parses a single segment of a version string.
      */
-    private int parseVersionPart(String part) {
+    private static int parseVersionPart(String part) {
         // Strip non-numeric suffixes (e.g. -beta, -alpha)
         Pattern pattern = Pattern.compile("^(\\d+)");
         Matcher matcher = pattern.matcher(part);

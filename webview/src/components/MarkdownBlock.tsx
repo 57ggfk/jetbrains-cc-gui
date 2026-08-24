@@ -1,13 +1,19 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { memo, useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { memo, useMemo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import katex from 'katex';
+import markedKatex from 'marked-katex-extension';
 import { openBrowser, openClass, openFile } from '../utils/bridge';
+import {
+  captureRangeOffsets,
+  restoreRangeOffsets,
+  type TextSelectionOffsets,
+} from '../utils/selectionOffsets';
 import { useMarkdownFileLinkTooltip } from '../hooks/useMarkdownFileLinkTooltip';
 import {
   decorateExistingAnchors,
   linkifyHtml,
-  linkifyPlainTextSegment,
 } from '../utils/linkify';
 import {
   getLinkifyCapabilities,
@@ -34,6 +40,7 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
+import 'katex/dist/katex.css';
 import { markedHighlight } from 'marked-highlight';
 
 const SAFE_HREF_PROTOCOL_REGEX = /^(?:https?|mailto):/i;
@@ -41,6 +48,7 @@ const FILE_URI_SCHEME_REGEX = /^file:/i;
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 let hrefSanitizerHookInstalled = false;
+const LATEX_CODE_LANGUAGES = new Set(['latex', 'tex', 'math']);
 
 function containsControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -156,6 +164,9 @@ async function getMermaid() {
 
 // Configure marked to use syntax highlighting
 marked.use(
+  markedKatex({
+    throwOnError: false,
+  }),
   markedHighlight({
     highlight(code: string, lang: string) {
       // Skip syntax highlighting for mermaid code blocks
@@ -294,6 +305,77 @@ function makeStreamSafe(content: string): string {
 }
 
 /**
+ * Split markdown into top-level blocks for block-memoized streaming rendering.
+ * Blocks split on blank lines, but never inside fenced code blocks (``` / ~~~)
+ * or display-math blocks ($$...$$ / \[...\]), whose contents may legitimately
+ * contain blank lines. During streaming every block except the last is stable,
+ * so each block's rendered HTML can be memoized by its source text — per-token
+ * work drops from O(document) to O(last block).
+ */
+function splitMarkdownBlocks(content: string): string[] {
+  if (!content) return [];
+
+  const lines = content.split('\n');
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+  let fenceMarker = '';
+  let inDisplayMath = false;
+  let mathCloser = '';
+
+  const flush = () => {
+    if (current.length > 0) {
+      blocks.push(current.join('\n'));
+      current = [];
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (inFence) {
+      current.push(line);
+      if (trimmed.startsWith(fenceMarker)) {
+        inFence = false;
+      }
+      continue;
+    }
+
+    if (inDisplayMath) {
+      current.push(line);
+      if (trimmed === mathCloser) {
+        inDisplayMath = false;
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+      inFence = true;
+      fenceMarker = trimmed.slice(0, 3);
+      current.push(line);
+      continue;
+    }
+
+    if (trimmed === '$$' || trimmed === '\\[') {
+      inDisplayMath = true;
+      mathCloser = trimmed === '$$' ? '$$' : '\\]';
+      current.push(line);
+      continue;
+    }
+
+    if (trimmed === '') {
+      flush();
+      continue;
+    }
+
+    current.push(line);
+  }
+
+  flush();
+  return blocks;
+}
+
+/**
  * Strip system-internal XML tags injected by Claude Code's prompt protocol.
  * Mirrors `stripPromptXMLTags` from the CLI source (src/utils/messages.ts).
  */
@@ -326,7 +408,74 @@ function escapeXmlTags(text: string): string {
  */
 const CODE_FENCE_RE = /(```[\s\S]*?```)/g;
 const INLINE_CODE_RE = /(`[^`\n]+`)/g;
-const BOLD_SYNTAX_RE = /(\*\*[^*]+\*\*)/g;
+const DISPLAY_MATH_DELIMITER_LINE_RE = /^([ \t]*)\$\$\s*$/;
+const BRACKET_MATH_DELIMITER_RE = /(?<!\\)(\\\[|\\\]|\\\(|\\\))/g;
+const BRACKET_MATH_DELIMITER_MAP: Record<string, string> = {
+  '\\[': '$$',
+  '\\]': '$$',
+  '\\(': '$',
+  '\\)': '$',
+};
+
+/**
+ * Normalize bracket-style math delimiters (\[...\] and \(...\)) — which many
+ * models emit instead of dollar delimiters — into the $$...$$ / $...$ forms
+ * that marked-katex-extension understands. Only prose segments are rewritten;
+ * fenced code blocks and inline code keep their literal backslash delimiters.
+ */
+function normalizeBracketMathDelimiters(content: string): string {
+  return content
+    .split(CODE_FENCE_RE)
+    .map((fencePart, fenceIdx) => {
+      if (fenceIdx % 2 === 1) return fencePart;
+
+      return fencePart
+        .split(INLINE_CODE_RE)
+        .map((inlinePart, inlineIdx) => {
+          if (inlineIdx % 2 === 1) return inlinePart;
+          return inlinePart.replace(
+            BRACKET_MATH_DELIMITER_RE,
+            (match) => BRACKET_MATH_DELIMITER_MAP[match],
+          );
+        })
+        .join('');
+    })
+    .join('');
+}
+
+function normalizeIndentedDisplayMath(content: string): string {
+  return content
+    .split(CODE_FENCE_RE)
+    .map((part, partIndex) => {
+      if (partIndex % 2 === 1) return part;
+
+      const lines = part.split('\n');
+      let mathIndent = '';
+      let inDisplayMath = false;
+
+      return lines
+        .map((line) => {
+          const delimiterMatch = DISPLAY_MATH_DELIMITER_LINE_RE.exec(line);
+          if (delimiterMatch) {
+            if (!inDisplayMath) {
+              mathIndent = delimiterMatch[1];
+              inDisplayMath = true;
+            } else {
+              inDisplayMath = false;
+            }
+            return '$$';
+          }
+
+          if (inDisplayMath && mathIndent && line.startsWith(mathIndent)) {
+            return line.slice(mathIndent.length);
+          }
+
+          return line;
+        })
+        .join('\n');
+    })
+    .join('');
+}
 
 function stripAndEscapeOutsideCodeBlocks(content: string): string {
   // First split by fenced code blocks
@@ -350,176 +499,238 @@ function stripAndEscapeOutsideCodeBlocks(content: string): string {
     .join('');
 }
 
+function isLatexCodeLanguage(language: string | null): boolean {
+  return language !== null && LATEX_CODE_LANGUAGES.has(language.toLowerCase());
+}
+
+function unwrapLatexCodeBlockSource(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const displayBlockMatch = trimmed.match(/^\$\$\s*([\s\S]*?)\s*\$\$$/);
+  if (displayBlockMatch) {
+    return (displayBlockMatch[1] ?? '').trim();
+  }
+
+  const bracketBlockMatch = trimmed.match(/^\\\[\s*([\s\S]*?)\s*\\\]$/);
+  if (bracketBlockMatch) {
+    return (bracketBlockMatch[1] ?? '').trim();
+  }
+
+  const inlineParenMatch = trimmed.match(/^\\\(\s*([\s\S]*?)\s*\\\)$/);
+  if (inlineParenMatch) {
+    return (inlineParenMatch[1] ?? '').trim();
+  }
+
+  return trimmed;
+}
+
+function renderLatexPreviewHtml(source: string): string | null {
+  const latex = unwrapLatexCodeBlockSource(source);
+  if (!latex) {
+    return null;
+  }
+
+  try {
+    const rendered = katex.renderToString(latex, {
+      displayMode: true,
+      throwOnError: false,
+      strict: 'ignore',
+      trust: false,
+    });
+    return rendered.includes('katex-error') ? null : rendered;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Lightweight renderer for streaming content.
- * Provides basic formatting (code fences, line breaks, inline code, bold)
- * without the heavy marked.parse() + DOMPurify + DOMParser pipeline.
- * Full markdown parsing is deferred to when streaming ends.
+ * Full markdown pipeline for a single top-level block: marked + DOMPurify +
+ * LaTeX previews + copy buttons + linkify. This is the ONLY renderer — used
+ * both during streaming (per memoized block) and after — so streaming output
+ * and final output are identical by construction.
  */
-/** Sanitize code language identifier — only allow safe characters for HTML class attribute. */
-function safeLang(lang: string): string {
-  return lang.replace(/[^a-zA-Z0-9_.-]/g, '');
-}
-
-function renderStreamingInlineText(
-  text: string,
-  capabilities: LinkifyCapabilities,
-  handleInlineCode: boolean = true,
-): string {
-  if (handleInlineCode) {
-    return text
-      .split(INLINE_CODE_RE)
-      .map((inlinePart) => {
-        const inlineCodeMatch = /^`([^`\n]+)`$/.exec(inlinePart);
-        if (inlineCodeMatch) {
-          // Inline code content should also be linkified
-          const linkifiedCode = linkifyPlainTextSegment(inlineCodeMatch[1], capabilities);
-          return `<code>${linkifiedCode}</code>`;
-        }
-
-        return inlinePart
-          .split(BOLD_SYNTAX_RE)
-          .map((part) => {
-            const boldMatch = /^\*\*([^*]+)\*\*$/.exec(part);
-            if (boldMatch) {
-              return `<strong>${linkifyPlainTextSegment(boldMatch[1], capabilities)}</strong>`;
-            }
-
-            return linkifyPlainTextSegment(part, capabilities);
-          })
-          .join('');
-      })
-      .join('');
-  }
-
-  // When inline code is already handled upstream, just process bold and linkify
-  return text
-    .split(BOLD_SYNTAX_RE)
-    .map((part) => {
-      const boldMatch = /^\*\*([^*]+)\*\*$/.exec(part);
-      if (boldMatch) {
-        return `<strong>${linkifyPlainTextSegment(boldMatch[1], capabilities)}</strong>`;
-      }
-
-      return linkifyPlainTextSegment(part, capabilities);
-    })
-    .join('');
-}
-
-function renderStreamingProseSegment(
-  segment: string,
-  capabilities: LinkifyCapabilities,
-): string {
-  // First strip system-internal XML tags from the prose segment
-  const cleaned = stripSystemTags(segment);
-
-  // Split by inline code to avoid double-escaping
-  // linkifyPlainTextSegment already handles HTML escaping for inline code content
-  const inlineParts = cleaned.split(INLINE_CODE_RE);
-
-  const processedParts = inlineParts.map((part, idx) => {
-    // Odd indices are inline code — pass to linkifyPlainTextSegment which escapes HTML
-    if (idx % 2 === 1) {
-      const inlineContent = part.slice(1, -1); // Remove surrounding backticks
-      return `<code>${linkifyPlainTextSegment(inlineContent, capabilities)}</code>`;
-    }
-    // Even indices are prose — escape XML tags then render inline formatting
-    return renderStreamingInlineText(escapeXmlTags(part), capabilities, false);
-  });
-
-  // Now wrap in paragraph/heading structure based on paragraph breaks
-  const combined = processedParts.join('');
-  return combined
-    .split(/\n{2,}/)
-    .filter((block) => block.length > 0)
-    .map((block) => {
-      const headingMatch = /^(#{1,6})\s+(.+)$/.exec(block);
-      if (headingMatch && !block.includes('\n')) {
-        const level = headingMatch[1].length;
-        return `<h${level}>${headingMatch[2]}</h${level}>`;
-      }
-
-      const lines = block.split('\n').join('<br/>');
-      return `<p>${lines}</p>`;
-    })
-    .join('');
-}
-
-function renderStreamingContent(
+function renderFullMarkdownHtml(
   content: string,
-  capabilities: LinkifyCapabilities,
+  linkifyCapabilities: LinkifyCapabilities,
+  copySuccessText: string,
+  copyCodeTitle: string,
 ): string {
-  if (!content) return '';
-
-  const safeContent = makeStreamSafe(content);
-
-  // Split by code fence blocks, keeping delimiters
-  const segments: string[] = [];
-  let current = '';
-  let inCode = false;
-  let codeLang = '';
-
-  for (const line of safeContent.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('```')) {
-      if (!inCode) {
-        // Flush prose before code block
-        if (current) segments.push(current);
-        current = '';
-        inCode = true;
-        codeLang = safeLang(trimmed.slice(3).trim());
-      } else {
-        // End code block — emit as <pre><code>
-        const escaped = current
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;');
-        segments.push(
-          `<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${escaped}</code></pre>`
-        );
-        current = '';
-        inCode = false;
-        codeLang = '';
+  try {
+    // Strip system-internal XML tags and escape remaining XML tags outside code blocks
+    // (mirrors CLI's stripPromptXMLTags + html token discard)
+    const cleaned = stripAndEscapeOutsideCodeBlocks(
+      normalizeIndentedDisplayMath(normalizeBracketMathDelimiters(content)),
+    );
+    const parsed = marked.parse(cleaned);
+    const sanitized = DOMPurify.sanitize(
+      typeof parsed === 'string' ? parsed : String(parsed),
+      {
+        ...MARKDOWN_LINK_SANITIZE_OPTIONS,
+        ADD_ATTR: ['class', 'data-lang', 'data-copy-success', 'data-copy-title'],
       }
-      continue;
+    );
+    const rawHtml = sanitized.trim();
+
+    if (typeof window === 'undefined' || !rawHtml) {
+      return rawHtml;
     }
-    current += (current ? '\n' : '') + line;
-  }
 
-  // Handle remaining content
-  if (current) {
-    if (inCode) {
-      const escaped = current
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      segments.push(
-        `<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${escaped}</code></pre>`
-      );
-    } else {
-      segments.push(current);
+    const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+    const pres = doc.querySelectorAll('pre');
+
+    pres.forEach((pre) => {
+      const code = pre.querySelector('code');
+      const languageTag = code ? (code.className.match(/language-([\w-]+)/i)?.[1] ?? null) : null;
+      if (!isLatexCodeLanguage(languageTag)) {
+        return;
+      }
+
+      const previewHtml = renderLatexPreviewHtml(code?.textContent ?? '');
+      if (!previewHtml) {
+        return;
+      }
+
+      const wrapper = doc.createElement('div');
+      wrapper.className = 'code-block-wrapper latex-code-block-wrapper';
+      pre.parentNode?.insertBefore(wrapper, pre);
+
+      const preview = doc.createElement('div');
+      preview.className = 'latex-code-block-preview';
+      preview.innerHTML = previewHtml;
+
+      wrapper.appendChild(preview);
+      wrapper.appendChild(pre);
+      pre.style.display = 'none';
+    });
+
+    decorateExistingAnchors(doc.body);
+
+    pres.forEach((pre) => {
+      const parent = pre.parentElement;
+      if (parent && parent.classList.contains('code-block-wrapper')) {
+        return;
+      }
+
+      const wrapper = doc.createElement('div');
+      wrapper.className = 'code-block-wrapper';
+
+      pre.parentNode?.insertBefore(wrapper, pre);
+      wrapper.appendChild(pre);
+
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'copy-code-btn';
+      btn.title = copyCodeTitle;
+      btn.setAttribute('aria-label', copyCodeTitle);
+
+      const iconSpan = doc.createElement('span');
+      iconSpan.className = 'copy-icon';
+      iconSpan.innerHTML = copyIconSvg;
+
+      const tooltipSpan = doc.createElement('span');
+      tooltipSpan.className = 'copy-tooltip';
+      tooltipSpan.textContent = copySuccessText;
+
+      btn.appendChild(iconSpan);
+      btn.appendChild(tooltipSpan);
+
+      wrapper.appendChild(btn);
+    });
+
+    linkifyHtml(doc.body, linkifyCapabilities);
+
+    return doc.body.innerHTML.trim();
+  } catch (e) {
+    // If marked/DOMPurify throws, never return raw `content` to
+    // dangerouslySetInnerHTML — escape HTML special chars so any malicious
+    // payload renders as literal text instead of executable markup.
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('[MarkdownBlock] Render failed, falling back to escaped text:', e);
     }
+    return content.replace(/[&<>"']/g, (ch) => {
+      switch (ch) {
+        case '&': return '&amp;';
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '"': return '&quot;';
+        case "'": return '&#39;';
+        default: return ch;
+      }
+    });
   }
-
-  // Process prose segments (non-code)
-  const raw = segments
-    .map((seg) => {
-      // Already wrapped in <pre> — pass through
-      if (seg.startsWith('<pre>')) return seg;
-
-      // renderStreamingProseSegment handles stripSystemTags + escapeXmlTags internally,
-      // and preserves inline code content for natural HTML escaping
-      return renderStreamingProseSegment(seg, capabilities);
-    })
-    .join('');
-
-  // Sanitize the assembled HTML to prevent XSS even during streaming
-  return DOMPurify.sanitize(raw, {
-    ...MARKDOWN_LINK_SANITIZE_OPTIONS,
-    ALLOWED_TAGS: ['a', 'p', 'br', 'pre', 'code', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
-    ALLOWED_ATTR: ['class', 'href', 'data-linkify'],
-  });
 }
+
+interface BlockSectionProps {
+  source: string;
+  isStreamingTail: boolean;
+  linkifyCapabilities: LinkifyCapabilities;
+  copySuccessText: string;
+  copyCodeTitle: string;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}
+
+/**
+ * One top-level markdown block, memoized by source text. During streaming only
+ * the tail block's source changes; every earlier block skips re-parsing, and
+ * because its `__html` string is unchanged React never touches its DOM.
+ */
+const BlockSection = memo(function BlockSection({
+  source,
+  isStreamingTail,
+  linkifyCapabilities,
+  copySuccessText,
+  copyCodeTitle,
+  containerRef,
+}: BlockSectionProps) {
+  const html = useMemo(
+    () =>
+      renderFullMarkdownHtml(
+        // The tail block may end mid-fence or mid-backtick while tokens are
+        // still arriving — temporarily close the structure so marked can parse
+        // it. Once the real closing token arrives the source itself contains
+        // it, makeStreamSafe becomes a no-op, and the HTML string is unchanged.
+        isStreamingTail ? makeStreamSafe(source) : source,
+        linkifyCapabilities,
+        copySuccessText,
+        copyCodeTitle,
+      ),
+    [source, isStreamingTail, linkifyCapabilities, copySuccessText, copyCodeTitle],
+  );
+
+  // Streaming selection preservation: when this block's HTML changes, its
+  // innerHTML rewrite destroys the text nodes underneath an active selection.
+  // Capture the selection as character offsets over the whole message
+  // container during render — the old text nodes are still in place, and
+  // stable blocks keep theirs, so offsets stay valid even for selections
+  // spanning multiple blocks — then re-anchor the Range in a layout effect,
+  // before paint, so there is no flicker.
+  //
+  // committedHtmlRef is read here but only mutated inside the layout effect
+  // below, so a discarded concurrent render can't poison the "last committed"
+  // comparison. rescuedSelectionRef is written during render as a deferred
+  // payload for that effect; the value is idempotent across double-invoked
+  // renders and never influences render output.
+  const committedHtmlRef = useRef(html);
+  const rescuedSelectionRef = useRef<TextSelectionOffsets | null>(null);
+
+  if (committedHtmlRef.current !== html && containerRef.current) {
+    rescuedSelectionRef.current = captureRangeOffsets(containerRef.current);
+  }
+
+  useLayoutEffect(() => {
+    committedHtmlRef.current = html;
+    const rescued = rescuedSelectionRef.current;
+    if (rescued && containerRef.current) {
+      restoreRangeOffsets(containerRef.current, rescued);
+    }
+    rescuedSelectionRef.current = null;
+  }, [html, containerRef]);
+
+  return <div className="md-block" dangerouslySetInnerHTML={{ __html: html }} />;
+});
 
 // Mermaid render counter for generating unique IDs
 let mermaidIdCounter = 0;
@@ -538,11 +749,19 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
     getLinkifyCapabilities(),
   );
   const containerRef = useRef<HTMLDivElement>(null);
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const normalizedContent = useMemo(() => safeStringifyContent(content), [content]);
 
-  // Track previous isStreaming state to detect when streaming ends
-  const prevIsStreamingRef = useRef(isStreaming);
+  // Split into top-level blocks. During streaming only the last block keeps
+  // growing; every earlier block is memoized by source and never re-parsed,
+  // so per-token render cost is O(last block) instead of O(document).
+  const blocks = useMemo(
+    () => splitMarkdownBlocks(normalizedContent.replace(/[\r\n]+$/, '')),
+    [normalizedContent],
+  );
+
+  const copySuccessText = t('markdown.copySuccess');
+  const copyCodeTitle = t('markdown.copyCode');
 
   // Ref for tracking retry count
   const mermaidRetryRef = useRef(0);
@@ -698,130 +917,6 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
     }
   };
 
-  const html = useMemo(() => {
-    try {
-      const trimmedContent = normalizedContent.replace(/[\r\n]+$/, '');
-
-      // During streaming, use lightweight renderer to avoid heavy parsing on every delta
-      if (isStreaming) {
-        return renderStreamingContent(trimmedContent, linkifyCapabilities);
-      }
-
-      // Non-streaming: full markdown pipeline
-      // Strip system-internal XML tags and escape remaining XML tags outside code blocks
-      // (mirrors CLI's stripPromptXMLTags + html token discard)
-      const cleaned = stripAndEscapeOutsideCodeBlocks(trimmedContent);
-      const parsed = marked.parse(cleaned);
-      const sanitized = DOMPurify.sanitize(
-        typeof parsed === 'string' ? parsed : String(parsed),
-        {
-          ...MARKDOWN_LINK_SANITIZE_OPTIONS,
-          ADD_ATTR: ['class', 'data-lang', 'data-copy-success', 'data-copy-title'],
-        }
-      );
-      const rawHtml = sanitized.trim();
-
-      if (typeof window === 'undefined' || !rawHtml) {
-        return rawHtml;
-      }
-
-      const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
-    decorateExistingAnchors(doc.body);
-      const pres = doc.querySelectorAll('pre');
-      const copySuccessText = t('markdown.copySuccess');
-      const copyCodeTitle = t('markdown.copyCode');
-
-      pres.forEach((pre) => {
-        const parent = pre.parentElement;
-        if (parent && parent.classList.contains('code-block-wrapper')) {
-          return;
-        }
-
-        const wrapper = doc.createElement('div');
-        wrapper.className = 'code-block-wrapper';
-
-        pre.parentNode?.insertBefore(wrapper, pre);
-        wrapper.appendChild(pre);
-
-        const btn = doc.createElement('button');
-        btn.type = 'button';
-        btn.className = 'copy-code-btn';
-        btn.title = copyCodeTitle;
-        btn.setAttribute('aria-label', copyCodeTitle);
-
-        const iconSpan = doc.createElement('span');
-        iconSpan.className = 'copy-icon';
-        iconSpan.innerHTML = copyIconSvg;
-
-        const tooltipSpan = doc.createElement('span');
-        tooltipSpan.className = 'copy-tooltip';
-        tooltipSpan.textContent = copySuccessText;
-
-        btn.appendChild(iconSpan);
-        btn.appendChild(tooltipSpan);
-
-        wrapper.appendChild(btn);
-      });
-
-      linkifyHtml(doc.body, linkifyCapabilities);
-
-      return doc.body.innerHTML.trim();
-    } catch (e) {
-      // If marked/DOMPurify throws, never return raw `content` to
-      // dangerouslySetInnerHTML — escape HTML special chars so any malicious
-      // payload renders as literal text instead of executable markup.
-      if (typeof console !== 'undefined' && console.error) {
-        console.error('[MarkdownBlock] Render failed, falling back to escaped text:', e);
-      }
-      return normalizedContent.replace(/[&<>"']/g, (ch) => {
-        switch (ch) {
-          case '&': return '&amp;';
-          case '<': return '&lt;';
-          case '>': return '&gt;';
-          case '"': return '&quot;';
-          case "'": return '&#39;';
-          default: return ch;
-        }
-      });
-    }
-  }, [normalizedContent, isStreaming, i18n.language, linkifyCapabilities, t]);
-
-  // Force DOM refresh when streaming ends to fix potential layout corruption from streaming render
-  useEffect(() => {
-    if (prevIsStreamingRef.current && !isStreaming && containerRef.current) {
-      let rafId2: number | null = null;
-      let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-      let done = false;
-
-      const applyRefresh = () => {
-        if (done || !containerRef.current) return;
-        done = true;
-        containerRef.current.innerHTML = html;
-        renderMermaidDiagrams();
-      };
-
-      // Use double requestAnimationFrame to ensure DOM is fully updated
-      const rafId1 = requestAnimationFrame(() => {
-        rafId2 = requestAnimationFrame(() => {
-          applyRefresh();
-        });
-        // Fallback: use setTimeout in case rAF doesn't fire in some environments
-        fallbackTimer = setTimeout(() => {
-          applyRefresh();
-        }, 100);
-      });
-
-      prevIsStreamingRef.current = isStreaming;
-      return () => {
-        cancelAnimationFrame(rafId1);
-        if (rafId2) cancelAnimationFrame(rafId2);
-        if (fallbackTimer) clearTimeout(fallbackTimer);
-      };
-    }
-    prevIsStreamingRef.current = isStreaming;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStreaming, html, renderMermaidDiagrams]);
-
   const handleClick = async (event: React.MouseEvent<HTMLDivElement>) => {
     // React synthetic events may have a Text node as target when the user
     // clicks inside an <a> element. Walk up to the parent element so that
@@ -901,17 +996,31 @@ const MarkdownBlock = ({ content = '', isStreaming = false }: MarkdownBlockProps
     }
   };
 
+  // Selection preservation lives inside each BlockSection: stable blocks are
+  // never rewritten (memoized identical `__html`), only the streaming tail
+  // re-anchors the Range across its own rebuilds.
   return (
     <>
       <div
         ref={containerRef}
         className="markdown-content"
-        dangerouslySetInnerHTML={{ __html: html }}
         onClick={handleClick}
         onMouseOver={fileLinkTooltip.handleMouseOver}
         onMouseMove={fileLinkTooltip.handleMouseMove}
         onMouseOut={fileLinkTooltip.handleMouseOut}
-      />
+      >
+        {blocks.map((source, index) => (
+          <BlockSection
+            key={index}
+            source={source}
+            isStreamingTail={isStreaming && index === blocks.length - 1}
+            linkifyCapabilities={linkifyCapabilities}
+            copySuccessText={copySuccessText}
+            copyCodeTitle={copyCodeTitle}
+            containerRef={containerRef}
+          />
+        ))}
+      </div>
       {/* Tooltip is managed via native DOM API in handleMouseOver/handleMouseOut
           to avoid React re-render issues that break click events in JCEF. */}
       {previewSrc && (

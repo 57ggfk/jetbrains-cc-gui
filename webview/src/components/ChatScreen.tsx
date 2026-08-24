@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useMemo } from 'react';
+import { type RefObject, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChatInputBox } from './ChatInputBox';
 import type {
@@ -24,8 +24,12 @@ import { extractMarkdownContent } from '../utils/copyUtils';
 import type { ClaudeMessage, TodoItem, ToolResultBlock } from '../types';
 import type { useMessageProcessing, useFileChanges, useSubagents, useFileChangesManagement, useModelProviderState, useMessageQueue } from '../hooks';
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
+import { CodexPetStatusBridge } from './codexPet/CodexPetStatusBridge';
+import { shouldToggleCodexPet } from './codexPet/petState';
+import { useCodexPetPreference } from './codexPet/useCodexPetPreference';
+import { reconcileMessageKeys, type MessageKeySnapshot } from '../utils/messageUtils';
 
-type SubagentHistoryGetter = (key: string) => ReturnType<typeof useMessages>['subagentHistories'][string] | undefined;
+type SubagentHistoryMap = ReturnType<typeof useMessages>['subagentHistories'];
 type ProviderState = ReturnType<typeof useModelProviderState>;
 type MessageQueueValue = ReturnType<typeof useMessageQueue>['queue'];
 type SubagentList = ReturnType<typeof useSubagents>;
@@ -35,6 +39,7 @@ type FileChangeMgmt = ReturnType<typeof useFileChangesManagement>;
 export interface ChatScreenProps {
   // Computed message data
   mergedMessages: ClaudeMessage[];
+  sessionTitle: string;
   getMessageText: (message: ClaudeMessage) => string;
   getContentBlocks: ReturnType<typeof useMessageProcessing>['getContentBlocks'];
   findToolResult: (toolUseId?: string, messageIndex?: number) => ToolResultBlock | null;
@@ -44,8 +49,8 @@ export interface ChatScreenProps {
   subagents: SubagentList;
   globalTodos: TodoItem[];
   filteredFileChanges: FileChangeList;
-  subagentHistoryCtxValue: SubagentHistoryGetter;
-  sessionIdCtxValue: { currentSessionId: string | null };
+  subagentHistoryCtxValue: SubagentHistoryMap;
+  sessionIdCtxValue: { currentSessionId: string | null; currentProvider: string };
 
   // Refs
   chatInputRef: RefObject<ChatInputBoxHandle | null>;
@@ -83,12 +88,15 @@ export interface ChatScreenProps {
   selectedModel: ProviderState['selectedModel'];
   permissionMode: ProviderState['permissionMode'];
   selectedAgent: ProviderState['selectedAgent'];
-  sdkStatusLoaded: ProviderState['sdkStatusLoaded'];
+  sdkStatusLoading: ProviderState['sdkStatusLoading'];
+  sdkStatusError: ProviderState['sdkStatusError'];
+  onRetrySdkStatus: ProviderState['retrySdkStatus'];
   currentSdkInstalled: ProviderState['currentSdkInstalled'];
   activeProviderConfig: ProviderState['activeProviderConfig'];
   claudeSettingsAlwaysThinkingEnabled: ProviderState['claudeSettingsAlwaysThinkingEnabled'];
   reasoningEffort: ProviderState['reasoningEffort'];
   codexFastMode: ProviderState['codexFastMode'];
+  dshPreset: ProviderState['dshPreset'];
   streamingEnabledSetting: ProviderState['streamingEnabledSetting'];
   sendShortcut: ProviderState['sendShortcut'];
   autoOpenFileEnabled: ProviderState['autoOpenFileEnabled'];
@@ -103,6 +111,7 @@ export interface ChatScreenProps {
   onAgentSelect: ProviderState['handleAgentSelect'];
   onReasoningChange: ProviderState['handleReasoningChange'];
   onCodexFastModeChange: ProviderState['handleCodexFastModeChange'];
+  onDshPresetChange: ProviderState['handleDshPresetChange'];
   onToggleThinking: ProviderState['handleToggleThinking'];
   onStreamingEnabledChange: ProviderState['handleStreamingEnabledChange'];
   onAutoOpenFileEnabledChange: ProviderState['handleAutoOpenFileEnabledChange'];
@@ -122,7 +131,7 @@ export interface ChatScreenProps {
  * Stage 5 of TASK-P1-01.
  */
 export const ChatScreen = ({
-  mergedMessages, getMessageText, getContentBlocks, findToolResult, getToolResultRaw,
+  mergedMessages, sessionTitle, getMessageText, getContentBlocks, findToolResult, getToolResultRaw,
   subagents, globalTodos, filteredFileChanges,
   subagentHistoryCtxValue, sessionIdCtxValue,
   chatInputRef, messagesContainerRef, messagesEndRef, inputAreaRef,
@@ -133,18 +142,30 @@ export const ChatScreen = ({
   onSubmit, onInterrupt, onRewind,
   onNavigateToProviderSettings, onProviderSelect,
   currentProvider, selectedModel, permissionMode, selectedAgent,
-  sdkStatusLoaded, currentSdkInstalled,
+  sdkStatusLoading, sdkStatusError, onRetrySdkStatus, currentSdkInstalled,
   activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
-  reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
+  reasoningEffort, codexFastMode, dshPreset, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
   longContextEnabled, usagePercentage, usageUsedTokens, usageMaxTokens,
-  onModeSelect, onModelSelect, onAgentSelect, onReasoningChange, onCodexFastModeChange, onToggleThinking,
+  onModeSelect, onModelSelect, onAgentSelect, onReasoningChange, onCodexFastModeChange, onDshPresetChange, onToggleThinking,
   onStreamingEnabledChange,
   onAutoOpenFileEnabledChange, onLongContextChange,
   messageQueue, onRemoveFromQueue,
 }: ChatScreenProps) => {
   const { t } = useTranslation();
-  const { messages, loading, isThinking, streamingActive, loadingStartTime, subagentHistories } = useMessages();
+  const { messages, status, loading, isThinking, streamingActive, loadingStartTime, subagentHistories } = useMessages();
   const { currentSessionId } = useSession();
+  const previousMessageKeySnapshotRef = useRef<MessageKeySnapshot | undefined>(undefined);
+  const messageKeySnapshot = useMemo(
+    () => reconcileMessageKeys(
+      mergedMessages,
+      previousMessageKeySnapshotRef.current,
+      `${currentProvider}:${currentSessionId ?? 'active-session'}`,
+    ),
+    [currentProvider, currentSessionId, mergedMessages],
+  );
+  useLayoutEffect(() => {
+    previousMessageKeySnapshotRef.current = messageKeySnapshot;
+  }, [messageKeySnapshot]);
   const {
     setSettingsInitialTab, setCurrentView,
     contextInfo, setContextInfo,
@@ -154,6 +175,23 @@ export const ChatScreen = ({
     openChangelogDialog,
     searchOpen, setSearchOpen,
   } = useUIState();
+  const { enabled: petEnabled, toggle: togglePet } = useCodexPetPreference();
+  const codexPetErrorCount = useMemo(
+    () => messages.reduce((count, message) => count + (message.type === 'error' ? 1 : 0), 0),
+    [messages],
+  );
+  const handleSubmit = useCallback((content: string, attachments?: Attachment[]) => {
+    if (shouldToggleCodexPet(currentProvider, content, attachments?.length ?? 0)) {
+      togglePet();
+      setDraftInput('');
+      addToast(
+        petEnabled ? t('codexPet.hidden', 'Codex pet hidden') : t('codexPet.shown', 'Codex pet shown'),
+        'success',
+      );
+      return;
+    }
+    onSubmit(content, attachments);
+  }, [addToast, currentProvider, onSubmit, petEnabled, setDraftInput, t, togglePet]);
 
   // Signal that the search hook can listen to for re-scanning. Combines
   // length + last timestamp + streaming flag + last-message content size.
@@ -200,11 +238,17 @@ export const ChatScreen = ({
     setSearchOpen(false);
   }, [setSearchOpen]);
 
+  const handleNavigateToDependencySettings = useCallback(() => {
+    setSettingsInitialTab('dependencies');
+    setCurrentView('settings');
+  }, [setCurrentView, setSettingsInitialTab]);
+
   return (
     <>
       <div className="messages-shell">
         <MessageAnchorRail
           messages={mergedMessages}
+          messageKeys={messageKeySnapshot.keys}
           collapsedCount={anchorCollapsedCount}
           containerRef={messagesContainerRef}
           messageNodeMap={messageNodeMapRef}
@@ -221,7 +265,6 @@ export const ChatScreen = ({
           {messages.length === 0 && (
             <WelcomeScreen
               currentProvider={currentProvider}
-              currentModelId={selectedModel}
               t={t}
               onProviderChange={onProviderSelect}
               onVersionClick={openChangelogDialog}
@@ -234,6 +277,7 @@ export const ChatScreen = ({
                 <MessageList
                   ref={messageListRef}
                   messages={mergedMessages}
+                  messageKeys={messageKeySnapshot.keys}
                   streamingActive={streamingActive}
                   isThinking={isThinking}
                   loading={loading}
@@ -247,16 +291,26 @@ export const ChatScreen = ({
                   onMessageNodeRef={onMessageNodeRef}
                   onCollapsedCountChange={setAnchorCollapsedCount}
                   onNavigateToProviderSettings={onNavigateToProviderSettings}
-                  onNavigateToDependencySettings={() => {
-                    setSettingsInitialTab('dependencies');
-                    setCurrentView('settings');
-                  }}
+                  onNavigateToDependencySettings={handleNavigateToDependencySettings}
                   currentProvider={currentProvider}
+                  currentSessionId={currentSessionId}
                 />
               </ToolResultRawContext.Provider>
             </SubagentHistoryContext.Provider>
           </SessionIdContext.Provider>
         </div>
+        <CodexPetStatusBridge
+          key={currentProvider}
+          active={petEnabled && (currentProvider === 'codex' || currentProvider === 'claude')}
+          loading={loading}
+          streamingActive={streamingActive}
+          isThinking={isThinking}
+          status={status}
+          errorCount={codexPetErrorCount}
+          provider={currentProvider}
+          model={selectedModel}
+          tabTitle={sessionTitle.trim() || undefined}
+        />
       </div>
 
       <ScrollControl containerRef={messagesContainerRef} inputAreaRef={inputAreaRef} />
@@ -268,6 +322,7 @@ export const ChatScreen = ({
           subagents={subagents}
           subagentHistories={subagentHistories}
           currentSessionId={currentSessionId}
+          currentProvider={currentProvider}
           expanded={statusPanelExpanded}
           isStreaming={streamingActive}
           onUndoFile={onUndoFile}
@@ -290,22 +345,26 @@ export const ChatScreen = ({
           alwaysThinkingEnabled={activeProviderConfig?.settingsConfig?.alwaysThinkingEnabled ?? claudeSettingsAlwaysThinkingEnabled}
           placeholder={sendShortcut === 'cmdEnter' ? t('chat.inputPlaceholderCmdEnter') : t('chat.inputPlaceholderEnter')}
           sdkInstalled={currentSdkInstalled}
-          sdkStatusLoading={!sdkStatusLoaded}
+          sdkStatusLoading={sdkStatusLoading}
+          sdkStatusError={sdkStatusError !== null}
+          onRetrySdkStatus={onRetrySdkStatus}
           onInstallSdk={() => {
             setSettingsInitialTab('dependencies');
             setCurrentView('settings');
           }}
           value={draftInput}
           onInput={setDraftInput}
-          onSubmit={onSubmit}
+          onSubmit={handleSubmit}
           onStop={onInterrupt}
           onModeSelect={onModeSelect}
           onModelSelect={onModelSelect}
           onProviderSelect={onProviderSelect}
           reasoningEffort={reasoningEffort}
+          dshPreset={dshPreset}
           onReasoningChange={onReasoningChange}
           codexFastMode={codexFastMode}
           onCodexFastModeChange={onCodexFastModeChange}
+          onDshPresetChange={onDshPresetChange}
           onToggleThinking={onToggleThinking}
           streamingEnabled={streamingEnabledSetting}
           onStreamingEnabledChange={onStreamingEnabledChange}

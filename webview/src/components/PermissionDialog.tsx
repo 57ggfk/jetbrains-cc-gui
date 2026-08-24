@@ -64,8 +64,9 @@ const getCommandContent = (inputs: Record<string, unknown>): string => {
   if ('text' in inputs && inputs.text !== undefined) {
     return formatInputValue(inputs.text);
   }
-  // For other tools, format all inputs
+  // For other tools, format all inputs (skip internal policy fields)
   return Object.entries(inputs)
+    .filter(([key]) => !key.startsWith('_'))
     .map(([key, value]) => `${key}: ${formatInputValue(value)}`)
     .join('\n');
 };
@@ -197,15 +198,6 @@ const PermissionDialog = ({
     return translated;
   };
 
-  // Security (E): for command-execution tools the "always allow" memory is scoped to this
-  // exact command (parameter-level), not the whole tool, so make the button say so —
-  // otherwise users expect every future Bash command to be allowed. Mirrors the backend
-  // PermissionDecisionStore.isCommandExecutionTool set (Bash + Agent).
-  const isCommandExecutionTool = request.toolName === 'Bash' || request.toolName === 'Agent';
-  const allowAlwaysLabel = isCommandExecutionTool
-    ? t('permission.allowAlwaysCommand')
-    : t('permission.allowAlways');
-
   return (
     <div className="permission-dialog-overlay">
       <div
@@ -268,7 +260,11 @@ const PermissionDialog = ({
             onClick={handleApproveAlways}
             onMouseEnter={() => setSelectedIndex(1)}
           >
-            <span className="option-text">{allowAlwaysLabel}</span>
+            {/* "Always allow" is remembered at the TOOL level for the current conversation
+                (PermissionService.dispatchPermissionDialog -> rememberToolDecision), so for
+                Bash/Agent this approves every future command this session — the label must
+                say "Always allow", not "Always allow this command". */}
+            <span className="option-text">{t('permission.allowAlways')}</span>
             <span className="option-key">2</span>
           </button>
           <button

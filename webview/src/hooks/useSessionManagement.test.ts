@@ -102,7 +102,7 @@ describe('useSessionManagement', () => {
     expect(window.sendToJava).toHaveBeenNthCalledWith(1, 'interrupt_session:');
     expect(window.sendToJava).toHaveBeenNthCalledWith(
       2,
-      'load_session:{"sessionId":"history-1","provider":"claude"}'
+      'load_session:{"sessionId":"history-1","provider":"claude","model":"claude-sonnet-4-6"}'
     );
     expect(window.__sessionTransitioning).toBe(true);
     expect(window.__sessionTransitionToken).toBeTruthy();
@@ -571,7 +571,9 @@ describe('useSessionManagement', () => {
     // Should NOT send interrupt when not loading
     const calls = (window.sendToJava as any).mock.calls.map((c: any) => c[0]);
     expect(calls).not.toContain('interrupt_session:');
-    expect(calls).toContain('load_session:{"sessionId":"hist-2","provider":"claude"}');
+    expect(calls).toContain(
+      'load_session:{"sessionId":"hist-2","provider":"claude","model":"claude-sonnet-4-6"}',
+    );
 
     // But should still set transition guard
     expect(window.__sessionTransitioning).toBe(true);
@@ -616,7 +618,44 @@ describe('useSessionManagement', () => {
     });
 
     expect(window.sendToJava).toHaveBeenCalledWith(
-      'load_session:{"sessionId":"hist-codex","provider":"codex"}'
+      'load_session:{"sessionId":"hist-codex","provider":"codex","model":"gpt-5.4"}'
+    );
+  });
+
+  it('loadHistorySession falls back to current provider when history item has no provider', () => {
+    const historyData = {
+      success: true,
+      sessions: [
+        {
+          sessionId: 'hist-codex-missing-provider',
+          title: 'Codex Session',
+          messageCount: 2,
+          lastTimestamp: Date.now(),
+        },
+      ],
+      total: 2,
+    } as unknown as HistoryData;
+
+    const mocks = createMocks();
+
+    const { result } = renderHook(() =>
+      useSessionManagement({
+        messages: [],
+        loading: false,
+        historyData,
+        currentSessionId: null,
+        currentProvider: 'codex',
+        ...mocks,
+        t,
+      })
+    );
+
+    act(() => {
+      result.current.loadHistorySession('hist-codex-missing-provider');
+    });
+
+    expect(window.sendToJava).toHaveBeenCalledWith(
+      'load_session:{"sessionId":"hist-codex-missing-provider","provider":"codex"}'
     );
   });
 

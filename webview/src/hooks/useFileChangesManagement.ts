@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { ClaudeMessage, ToolResultBlock } from '../types';
 import { debugLog } from '../utils/debug';
+import { clearLedgerMeta } from '../utils/sessionFileLedger';
 
 export interface UseFileChangesManagementOptions {
   currentSessionId: string | null;
@@ -28,6 +29,11 @@ export function useFileChangesManagement({
   const [processedFiles, setProcessedFiles] = useState<string[]>([]);
   // Base message index (for Keep All feature, only counts changes after this index)
   const [baseMessageIndex, setBaseMessageIndex] = useState(0);
+
+  // Ref to always hold the latest messages array, avoiding stale closure issues
+  // in handleKeepAll when messages.length changes between renders.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Callback after file undo success (triggered from StatusPanel)
   const handleUndoFile = useCallback((filePath: string) => {
@@ -94,9 +100,10 @@ export function useFileChangesManagement({
     });
   }, [currentSessionId]);
 
-  // Callback for Keep All - set current changes as the new baseline
+  // Callback for Keep All - set current changes as the new baseline (ledger rebuilds from index)
   const handleKeepAll = useCallback(() => {
-    const newBaseIndex = messages.length;
+    // Use ref to get the latest messages.length, avoiding stale closure issues
+    const newBaseIndex = messagesRef.current.length;
     setBaseMessageIndex(newBaseIndex);
     setProcessedFiles([]);
 
@@ -104,11 +111,12 @@ export function useFileChangesManagement({
       try {
         localStorage.setItem(`keep-all-base-${currentSessionId}`, String(newBaseIndex));
         localStorage.removeItem(`processed-files-${currentSessionId}`);
+        clearLedgerMeta(currentSessionId);
       } catch (e) {
         console.error('Failed to persist Keep All state:', e);
       }
     }
-  }, [messages.length, currentSessionId]);
+  }, [currentSessionId]);
 
   // Register window callbacks for editable diff operations from Java backend
   useEffect(() => {

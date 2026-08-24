@@ -1,6 +1,5 @@
 package com.github.claudecodegui.ui;
 
-import com.github.claudecodegui.util.HtmlLoader;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
@@ -11,6 +10,11 @@ import com.intellij.util.concurrency.AppExecutorUtil;
 import javax.swing.*;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 /**
  * Webview render watchdog for JCEF stall/black-screen recovery.
@@ -24,18 +28,23 @@ public class WebviewWatchdog {
     private static final long HEARTBEAT_TIMEOUT_MS = 45_000L;
     private static final long WATCHDOG_INTERVAL_MS = 10_000L;
     private static final long RECOVERY_COOLDOWN_MS = 60_000L;
+    private static final long STARTUP_READY_TIMEOUT_MS = 15_000L;
+    private static final long STARTUP_RECOVERY_COOLDOWN_MS = 15_000L;
+    private static final int MAX_STARTUP_RECOVERY_ATTEMPTS = 2;
 
-    private volatile long lastHeartbeatAtMs = System.currentTimeMillis();
-    private volatile long lastRafAtMs = System.currentTimeMillis();
+    private volatile long lastHeartbeatAtMs;
+    private volatile long lastRafAtMs;
     private volatile String lastVisibility = null;
     private volatile Boolean lastHasFocus = null;
     private volatile int stallCount = 0;
     private volatile long lastRecoveryAtMs = 0L;
     private volatile ScheduledFuture<?> watchdogFuture = null;
+    private final AtomicBoolean recoveryPending = new AtomicBoolean();
+    private final AtomicInteger startupRecoveryAttempts = new AtomicInteger();
 
     private final JPanel mainPanel;
-    private final BrowserProvider browserProvider;
-    private final HtmlLoader htmlLoader;
+    private final BooleanSupplier browserAvailableCheck;
+    private final Runnable onReloadWebview;
     private final Runnable onRecreateWebview;
     private final DisposedCheck disposedCheck;
 
@@ -62,27 +71,65 @@ public class WebviewWatchdog {
         boolean isStreamActive();
     }
 
+    public interface ReadyCheck {
+        boolean isFrontendReady();
+    }
+
     // Extended timeout during active streaming — IPC saturation is expected
     // when pushing large message payloads.  Reloading would destroy React state
     // and the backend would continue pushing to a blank page.
     private static final long STREAMING_HEARTBEAT_TIMEOUT_MS = 180_000L; // 3 minutes
 
     private final StreamActiveCheck streamActiveCheck;
+    private final ReadyCheck readyCheck;
+    private final LongSupplier currentTimeMillis;
+    private final Consumer<Runnable> recoveryExecutor;
 
     public WebviewWatchdog(
             JPanel mainPanel,
             BrowserProvider browserProvider,
-            HtmlLoader htmlLoader,
+            Runnable onReloadWebview,
             Runnable onRecreateWebview,
             DisposedCheck disposedCheck,
-            StreamActiveCheck streamActiveCheck
+            StreamActiveCheck streamActiveCheck,
+            ReadyCheck readyCheck
+    ) {
+        this(
+                mainPanel,
+                () -> browserProvider.getBrowser() != null,
+                onReloadWebview,
+                onRecreateWebview,
+                disposedCheck,
+                streamActiveCheck,
+                readyCheck,
+                System::currentTimeMillis,
+                runnable -> ApplicationManager.getApplication().invokeLater(runnable)
+        );
+    }
+
+    WebviewWatchdog(
+            JPanel mainPanel,
+            BooleanSupplier browserAvailableCheck,
+            Runnable onReloadWebview,
+            Runnable onRecreateWebview,
+            DisposedCheck disposedCheck,
+            StreamActiveCheck streamActiveCheck,
+            ReadyCheck readyCheck,
+            LongSupplier currentTimeMillis,
+            Consumer<Runnable> recoveryExecutor
     ) {
         this.mainPanel = mainPanel;
-        this.browserProvider = browserProvider;
-        this.htmlLoader = htmlLoader;
+        this.browserAvailableCheck = browserAvailableCheck;
+        this.onReloadWebview = onReloadWebview;
         this.onRecreateWebview = onRecreateWebview;
         this.disposedCheck = disposedCheck;
         this.streamActiveCheck = streamActiveCheck;
+        this.readyCheck = readyCheck;
+        this.currentTimeMillis = currentTimeMillis;
+        this.recoveryExecutor = recoveryExecutor;
+        long now = currentTimeMillis.getAsLong();
+        this.lastHeartbeatAtMs = now;
+        this.lastRafAtMs = now;
     }
 
     /**
@@ -116,7 +163,7 @@ public class WebviewWatchdog {
      * Handle a heartbeat message from the webview.
      */
     public void handleHeartbeat(String content) {
-        long now = System.currentTimeMillis();
+        long now = currentTimeMillis.getAsLong();
         lastHeartbeatAtMs = now;
 
         if (content == null || content.isEmpty()) {
@@ -151,26 +198,40 @@ public class WebviewWatchdog {
      * Reset heartbeat timestamps (e.g., after a recovery action).
      */
     public void resetTimestamps() {
-        long now = System.currentTimeMillis();
+        long now = currentTimeMillis.getAsLong();
         lastHeartbeatAtMs = now;
         lastRafAtMs = now;
+        lastVisibility = null;
+        lastHasFocus = null;
     }
 
-    private void checkHealth() {
-        if (disposedCheck.isDisposed()) { return; }
-        if (!mainPanel.isShowing()) { return; }
+    public void markFrontendReady() {
+        resetTimestamps();
+        resetRecoveryState();
+    }
 
-        long now = System.currentTimeMillis();
+    /** Give an activated tab one heartbeat window before evaluating stale metadata. */
+    public void markTabActivated() {
+        resetTimestamps();
+        resetRecoveryState();
+    }
+
+    void checkHealth() {
+        if (disposedCheck.isDisposed()) { return; }
+        boolean frontendReady = readyCheck.isFrontendReady();
+
+        long now = currentTimeMillis.getAsLong();
         long heartbeatAgeMs = now - lastHeartbeatAtMs;
         long rafAgeMs = now - lastRafAtMs;
 
         boolean visible = lastVisibility == null || "visible".equals(lastVisibility);
         boolean focused = lastHasFocus == null || lastHasFocus;
-        if (!visible || !focused) {
+        if (!shouldMonitor(frontendReady, mainPanel.isShowing(), visible, focused)) {
             return;
         }
 
-        if (now - lastRecoveryAtMs < RECOVERY_COOLDOWN_MS) {
+        long recoveryCooldownMs = recoveryCooldownMs(frontendReady);
+        if (now - lastRecoveryAtMs < recoveryCooldownMs) {
             return;
         }
 
@@ -179,7 +240,7 @@ public class WebviewWatchdog {
         // Reloading during streaming causes "fake death": backend continues working
         // but the webview shows empty content because streaming state is lost.
         boolean streaming = streamActiveCheck.isStreamActive();
-        long effectiveTimeoutMs = streaming ? STREAMING_HEARTBEAT_TIMEOUT_MS : HEARTBEAT_TIMEOUT_MS;
+        long effectiveTimeoutMs = heartbeatTimeoutMs(frontendReady, streaming);
 
         boolean stalled = heartbeatAgeMs > effectiveTimeoutMs || rafAgeMs > effectiveTimeoutMs;
         if (!stalled) {
@@ -187,40 +248,115 @@ public class WebviewWatchdog {
             return;
         }
 
+        scheduleRecoveryCheck();
+    }
+
+    boolean tryAcquireRecoveryPermit(boolean frontendReady) {
+        if (frontendReady) {
+            return true;
+        }
+
+        while (true) {
+            int attempts = startupRecoveryAttempts.get();
+            if (attempts >= MAX_STARTUP_RECOVERY_ATTEMPTS) {
+                return false;
+            }
+            if (startupRecoveryAttempts.compareAndSet(attempts, attempts + 1)) {
+                return true;
+            }
+        }
+    }
+
+    private void resetRecoveryState() {
+        stallCount = 0;
+        lastRecoveryAtMs = 0L;
+        startupRecoveryAttempts.set(0);
+    }
+
+    static long heartbeatTimeoutMs(boolean frontendReady, boolean streaming) {
+        if (!frontendReady) {
+            return STARTUP_READY_TIMEOUT_MS;
+        }
+        return streaming ? STREAMING_HEARTBEAT_TIMEOUT_MS : HEARTBEAT_TIMEOUT_MS;
+    }
+
+    static long recoveryCooldownMs(boolean frontendReady) {
+        return frontendReady ? RECOVERY_COOLDOWN_MS : STARTUP_RECOVERY_COOLDOWN_MS;
+    }
+
+    static boolean shouldMonitor(boolean frontendReady,
+                                 boolean panelShowing,
+                                 boolean pageVisible,
+                                 boolean pageFocused) {
+        // A hidden JCEF page cannot advance requestAnimationFrame or complete
+        // frontend startup reliably. Treat visibility as a lifecycle gate for
+        // both startup and runtime health checks; tab activation resets the
+        // timestamps before monitoring resumes.
+        // Editor focus is independent from webview render health.
+        return panelShowing && pageVisible;
+    }
+
+    private void scheduleRecoveryCheck() {
+        if (!recoveryPending.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            recoveryExecutor.accept(() -> {
+                try {
+                    executeRecoveryIfStillRequired();
+                } finally {
+                    recoveryPending.set(false);
+                }
+            });
+        } catch (RuntimeException e) {
+            recoveryPending.set(false);
+            throw e;
+        }
+    }
+
+    private void executeRecoveryIfStillRequired() {
         if (disposedCheck.isDisposed()) { return; }
+        boolean frontendReady = readyCheck.isFrontendReady();
+        boolean visible = lastVisibility == null || "visible".equals(lastVisibility);
+        boolean focused = lastHasFocus == null || lastHasFocus;
+        if (!shouldMonitor(frontendReady, mainPanel.isShowing(), visible, focused)) {
+            return;
+        }
+
+        long now = currentTimeMillis.getAsLong();
+        if (now - lastRecoveryAtMs < recoveryCooldownMs(frontendReady)) {
+            return;
+        }
+        long heartbeatAgeMs = now - lastHeartbeatAtMs;
+        long rafAgeMs = now - lastRafAtMs;
+        long effectiveTimeoutMs = heartbeatTimeoutMs(
+                frontendReady, streamActiveCheck.isStreamActive());
+        if (heartbeatAgeMs <= effectiveTimeoutMs && rafAgeMs <= effectiveTimeoutMs) {
+            stallCount = 0;
+            return;
+        }
+        if (!tryAcquireRecoveryPermit(frontendReady)) { return; }
 
         stallCount += 1;
-        String reason = "heartbeatAgeMs=" + heartbeatAgeMs + ", rafAgeMs=" + rafAgeMs;
-        LOG.warn("[WebviewWatchdog] Webview appears stalled (" + stallCount + "), attempting recovery. " + reason);
+        String reason = "frontendReady=" + frontendReady
+                + ", heartbeatAgeMs=" + heartbeatAgeMs + ", rafAgeMs=" + rafAgeMs;
+        LOG.warn("[WebviewWatchdog] Webview appears stalled (" + stallCount
+                + "), attempting recovery. " + reason);
 
         lastRecoveryAtMs = now;
-        // Give the webview a grace window after initiating recovery to avoid repeated triggers.
         lastHeartbeatAtMs = now;
         lastRafAtMs = now;
 
-        if (stallCount <= 1) {
-            reload("watchdog_reload");
+        if (stallCount <= 1 && browserAvailableCheck.getAsBoolean()) {
+            onReloadWebview.run();
         } else {
             onRecreateWebview.run();
             stallCount = 0;
         }
-    }
 
-    private void reload(String reason) {
-        ApplicationManager.getApplication().invokeLater(() -> {
-            if (disposedCheck.isDisposed()) { return; }
-            JBCefBrowser browser = browserProvider.getBrowser();
-            if (browser == null) {
-                onRecreateWebview.run();
-                return;
-            }
-            try {
-                browser.loadHTML(htmlLoader.loadChatHtml());
-                mainPanel.revalidate();
-                mainPanel.repaint();
-            } catch (Exception e) {
-                LOG.warn("[WebviewWatchdog] Reload failed: " + e.getMessage(), e);
-            }
-        });
+        if (!frontendReady && startupRecoveryAttempts.get() == MAX_STARTUP_RECOVERY_ATTEMPTS) {
+            LOG.warn("[WebviewWatchdog] Startup recovery limit reached; "
+                    + "waiting for frontend readiness or tab activation before retrying");
+        }
     }
 }

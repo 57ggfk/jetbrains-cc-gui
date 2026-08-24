@@ -26,6 +26,7 @@ export function ChatInputBoxFooter({
   currentProvider,
   reasoningEffort,
   codexFastMode,
+  dshPreset,
   onSubmit,
   onStop,
   onModeSelect,
@@ -33,6 +34,7 @@ export function ChatInputBoxFooter({
   onProviderSelect,
   onReasoningChange,
   onCodexFastModeChange,
+  onDshPresetChange,
   onEnhancePrompt,
   alwaysThinkingEnabled,
   onToggleThinking,
@@ -63,6 +65,7 @@ export function ChatInputBoxFooter({
   currentProvider: string;
   reasoningEffort: ReasoningEffort;
   codexFastMode?: CodexFastMode;
+  dshPreset?: string;
   onSubmit: () => void;
   onStop?: () => void;
   onModeSelect?: (mode: PermissionMode) => void;
@@ -70,6 +73,7 @@ export function ChatInputBoxFooter({
   onProviderSelect?: (providerId: string) => void;
   onReasoningChange?: (effort: ReasoningEffort) => void;
   onCodexFastModeChange?: (mode: CodexFastMode) => void;
+  onDshPresetChange?: (preset: string) => void;
   onEnhancePrompt: () => void;
   alwaysThinkingEnabled?: boolean;
   onToggleThinking?: (enabled: boolean) => void;
@@ -93,9 +97,15 @@ export function ChatInputBoxFooter({
     isLoading: boolean;
     originalPrompt: string;
     enhancedPrompt: string;
+    usageInfo?: {
+      provider: string | null;
+      model: string | null;
+      resolutionSource: 'manual' | 'auto' | 'unavailable' | null;
+    } | null;
     onUseEnhanced: () => void;
     onKeepOriginal: () => void;
     onClose: () => void;
+    onOpenSettings?: () => void;
   };
   t: TFunction;
 }) {
@@ -112,6 +122,7 @@ export function ChatInputBoxFooter({
         currentProvider={currentProvider}
         reasoningEffort={reasoningEffort}
         codexFastMode={codexFastMode}
+        dshPreset={dshPreset}
         onSubmit={onSubmit}
         onStop={onStop}
         onModeSelect={onModeSelect}
@@ -119,6 +130,7 @@ export function ChatInputBoxFooter({
         onProviderSelect={onProviderSelect}
         onReasoningChange={onReasoningChange}
         onCodexFastModeChange={onCodexFastModeChange}
+        onDshPresetChange={onDshPresetChange}
         onEnhancePrompt={onEnhancePrompt}
         alwaysThinkingEnabled={alwaysThinkingEnabled}
         onToggleThinking={onToggleThinking}
@@ -230,9 +242,11 @@ export function ChatInputBoxFooter({
         isLoading={promptEnhancer.isLoading}
         originalPrompt={promptEnhancer.originalPrompt}
         enhancedPrompt={promptEnhancer.enhancedPrompt}
+        usageInfo={promptEnhancer.usageInfo}
         onUseEnhanced={promptEnhancer.onUseEnhanced}
         onKeepOriginal={promptEnhancer.onKeepOriginal}
         onClose={promptEnhancer.onClose}
+        onOpenSettings={promptEnhancer.onOpenSettings}
       />
     </>
   );

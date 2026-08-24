@@ -5,7 +5,9 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 
 import com.github.claudecodegui.session.SessionSendService;
 import com.github.claudecodegui.skill.SlashCommandRegistry;
+import com.github.claudecodegui.provider.CustomModelContextWindowProvider;
 import com.github.claudecodegui.util.EditorFileUtils;
+import com.github.claudecodegui.util.TokenUsageUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
@@ -26,20 +28,27 @@ public class ModelProviderHandler {
     static final Map<String, Integer> MODEL_CONTEXT_LIMITS = new HashMap<>();
     static {
         // Claude models with 1M context (base IDs)
+        MODEL_CONTEXT_LIMITS.put("claude-opus-5", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-5", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-7", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-fable-5", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-8", 200_000);
-        MODEL_CONTEXT_LIMITS.put("claude-opus-4-7", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-6", 200_000);
         // Claude models with [1m] suffix - 1M context
+        MODEL_CONTEXT_LIMITS.put("claude-opus-5[1m]", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-5[1m]", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-7[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-fable-5[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-8[1m]", 1_000_000);
-        MODEL_CONTEXT_LIMITS.put("claude-opus-4-7[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-6[1m]", 1_000_000);
         // Haiku - no 1M context available
         MODEL_CONTEXT_LIMITS.put("claude-haiku-4-5", 200_000);
         // Codex/GPT models
+        MODEL_CONTEXT_LIMITS.put("gpt-5.6-sol", 1_050_000);
+        MODEL_CONTEXT_LIMITS.put("gpt-5.6-terra", 1_050_000);
+        MODEL_CONTEXT_LIMITS.put("gpt-5.6-luna", 1_050_000);
         MODEL_CONTEXT_LIMITS.put("gpt-5.4", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gpt-5.4-mini", 400_000);
         MODEL_CONTEXT_LIMITS.put("gpt-5.3-codex", 258_000);
@@ -56,6 +65,17 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("o1", 200_000);
         MODEL_CONTEXT_LIMITS.put("o1-mini", 128_000);
         MODEL_CONTEXT_LIMITS.put("o1-preview", 128_000);
+
+        // Grok models (xAI)
+        MODEL_CONTEXT_LIMITS.put("grok-2", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-2-latest", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-beta", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-1.5", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4.6", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000); // legacy alias
+        MODEL_CONTEXT_LIMITS.put("grok-4", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-build", 500_000);
     }
 
     private final HandlerContext context;
@@ -81,28 +101,54 @@ public class ModelProviderHandler {
                 }
             }
 
-            LOG.info("[ModelProviderHandler] Setting model to: " + model);
+            String previousModel = resolveCurrentSessionModel(context);
+            boolean modelChanged = isActualModelSwitch(previousModel, model);
+            LOG.info("[ModelProviderHandler] Setting model to: " + model
+                    + " (was: " + previousModel + ")");
             context.setCurrentModel(model);
 
             if (context.getSession() != null) {
                 context.getSession().setModel(model);
+                if (modelChanged) {
+                    TokenUsageUtils.clearContextUsageFromSessionMessages(
+                            context.getSession().getMessages());
+                }
                 LOG.info("[ModelProviderHandler] Updated session model to canonical ID: " + model);
             }
 
-            com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
+            if (modelChanged) {
+                usagePushService.clearUsageDisplay();
+            }
 
-            String resolvedModelForUsage = resolveConfiguredClaudeModelFromSettings(model);
-            int newMaxTokens = getModelContextLimit(resolvedModelForUsage);
+            if (context.getProject() != null) {
+                com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
+            }
+
+            String provider = context.getCurrentProvider();
+            boolean isCodex = "codex".equalsIgnoreCase(provider);
+            String resolvedModelForUsage = isCodex ? model : resolveConfiguredClaudeModelFromSettings(model);
+            int newMaxTokens = isCodex
+                    ? getModelContextLimit(provider, model)
+                    : getModelContextLimit(resolvedModelForUsage);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
                     + ", resolved model: " + resolvedModelForUsage);
 
             final String confirmedModel = model;
             final String confirmedProvider = context.getCurrentProvider();
-            ApplicationManager.getApplication().invokeLater(() -> {
+            Runnable confirmModel = () -> {
                 context.callJavaScript("window.onModelConfirmed", context.escapeJs(confirmedModel), context.escapeJs(confirmedProvider));
-                usagePushService.pushUsageUpdateAfterModelChange(newMaxTokens);
-            });
+                if (modelChanged) {
+                    usagePushService.pushUsageUpdateAfterModelChange(newMaxTokens);
+                }
+            };
+            if (ApplicationManager.getApplication() != null) {
+                ApplicationManager.getApplication().invokeLater(confirmModel);
+            } else {
+                // Plain unit tests have no IntelliJ Application; keep the state
+                // transition testable without changing the IDE's EDT behavior.
+                confirmModel.run();
+            }
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set model: " + e.getMessage(), e);
         }
@@ -125,12 +171,21 @@ public class ModelProviderHandler {
             // Capture previous provider BEFORE mutating context so we can detect
             // the leave-claude transition that needs daemon cleanup.
             String previousProvider = context.getCurrentProvider();
+            boolean providerChanged = isActualProviderSwitch(previousProvider, provider);
             LOG.info("[ModelProviderHandler] Setting provider to: " + provider
                     + " (was: " + previousProvider + ")");
             context.setCurrentProvider(provider);
 
             if (context.getSession() != null) {
                 context.getSession().setProvider(provider);
+                if (providerChanged) {
+                    TokenUsageUtils.clearContextUsageFromSessionMessages(
+                            context.getSession().getMessages());
+                }
+            }
+
+            if (providerChanged) {
+                usagePushService.clearUsageDisplay();
             }
 
             // Bug fix (Node process leak L2): when the tab moves AWAY from Claude
@@ -175,6 +230,45 @@ public class ModelProviderHandler {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Return whether a provider command represents a real cross-provider switch.
+     * Null/empty initialization values and same-provider reaffirmations are no-ops.
+     */
+    static boolean isActualProviderSwitch(String previousProvider, String newProvider) {
+        return previousProvider != null
+                && newProvider != null
+                && !previousProvider.isEmpty()
+                && !newProvider.isEmpty()
+                && !previousProvider.equals(newProvider);
+    }
+
+    /**
+     * Return whether a model command represents a real model transition.
+     * Null/empty initialization values and same-model reaffirmations are no-ops.
+     */
+    static boolean isActualModelSwitch(String previousModel, String newModel) {
+        return previousModel != null
+                && newModel != null
+                && !previousModel.isEmpty()
+                && !newModel.isEmpty()
+                && !previousModel.equals(newModel);
+    }
+
+    /**
+     * Resolve the authoritative model before processing a frontend model command.
+     * A restored session may already own the saved model while the handler context
+     * still contains its startup default, so session state takes precedence.
+     */
+    static String resolveCurrentSessionModel(HandlerContext context) {
+        if (context != null && context.getSession() != null) {
+            String sessionModel = context.getSession().getModel();
+            if (sessionModel != null && !sessionModel.isEmpty()) {
+                return sessionModel;
+            }
+        }
+        return context == null ? null : context.getCurrentModel();
     }
 
     /**
@@ -308,14 +402,9 @@ public class ModelProviderHandler {
         return baseModel;
     }
 
-    static String resolveConfiguredClaudeModel(String baseModel, JsonObject env) {
+    public static String resolveConfiguredClaudeModel(String baseModel, JsonObject env) {
         if (baseModel == null || baseModel.isEmpty() || env == null) {
             return baseModel;
-        }
-
-        String mainModel = readConfiguredEnvValue(env, "ANTHROPIC_MODEL");
-        if (mainModel != null) {
-            return mainModel;
         }
 
         String lowerBaseModel = baseModel.toLowerCase();
@@ -324,17 +413,22 @@ public class ModelProviderHandler {
             return baseModel;
         }
 
+        String mainModel = readConfiguredEnvValue(env, "ANTHROPIC_MODEL");
+        if (lowerBaseModel.contains("fable")) {
+            String mappedFable = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_FABLE_MODEL");
+            return mappedFable != null ? mappedFable : mainModel != null ? mainModel : baseModel;
+        }
         if (lowerBaseModel.contains("opus")) {
             String mappedOpus = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_OPUS_MODEL");
-            return mappedOpus != null ? mappedOpus : baseModel;
+            return mappedOpus != null ? mappedOpus : mainModel != null ? mainModel : baseModel;
         }
         if (lowerBaseModel.contains("haiku")) {
             String mappedHaiku = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_HAIKU_MODEL");
-            return mappedHaiku != null ? mappedHaiku : baseModel;
+            return mappedHaiku != null ? mappedHaiku : mainModel != null ? mainModel : baseModel;
         }
         if (lowerBaseModel.contains("sonnet")) {
             String mappedSonnet = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_SONNET_MODEL");
-            return mappedSonnet != null ? mappedSonnet : baseModel;
+            return mappedSonnet != null ? mappedSonnet : mainModel != null ? mainModel : baseModel;
         }
 
         return baseModel;
@@ -379,4 +473,11 @@ public class ModelProviderHandler {
 
         return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
     }
+
+    public static int getModelContextLimit(String provider, String model) {
+        return CustomModelContextWindowProvider.getInstance()
+                .getContextWindow(provider, model)
+                .orElseGet(() -> getModelContextLimit(model));
+    }
+
 }

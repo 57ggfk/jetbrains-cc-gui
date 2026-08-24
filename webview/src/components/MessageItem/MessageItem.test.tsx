@@ -16,6 +16,7 @@ vi.mock('../toolBlocks', () => ({
   BashToolBlock: () => <div data-testid="bash-tool-block">bash</div>,
   BashToolGroupBlock: () => <div data-testid="bash-tool-group-block">bash-group</div>,
   SearchToolGroupBlock: () => <div data-testid="search-tool-group-block">search-group</div>,
+  AgentGroupBlock: () => <div data-testid="agent-group-block">agent</div>,
 }));
 
 vi.mock('./ContentBlockRenderer', () => ({
@@ -37,6 +38,7 @@ const t = ((key: string, opts?: Record<string, string>) => {
     'chat.totalDuration': '本次耗时',
     'chat.tokenUsage': '输入 {{input}} / 输出 {{output}}',
     'chat.tokenUsageDetail': '本轮合计 — 输入 {{input}} · 缓存写入 {{cacheWrite}} · 缓存读取 {{cacheRead}} · 输出 {{output}}',
+    'chat.cacheHitsWithRatio': '（缓存命中 {{tokens}}，{{ratio}}）',
   };
   let result = translations[key] ?? key;
   if (opts) {
@@ -66,7 +68,7 @@ const getContentBlocks = (message: ClaudeMessage): ClaudeContentBlock[] => {
 
 const findToolResult = (_toolId: string | undefined, _messageIndex: number): ToolResultBlock | null => null;
 
-function renderMessageItem(message: ClaudeMessage) {
+function renderMessageItem(message: ClaudeMessage, options: { detailedOutputEnabled?: boolean } = {}) {
   return render(
     <MessageItem
       message={message}
@@ -80,6 +82,7 @@ function renderMessageItem(message: ClaudeMessage) {
       getContentBlocks={getContentBlocks}
       findToolResult={findToolResult}
       extractMarkdownContent={extractMarkdownContent}
+      detailedOutputEnabled={options.detailedOutputEnabled}
     />
   );
 }
@@ -160,10 +163,46 @@ describe('MessageItem copy button visibility', () => {
     expect(screen.getByTestId('bash-tool-group-block')).toBeTruthy();
     expect(screen.queryAllByTestId('content-block-tool_use')).toHaveLength(0);
   });
+  it('keeps the Agent block mounted when its tool id arrives later', () => {
+    const makeMessage = (id?: string): ClaudeMessage => ({
+      type: 'assistant',
+      raw: {
+        content: [{
+          type: 'tool_use',
+          ...(id ? { id } : {}),
+          name: 'Task',
+          input: { description: 'Inspect the project' },
+        }],
+      },
+    } as unknown as ClaudeMessage);
+
+    const renderAgentMessage = (message: ClaudeMessage) => (
+      <MessageItem
+        message={message}
+        messageIndex={0}
+        messageKey="message-0"
+        isLast
+        streamingActive
+        isThinking={false}
+        t={t}
+        getMessageText={getMessageText}
+        getContentBlocks={getContentBlocks}
+        findToolResult={findToolResult}
+        extractMarkdownContent={extractMarkdownContent}
+      />
+    );
+
+    const { rerender } = render(renderAgentMessage(makeMessage()));
+    const initialBlock = screen.getByTestId('agent-group-block');
+
+    rerender(renderAgentMessage(makeMessage('tool-1')));
+
+    expect(screen.getByTestId('agent-group-block')).toBe(initialBlock);
+  });
 });
 
 describe('MessageItem token usage display', () => {
-  it('shows whole-turn token usage alongside duration when turnUsage is present', () => {
+  it('shows whole-turn token usage without detailed extras by default', () => {
     const message: ClaudeMessage = {
       type: 'assistant',
       content: 'Hello',
@@ -176,6 +215,7 @@ describe('MessageItem token usage display', () => {
           input_tokens: 1200,
           output_tokens: 456,
         },
+        turnCostUsd: 0.006,
       } as any,
     };
 
@@ -183,6 +223,31 @@ describe('MessageItem token usage display', () => {
 
     expect(screen.getByText('0:16')).toBeTruthy();
     expect(screen.getByText('输入 1.2K / 输出 456')).toBeTruthy();
+    expect(screen.queryByText(/\$0\.0060/)).toBeNull();
+  });
+
+  it('shows turn cost only when detailed output is enabled', () => {
+    const message: ClaudeMessage = {
+      type: 'assistant',
+      content: 'Hello',
+      durationMs: 16000,
+      raw: {
+        message: {
+          content: [{ type: 'text', text: 'Hello' }],
+        },
+        turnUsage: {
+          input_tokens: 1200,
+          output_tokens: 456,
+        },
+        turnCostUsd: 0.006,
+      } as any,
+    };
+
+    renderMessageItem(message, { detailedOutputEnabled: true });
+
+    expect(screen.getByText('0:16')).toBeTruthy();
+    expect(screen.getByText('输入 1.2K / 输出 456')).toBeTruthy();
+    expect(screen.getByText('$0.0060')).toBeTruthy();
   });
 
   it('counts cache tokens in the input total and details them in the tooltip', () => {
@@ -203,15 +268,39 @@ describe('MessageItem token usage display', () => {
       } as any,
     };
 
-    renderMessageItem(message);
+    renderMessageItem(message, { detailedOutputEnabled: true });
 
     // Input shows the full input side (37 + 0 + 36310 = 36347 → "36.3K"),
     // so heavy cache reads are never hidden from the user.
-    const tokens = screen.getByText('输入 36.3K / 输出 353');
+    const tokens = screen.getByText('输入 36.3K（缓存命中 36.3K，100%） / 输出 353');
     expect(tokens).toBeTruthy();
     expect(tokens.getAttribute('title')).toBe(
       '本轮合计 — 输入 37 · 缓存写入 0 · 缓存读取 36.3K · 输出 353'
     );
+  });
+
+  it('hides cache hit ratio when detailed output is disabled', () => {
+    const message: ClaudeMessage = {
+      type: 'assistant',
+      content: 'Hello',
+      durationMs: 10000,
+      raw: {
+        message: {
+          content: [{ type: 'text', text: 'Hello' }],
+        },
+        turnUsage: {
+          input_tokens: 37,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 36310,
+          output_tokens: 353,
+        },
+      } as any,
+    };
+
+    renderMessageItem(message);
+
+    expect(screen.getByText('输入 36.3K / 输出 353')).toBeTruthy();
+    expect(screen.queryByText(/缓存命中/)).toBeNull();
   });
 
   it('ignores per-call usage fields (message.usage / top-level usage)', () => {

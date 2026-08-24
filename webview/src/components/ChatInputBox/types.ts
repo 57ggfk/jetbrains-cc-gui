@@ -176,9 +176,23 @@ export interface SelectedAgent {
 // ============================================================
 
 /**
- * Permission mode for conversations
+ * Permission mode for conversations.
+ *
+ * The union literals are the static modes known to the Java backend
+ * (SessionState.VALID_PERMISSION_MODES). The `(string & {})` tail keeps
+ * literal autocomplete while allowing dynamic OMP model-role ids (e.g.
+ * 'designer') discovered at runtime via the listModels payload — those are
+ * NEVER sent as `set_mode` (use isValidPermissionMode to gate that); the
+ * role travels via `set_model` instead.
  */
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+export type PermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'plan'
+  | 'bypassPermissions'
+  | 'smol'
+  | 'slow'
+  | (string & {});
 
 /**
  * Mode information
@@ -223,6 +237,20 @@ export const AVAILABLE_MODES: ModeInfo[] = [
     icon: 'codicon-zap',
     tooltip: 'Bypass all permission checks',
     description: 'Fully automated, bypasses all permission checks [use with caution]',
+  },
+  {
+    id: 'smol',
+    label: 'Smol Mode',
+    icon: 'codicon-zap',
+    tooltip: 'Fast model role (OMP only)',
+    description: 'Runs with the model configured for omp\'s smol role',
+  },
+  {
+    id: 'slow',
+    label: 'Slow Mode',
+    icon: 'codicon-lightbulb',
+    tooltip: 'Reasoning model role (OMP only)',
+    description: 'Runs with the model configured for omp\'s slow role',
   },
 ];
 
@@ -295,13 +323,30 @@ export function strip1MContextSuffix(modelId: string | undefined | null): string
   return modelId.replace(/\[1m\]$/i, '');
 }
 
+/**
+ * Fallback Claude model when nothing valid is saved. Must stay in sync with the
+ * entry marked "Use the default model" in CLAUDE_MODELS — never derive this from
+ * CLAUDE_MODELS[0], which is the newest tier and the most likely to be missing
+ * from a user's API relay.
+ */
+export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-5';
+
+/**
+ * Retired model IDs -> their current-generation replacement. Lookup happens after
+ * the [1m] suffix is stripped, so keys must be base IDs. Without an entry here a
+ * saved retired model fails validation and silently resets to the fallback.
+ * Retired ids must always map to a LIVE model - mapping one retired id to another
+ * (sonnet-4-6 -> sonnet-4-7) kept restoring tabs pinned to a dead model (#1678).
+ */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
-  'claude-opus-4-6[1m]': 'claude-opus-4-6',
+  'claude-sonnet-4-6': 'claude-sonnet-5',
+  'claude-sonnet-4-7': 'claude-sonnet-5',
+  'claude-opus-4-6': 'claude-opus-4-8',
 };
 
 export function normalizeClaudeModelId(modelId: string | undefined | null): string {
   if (!modelId) {
-    return 'claude-sonnet-4-6';
+    return DEFAULT_CLAUDE_MODEL_ID;
   }
   // First strip any [1m] suffix
   const stripped = strip1MContextSuffix(modelId);
@@ -314,24 +359,24 @@ export function normalizeClaudeModelId(modelId: string | undefined | null): stri
  */
 export const CLAUDE_MODELS: ModelInfo[] = [
   {
-    id: 'claude-opus-4-8',
-    label: 'Opus 4.8',
-    description: 'Opus 4.8 · Latest and most capable',
-  },
-  {
-    id: 'claude-opus-4-7',
-    label: 'Opus 4.7',
-    description: 'Opus 4.7 · Previous flagship model',
-  },
-  {
     id: 'claude-fable-5',
     label: 'Fable 5',
     description: 'Fable 5 · Most powerful · Mythos-class',
   },
   {
-    id: 'claude-sonnet-4-6',
-    label: 'Sonnet 4.6',
-    description: 'Sonnet 4.6 · Use the default model',
+    id: 'claude-opus-5',
+    label: 'Opus 5',
+    description: 'Opus 5 · Latest Opus upgrade',
+  },
+  {
+    id: 'claude-opus-4-8',
+    label: 'Opus 4.8',
+    description: 'Opus 4.8 · Previous Opus generation',
+  },
+  {
+    id: 'claude-sonnet-5',
+    label: 'Sonnet 5',
+    description: 'Sonnet 5 · Use the default model',
   },
   {
     id: 'claude-haiku-4-5',
@@ -345,6 +390,21 @@ export const CLAUDE_MODELS: ModelInfo[] = [
  */
 export const CODEX_MODELS: ModelInfo[] = [
   {
+    id: 'gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
+    description: 'Frontier model for complex professional work.',
+  },
+  {
+    id: 'gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    description: 'GPT-5.6 model that balances intelligence and cost.',
+  },
+  {
+    id: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    description: 'GPT-5.6 model optimized for cost-sensitive workloads.',
+  },
+  {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
     description: 'Latest frontier model with stronger capabilities.',
@@ -354,42 +414,174 @@ export const CODEX_MODELS: ModelInfo[] = [
     label: 'GPT-5.4',
     description: 'Latest frontier model with enhanced capabilities.',
   },
+];
+
+/**
+ * Default model id sent to the Grok ACP CLI via `session/set_model` /
+ * `_meta.modelId`. The ACP CLI only accepts real upstream model ids —
+ * sentinel values like `grok` / `default` / `(default)` are rejected with
+ * "unknown model id", so the bridge (`normalizeGrokModelId`) and the Java
+ * side (`normalizeCliModelForProvider`) normalize them to this value.
+ *
+ * Note: this id goes straight to the upstream API; it does NOT resolve
+ * `~/.grok/config.toml` `[model."name"]` profiles the way the legacy
+ * `-m <profile>` path did, so custom per-profile base_url/api_key from
+ * config.toml may not apply here.
+ */
+export const GROK_DEFAULT_MODEL_ID = 'grok-4.6';
+
+/**
+ * Grok CLI model picker entries.
+ * id = model ID passed via ACP session/set_model or _meta.modelId.
+ */
+export const GROK_MODELS: ModelInfo[] = [
   {
-    id: 'gpt-5.2-codex',
-    label: 'GPT-5.2-Codex',
-    description: 'Frontier agentic coding model.',
+    id: GROK_DEFAULT_MODEL_ID,
+    label: 'Grok 4.6',
+    description: 'xAI Grok 4.6',
   },
   {
-    id: 'gpt-5.1-codex-max',
-    label: 'GPT-5.1-Codex-Max',
-    description: 'Codex-optimized flagship for deep and fast reasoning.',
+    id: 'grok-3',
+    label: 'Grok 3',
+    description: 'xAI Grok 3',
   },
   {
-    id: 'gpt-5.4-mini',
-    label: 'GPT-5.4-Mini',
-    description: 'Smaller frontier agentic coding model.',
+    id: 'grok-2',
+    label: 'Grok 2',
+    description: 'xAI Grok 2',
   },
   {
-    id: 'gpt-5.3-codex',
-    label: 'GPT-5.3-Codex',
-    description: 'Latest frontier agentic coding model with enhanced capabilities.',
-  },
-  {
-    id: 'gpt-5.3-codex-spark',
-    label: 'GPT-5.3-Codex-Spark',
-    description: 'Ultra-fast coding model.',
-  },
-  {
-    id: 'gpt-5.2',
-    label: 'GPT-5.2',
-    description: 'Optimized for professional work and long-running agents.',
-  },
-  {
-    id: 'gpt-5.1-codex-mini',
-    label: 'GPT-5.1-Codex-Mini',
-    description: 'Optimized for Codex. Cheaper, faster, but less capable.',
+    id: 'grok-beta',
+    label: 'Grok Beta',
+    description: 'xAI Grok Beta',
   },
 ];
+
+/** Kimi CLI default: omit `--model` when empty / auto. */
+export const KIMI_DEFAULT_MODEL_ID = 'auto';
+
+export const KIMI_MODELS: ModelInfo[] = [
+  {
+    id: KIMI_DEFAULT_MODEL_ID,
+    label: 'Kimi Auto',
+    description: 'Use Kimi CLI default model',
+  },
+  {
+    id: 'kimi-k2.5',
+    label: 'Kimi K2.5',
+    description: 'Moonshot Kimi coding model',
+  },
+  {
+    id: 'kimi-k3',
+    label: 'Kimi K3',
+    description: 'Moonshot Kimi K3',
+  },
+];
+
+/** OpenCode default: omit `--model` so CLI resolves its own default. */
+export const OPENCODE_DEFAULT_MODEL_ID = 'opencode-default';
+
+export const OPENCODE_MODELS: ModelInfo[] = [
+  {
+    id: OPENCODE_DEFAULT_MODEL_ID,
+    label: 'OpenCode Default',
+    description: 'Use OpenCode CLI default model',
+  },
+];
+
+/** PI default: omit `--model` so CLI resolves its own default. */
+export const PI_DEFAULT_MODEL_ID = 'auto';
+
+export const PI_MODELS: ModelInfo[] = [
+  {
+    id: PI_DEFAULT_MODEL_ID,
+    label: 'PI Auto',
+    description: 'Use PI CLI default model',
+  },
+];
+
+/** OMP default: omit `--model` so CLI resolves its own default. */
+export const OMP_DEFAULT_MODEL_ID = 'auto';
+
+export const OMP_MODELS: ModelInfo[] = [
+  {
+    id: OMP_DEFAULT_MODEL_ID,
+    label: 'OMP Auto',
+    description: 'Use OMP CLI default model',
+  },
+];
+
+/**
+ * OMP model roles — `omp --model <role>` resolves role names natively.
+ * These always appear in the omp model dropdown; the mode selector is a
+ * shortcut that sets the model to the same role id.
+ */
+export const OMP_ROLE_MODELS: ModelInfo[] = [
+  {
+    id: 'smol',
+    label: 'Smol (role)',
+    description: 'Fast model role — resolved by OMP CLI (--model smol)',
+  },
+  {
+    id: 'slow',
+    label: 'Slow (role)',
+    description: 'Reasoning model role — resolved by OMP CLI (--model slow)',
+  },
+  {
+    id: 'plan',
+    label: 'Plan (role)',
+    description: 'Planning model role — resolved by OMP CLI (--model plan)',
+  },
+];
+
+/**
+ * DSH default: skip `session.selectModel` so the host serves whatever the DSH
+ * Web UI configured. The runtime catalog (`provider/model` ids) is fetched
+ * from the host via `llm.models` — this static entry is the offline fallback.
+ */
+export const DSH_DEFAULT_MODEL_ID = 'auto';
+
+export const DSH_MODELS: ModelInfo[] = [
+  {
+    id: DSH_DEFAULT_MODEL_ID,
+    label: 'DSH Auto',
+    description: 'Use the model configured in the DSH Web UI',
+  },
+];
+
+/** No DSH agent preset: use the default headless composition. */
+export const DSH_PRESET_NONE = '';
+
+export interface DshPresetOption {
+  id: string;
+  label?: string;
+  labelKey?: string;
+  descriptionKey?: string;
+}
+
+export const DSH_PRESETS: DshPresetOption[] = [
+  { id: DSH_PRESET_NONE, labelKey: 'dshPresets.none.label', descriptionKey: 'dshPresets.none.description' },
+  { id: 'standard', labelKey: 'dshPresets.standard.label', descriptionKey: 'dshPresets.standard.description' },
+  { id: 'code', labelKey: 'dshPresets.code.label', descriptionKey: 'dshPresets.code.description' },
+  { id: 'minimal', labelKey: 'dshPresets.minimal.label', descriptionKey: 'dshPresets.minimal.description' },
+  { id: 'cordis', labelKey: 'dshPresets.cordis.label', descriptionKey: 'dshPresets.cordis.description' },
+];
+
+export const getUserDshPresetOptions = (): DshPresetOption[] => {
+  const injected = window.__INITIAL_DSH_PRESETS__;
+  if (!Array.isArray(injected)) return [];
+  const curated = new Set(DSH_PRESETS.map((preset) => preset.id));
+  return injected
+    .filter((id): id is string => typeof id === 'string' && id.trim() !== '' && !curated.has(id))
+    .map((id) => ({ id, label: id, descriptionKey: 'dshPresets.user.description' }));
+};
+
+export type DshPreset = string;
+
+export const isValidDshPreset = (value: unknown): value is DshPreset =>
+  typeof value === 'string'
+  && (DSH_PRESETS.some((preset) => preset.id === value)
+    || getUserDshPresetOptions().some((preset) => preset.id === value));
 
 /**
  * Available models (backward compatibility)
@@ -404,6 +596,8 @@ export interface ProviderInfo {
   label: string;
   icon: string;
   enabled: boolean;
+  /** When true, show a Beta badge and first-click notice dialog. */
+  beta?: boolean;
 }
 
 /**
@@ -412,8 +606,12 @@ export interface ProviderInfo {
 export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'claude', label: 'Claude Code', icon: 'codicon-terminal', enabled: true },
   { id: 'codex', label: 'Codex', icon: 'codicon-terminal', enabled: true },
-  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: false },
-  { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: false },
+  { id: 'grok', label: 'Grok CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'kimi', label: 'Kimi CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'omp', label: 'OMP CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'dsh', label: 'DeepSeek Harness', icon: 'codicon-terminal', enabled: true, beta: true },
 ];
 
 /**
@@ -422,10 +620,12 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
  */
 export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
-  'claude-opus-4-7',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
+  'claude-sonnet-5',
+  'claude-sonnet-4-7',
   'claude-sonnet-4-6',
 ]);
 
@@ -434,8 +634,8 @@ export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
  */
 export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
-  'claude-opus-4-7',
 ]);
 
 /**
@@ -443,18 +643,24 @@ export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
  */
 export const MAX_EFFORT_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
-  'claude-opus-4-7',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
+  'claude-sonnet-5',
+  'claude-sonnet-4-7',
   'claude-sonnet-4-6',
 ]);
+
+export function codexModelSupportsMaxEffort(modelId: string): boolean {
+  return modelId.trim().toLowerCase().includes('gpt-5.6');
+}
 
 /**
  * Reasoning Effort (thinking depth)
  * Controls the depth of reasoning for AI models
  * Claude API values: low, medium, high, xhigh, max
- * Codex API values: low, medium, high, xhigh
+ * Codex API values: low, medium, high, xhigh; GPT-5.6 also supports max
  */
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -617,8 +823,12 @@ export interface ChatInputBoxProps {
   onReasoningChange?: (effort: ReasoningEffort) => void;
   /** Codex speed mode */
   codexFastMode?: CodexFastMode;
+  /** DSH agent preset */
+  dshPreset?: string;
   /** Switch Codex speed mode callback */
   onCodexFastModeChange?: (mode: CodexFastMode) => void;
+  /** Switch DSH agent preset callback */
+  onDshPresetChange?: (preset: string) => void;
   /** Toggle thinking mode */
   onToggleThinking?: (enabled: boolean) => void;
   /** Whether streaming is enabled */
@@ -656,6 +866,10 @@ export interface ChatInputBoxProps {
   sdkInstalled?: boolean;
   /** SDK status loading state */
   sdkStatusLoading?: boolean;
+  /** SDK status query failed; chat remains available until the user retries */
+  sdkStatusError?: boolean;
+  /** Retry SDK status query callback */
+  onRetrySdkStatus?: () => void;
   /** Go to install SDK callback */
   onInstallSdk?: () => void;
   /** Show toast message */
@@ -698,6 +912,8 @@ export interface ButtonAreaProps {
   reasoningEffort?: ReasoningEffort;
   /** Codex speed mode */
   codexFastMode?: CodexFastMode;
+  /** DSH agent preset */
+  dshPreset?: string;
 
   // Event callbacks
   onSubmit?: () => void;
@@ -709,6 +925,8 @@ export interface ButtonAreaProps {
   onReasoningChange?: (effort: ReasoningEffort) => void;
   /** Switch Codex speed mode callback */
   onCodexFastModeChange?: (mode: CodexFastMode) => void;
+  /** Switch DSH agent preset callback */
+  onDshPresetChange?: (preset: string) => void;
   /** Enhance prompt callback */
   onEnhancePrompt?: () => void;
   /** Whether always thinking enabled */

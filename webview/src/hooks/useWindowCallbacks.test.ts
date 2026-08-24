@@ -1,4 +1,5 @@
-import { act, renderHook } from '@testing-library/react';
+import { createElement, useState } from 'react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { useWindowCallbacks } from './useWindowCallbacks.js';
 import type { UseWindowCallbacksOptions } from './useWindowCallbacks.js';
 import type { ClaudeMessage } from '../types/index.js';
@@ -6,7 +7,9 @@ import { forceWebviewRepaint } from '../utils/forceWebviewRepaint.js';
 
 // Mock the repaint util so we can assert the session-transition path triggers it
 // without touching the real DOM (there is no #app element under jsdom).
-vi.mock('../utils/forceWebviewRepaint.js', () => ({ forceWebviewRepaint: vi.fn() }));
+vi.mock('../utils/forceWebviewRepaint.js', () => ({
+  forceWebviewRepaint: vi.fn((_reason?: string, onRepaint?: () => void) => onRepaint?.()),
+}));
 
 /**
  * Integration tests for useWindowCallbacks — verifies the real window callback
@@ -38,10 +41,14 @@ describe('useWindowCallbacks integration', () => {
     setUsageMaxTokens: vi.fn(),
     setSubagentHistories: vi.fn(),
     setPermissionMode: vi.fn(),
+    setCurrentProvider: vi.fn(),
     setClaudePermissionMode: vi.fn(),
     setCodexPermissionMode: vi.fn(),
     setSelectedClaudeModel: vi.fn(),
     setSelectedCodexModel: vi.fn(),
+    setLongContextEnabled: vi.fn(),
+    setReasoningEffort: vi.fn(),
+    setCodexFastMode: vi.fn(),
     setProviderConfigVersion: vi.fn(),
     setActiveProviderConfig: vi.fn(),
     setClaudeSettingsAlwaysThinkingEnabled: vi.fn(),
@@ -51,6 +58,7 @@ describe('useWindowCallbacks integration', () => {
     setPermissionDialogTimeoutSeconds: vi.fn(),
     setSdkStatus: vi.fn(),
     setSdkStatusLoaded: vi.fn(),
+    setSdkStatusError: vi.fn(),
     setIsRewinding: vi.fn(),
     setRewindDialogOpen: vi.fn(),
     setCurrentRewindRequest: vi.fn(),
@@ -105,13 +113,29 @@ describe('useWindowCallbacks integration', () => {
   beforeEach(() => {
     window.__sessionTransitioning = false;
     window.__sessionTransitionToken = null;
+    window.__deferredTransitionUpdateMessages = null;
+    window.__minAcceptedUpdateSequence = 0;
+    window.__prependedHistoryMessageCount = 0;
+    window.__messageBaseIndex = 0;
     window.__pendingSessionTransitionToast = undefined;
     window.__deniedToolIds = new Set();
     window.sendToJava = vi.fn();
+    window.updateDependencyStatus = undefined;
+    delete (window as unknown as Record<string, unknown>)._appUpdateDependencyStatus;
     // The drain test inspects this slot; if a prior test (or earlier suite run)
     // leaked a value onto window we'd see a false-positive drain. Wipe it here
     // so each test starts from a clean pending state.
     delete (window as unknown as Record<string, unknown>).__pendingPermissionDialogTimeout;
+    delete (window as unknown as Record<string, unknown>).__pendingDependencyStatus;
+    delete window.__pendingBackendTabState;
+    delete window.__pendingUsageUpdate;
+    delete window.__CCGUI_RECOVERY_STATE_APPLIED__;
+    delete window.__lastAcceptedMessageCount;
+    delete window.__pendingHistoryRefreshMessageCount;
+    delete window.__pendingHistoryLoadComplete;
+    delete window.__historySurfaceRefreshEpoch;
+    vi.mocked(forceWebviewRepaint).mockClear();
+    window.__dependencyStatusState = 'pending';
   });
 
   /** Stub timer/rAF globals to execute synchronously for streaming tests. */
@@ -128,8 +152,116 @@ describe('useWindowCallbacks integration', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
   };
 
+  it('applies Java recovery state without echoing provider or model bridge commands', () => {
+    const currentProviderRef = { current: 'codex' };
+    const opts = createOptions({ currentProviderRef });
+    renderHook(() => useWindowCallbacks(opts));
+    const bridgeCallsBeforeRestore = (window.sendToJava as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    act(() => {
+      window.applyBackendTabState?.(JSON.stringify({
+        provider: 'claude',
+        model: 'claude-opus-4-8[1m]',
+        permissionMode: 'default',
+        reasoningEffort: 'high',
+        codexFastMode: 'normal',
+      }));
+    });
+
+    expect(currentProviderRef.current).toBe('claude');
+    expect(opts.setCurrentProvider).toHaveBeenCalledWith('claude');
+    expect(opts.setSelectedClaudeModel).toHaveBeenCalledWith('claude-opus-4-8');
+    expect(opts.setLongContextEnabled).toHaveBeenCalledWith(true);
+    expect(opts.setReasoningEffort).toHaveBeenCalledWith('high');
+    expect(opts.setCodexFastMode).toHaveBeenCalledWith('normal');
+    expect(window.__CCGUI_RECOVERY_STATE_APPLIED__).toBe(true);
+    expect((window.sendToJava as ReturnType<typeof vi.fn>).mock.calls.length).toBe(bridgeCallsBeforeRestore);
+  });
+
+  it('drains Java recovery state buffered before React callback registration', () => {
+    window.__pendingBackendTabState = JSON.stringify({
+      provider: 'codex',
+      model: 'gpt-5.6-sol',
+      permissionMode: 'default',
+      codexFastMode: 'fast',
+    });
+    const opts = createOptions();
+
+    renderHook(() => useWindowCallbacks(opts));
+
+    expect(opts.setCurrentProvider).toHaveBeenCalledWith('codex');
+    expect(opts.setSelectedCodexModel).toHaveBeenCalledWith('gpt-5.6-sol');
+    expect(opts.setCodexFastMode).toHaveBeenCalledWith('fast');
+    expect(window.__pendingBackendTabState).toBeUndefined();
+  });
+
+  it('drains the latest usage update buffered before React callback registration', () => {
+    window.__pendingUsageUpdate = JSON.stringify({
+      percentage: 19,
+      usedTokens: 49300,
+      maxTokens: 258400,
+    });
+    const opts = createOptions();
+
+    renderHook(() => useWindowCallbacks(opts));
+
+    expect(opts.setUsagePercentage).toHaveBeenCalledWith(19);
+    expect(opts.setUsageUsedTokens).toHaveBeenCalledWith(49300);
+    expect(opts.setUsageMaxTokens).toHaveBeenCalledWith(258400);
+    expect(window.__pendingUsageUpdate).toBeUndefined();
+  });
+
+  it('settles dependency status errors without reporting an SDK installation state', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify({
+        success: false,
+        error: 'status unavailable',
+      }));
+    });
+
+    expect(opts.setSdkStatus).not.toHaveBeenCalled();
+    expect(opts.setSdkStatusLoaded).toHaveBeenCalledWith(false);
+    expect(opts.setSdkStatusError).toHaveBeenCalledWith('status unavailable');
+    expect(window.__dependencyStatusState).toBe('error');
+  });
+
+  it('clears a dependency status error after a valid response', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+    const status = {
+      'codex-sdk': { status: 'installed' },
+    };
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify(status));
+    });
+
+    expect(opts.setSdkStatus).toHaveBeenCalledWith(status);
+    expect(opts.setSdkStatusLoaded).toHaveBeenCalledWith(true);
+    expect(opts.setSdkStatusError).toHaveBeenCalledWith(null);
+    expect(window.__dependencyStatusState).toBe('ready');
+  });
+
+  it('settles malformed dependency status payloads as errors', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateDependencyStatus?.('{invalid');
+    });
+
+    expect(opts.setSdkStatusLoaded).toHaveBeenCalledWith(false);
+    expect(opts.setSdkStatusError).toHaveBeenCalledWith(expect.any(String));
+    expect(window.__dependencyStatusState).toBe('error');
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
+    delete window.__codexHistoryPageInfo;
   });
 
   /**
@@ -165,6 +297,20 @@ describe('useWindowCallbacks integration', () => {
 
     expect(window.__sessionTransitioning).toBe(false);
     expect(window.__sessionTransitionToken).toBeNull();
+  });
+
+  it('older Codex page rendering does not release the session transition guard', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+    window.__sessionTransitioning = true;
+    window.__sessionTransitionToken = 'newer-transition';
+
+    act(() => {
+      window.codexHistoryPageRenderComplete!();
+    });
+
+    expect(window.__sessionTransitioning).toBe(true);
+    expect(window.__sessionTransitionToken).toBe('newer-transition');
   });
 
   it('historyLoadComplete shows pending session transition toast', () => {
@@ -331,24 +477,97 @@ describe('useWindowCallbacks integration', () => {
     expect(opts.applyHistoryTitleLocal).not.toHaveBeenCalled();
   });
 
-  // ===== updateMessages is blocked during transition =====
+  // ===== updateMessages is deferred during transition =====
 
-  it('updateMessages is silently dropped while __sessionTransitioning is true', () => {
+  it('updateMessages is stashed while __sessionTransitioning is true (not applied yet)', () => {
     const opts = createOptions();
     renderHook(() => useWindowCallbacks(opts));
 
     window.__sessionTransitioning = true;
 
-    const staleMessages: ClaudeMessage[] = [
-      { type: 'assistant', content: 'stale content', timestamp: new Date().toISOString() },
+    const historyMessages: ClaudeMessage[] = [
+      { type: 'assistant', content: 'history content', timestamp: new Date().toISOString() },
     ];
 
     act(() => {
-      window.updateMessages!(JSON.stringify(staleMessages));
+      window.updateMessages!(JSON.stringify(historyMessages));
     });
 
-    // setMessages should NOT be called because guard is active
+    // Not applied while the guard is active
     expect(opts.setMessages).not.toHaveBeenCalled();
+    expect(window.__deferredTransitionUpdateMessages?.json).toContain('history content');
+  });
+
+  it('historyLoadComplete flushes stashed updateMessages after releasing the guard', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    window.__sessionTransitioning = true;
+    const historyMessages: ClaudeMessage[] = [
+      { type: 'user', content: '从历史恢复', timestamp: new Date().toISOString() },
+      { type: 'assistant', content: 'ok', timestamp: new Date().toISOString() },
+    ];
+
+    act(() => {
+      window.updateMessages!(JSON.stringify(historyMessages), 5);
+    });
+    expect(opts.setMessages).not.toHaveBeenCalled();
+
+    act(() => {
+      window.historyLoadComplete!();
+    });
+
+    expect(window.__sessionTransitioning).toBe(false);
+    expect(opts.setMessages).toHaveBeenCalled();
+    expect(window.__deferredTransitionUpdateMessages == null
+      || window.__deferredTransitionUpdateMessages === null).toBe(true);
+
+    // historyLoadComplete also re-scans messages (refreshLoadedHistoryMessages), so
+    // the last setMessages call may be a no-op on []. Assert some updater installs
+    // the restored transcript when given an empty previous list.
+    const applied = (opts.setMessages as ReturnType<typeof vi.fn>).mock.calls.some(([arg]) => {
+      if (typeof arg !== 'function') return false;
+      const next = (arg as (prev: ClaudeMessage[]) => ClaudeMessage[])([]);
+      return Array.isArray(next)
+        && next.length === 2
+        && next[0]?.content === '从历史恢复'
+        && next[1]?.content === 'ok';
+    });
+    expect(applied).toBe(true);
+  });
+
+  it('clearMessages does not wipe a post-barrier stashed history snapshot', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    window.__sessionTransitioning = true;
+    // Simulate clearMessages barrier first (normal order), then history arrives with higher sequence.
+    act(() => {
+      window.clearMessages!('10');
+    });
+    const historyMessages: ClaudeMessage[] = [
+      { type: 'user', content: 'post-clear history', timestamp: new Date().toISOString() },
+    ];
+    act(() => {
+      window.updateMessages!(JSON.stringify(historyMessages), 11);
+    });
+    expect(window.__deferredTransitionUpdateMessages?.json).toContain('post-clear history');
+
+    // Reordered clear with lower/same barrier must not drop the post-barrier stash
+    act(() => {
+      window.clearMessages!('10');
+    });
+    expect(window.__deferredTransitionUpdateMessages?.json).toContain('post-clear history');
+
+    act(() => {
+      window.historyLoadComplete!();
+    });
+    const applied = (opts.setMessages as ReturnType<typeof vi.fn>).mock.calls.some(([arg]) => {
+      if (typeof arg !== 'function') return false;
+      const next = (arg as (prev: ClaudeMessage[]) => ClaudeMessage[])([]);
+      return Array.isArray(next) && next.some((m) => m.content === 'post-clear history');
+    });
+    expect(applied).toBe(true);
   });
 
   it('updateMessages works normally after guard is released', () => {
@@ -368,6 +587,485 @@ describe('useWindowCallbacks integration', () => {
 
     // setMessages SHOULD be called
     expect(opts.setMessages).toHaveBeenCalled();
+  });
+
+  it('reports one DOM commit when restored history arrives after completion', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([]), 1);
+      window.historyLoadComplete!('1');
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBe(1);
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'user', content: 'restored history' },
+      ]), 2);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    act(() => vi.runAllTimers());
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'user', content: 'normal follow-up' },
+      ]), 3);
+    });
+
+    const historyRefreshCalls = (window.sendToJava as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([payload]) => payload === 'history_dom_committed:1');
+    expect(historyRefreshCalls).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it('drains an early history completion only after the restored message DOM commits', async () => {
+    const restoredMessages: ClaudeMessage[] = [
+      { type: 'assistant', content: 'restored before callback registration' },
+    ];
+    window.__pendingUpdateMessages = {
+      json: JSON.stringify(restoredMessages),
+      sequence: 1,
+    };
+    window.__pendingHistoryLoadComplete = { expectedMessageCount: 1 };
+    let domTextWhenAcknowledged = '';
+    window.sendToJava = vi.fn((payload: string) => {
+      if (payload === 'history_dom_committed:1') {
+        domTextWhenAcknowledged = document.querySelector('[data-testid="history-dom"]')?.textContent ?? '';
+      }
+    });
+
+    const HistoryHarness = () => {
+      const [messages, setMessages] = useState<ClaudeMessage[]>([]);
+      useWindowCallbacks(createOptions({ setMessages }));
+      return createElement(
+        'div',
+        { 'data-testid': 'history-dom' },
+        messages.map(message => message.content).join('|'),
+      );
+    };
+
+    render(createElement(HistoryHarness));
+
+    await waitFor(() => {
+      expect(domTextWhenAcknowledged).toContain('restored before callback registration');
+    });
+    expect(window.__pendingHistoryLoadComplete).toBeUndefined();
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+  });
+
+  it('preserves an explicit zero count buffered before callback registration', async () => {
+    window.__pendingHistoryLoadComplete = { expectedMessageCount: 0 };
+    renderHook(() => useWindowCallbacks(createOptions()));
+
+    await waitFor(() => {
+      expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+    });
+    expect(window.__pendingHistoryLoadComplete).toBeUndefined();
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+  });
+
+  it('reports a DOM commit when the restored-history snapshot arrived first', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'already restored' },
+      ]), 1);
+    });
+    act(() => {
+      window.historyLoadComplete!(1);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    act(() => vi.runAllTimers());
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+    vi.useRealTimers();
+  });
+
+  it('keeps the restored-history refresh pending when a stale snapshot is rejected', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    window.__minAcceptedUpdateSequence = 5;
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.historyLoadComplete!(1);
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'stale history' },
+      ]), 4);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBe(1);
+
+    act(() => {
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'current history' },
+      ]), 5);
+    });
+
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    act(() => vi.runAllTimers());
+    expect(window.sendToJava).toHaveBeenCalledWith('history_dom_committed:1');
+    vi.useRealTimers();
+  });
+
+  it('cancels a deferred restored-history refresh when the session is cleared', () => {
+    const opts = createOptions();
+    vi.useFakeTimers();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.historyLoadComplete!(1);
+      window.clearMessages!();
+      window.updateMessages!(JSON.stringify([
+        { type: 'assistant', content: 'new session' },
+      ]), 1);
+    });
+
+    act(() => vi.runAllTimers());
+    expect(window.__pendingHistoryRefreshMessageCount).toBeUndefined();
+    expect(window.sendToJava).not.toHaveBeenCalledWith('history_dom_committed:1');
+    expect(forceWebviewRepaint).toHaveBeenCalledWith('session-transition');
+    vi.useRealTimers();
+  });
+
+  it('buffers a Codex history page and prepends it in one ordered state update', () => {
+    const { opts, buffer } = createOptsWithMessages([{ type: 'user', content: 'newer' }]);
+    opts.currentSessionIdRef.current = 'session-1';
+    renderHook(() => useWindowCallbacks(opts));
+    window.__codexHistoryPageInfo = {
+      pageId: 'page-current', sessionId: 'session-1', mode: 'replace',
+      fromTurn: 40, toTurn: 70, totalTurns: 70, hasMore: true, loadedMessageCount: 1,
+    };
+
+    act(() => {
+      window.beginCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-1', sessionId: 'session-1', mode: 'prepend',
+      }));
+      window.appendCodexHistoryPageBatch!('page-1', JSON.stringify([
+        { type: 'user', content: 'older-1' },
+      ]));
+      window.appendCodexHistoryPageBatch!('page-1', JSON.stringify([
+        { type: 'assistant', content: 'older-2' },
+      ]));
+      window.completeCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-1', sessionId: 'session-1', mode: 'prepend',
+        fromTurn: 10, toTurn: 40, totalTurns: 70, hasMore: true, loadedMessageCount: 2,
+      }));
+    });
+
+    expect(buffer.current.map(message => message.content)).toEqual(['older-1', 'older-2', 'newer']);
+    expect(window.__codexHistoryPageInfo?.fromTurn).toBe(10);
+  });
+
+  it('resets the prepended history offset when a page replaces the transcript', () => {
+    const { opts, buffer } = createOptsWithMessages([
+      { type: 'user', content: 'older-user' },
+      { type: 'assistant', content: 'current-answer' },
+    ]);
+    opts.currentSessionIdRef.current = 'session-1';
+    window.__prependedHistoryMessageCount = 1;
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.beginCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-replace', sessionId: 'session-1', mode: 'replace',
+      }));
+      window.appendCodexHistoryPageBatch!('page-replace', JSON.stringify([
+        { type: 'user', content: 'replacement' },
+      ]));
+      window.completeCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-replace', sessionId: 'session-1', mode: 'replace',
+        fromTurn: 0, toTurn: 1, totalTurns: 1, hasMore: false, loadedMessageCount: 1,
+      }));
+    });
+
+    expect(buffer.current.map(message => message.content)).toEqual(['replacement']);
+    expect(window.__prependedHistoryMessageCount).toBe(0);
+  });
+
+  it('keeps the streaming assistant index aligned when history is prepended', () => {
+    const { opts, buffer } = createOptsWithMessages([
+      { type: 'user', content: 'current-user' },
+      { type: 'assistant', content: 'streaming-answer', isStreaming: true },
+    ]);
+    opts.currentSessionIdRef.current = 'session-1';
+    opts.isStreamingRef.current = true;
+    opts.streamingMessageIndexRef.current = 1;
+    renderHook(() => useWindowCallbacks(opts));
+    window.__codexHistoryPageInfo = {
+      pageId: 'page-current', sessionId: 'session-1', mode: 'replace',
+      fromTurn: 40, toTurn: 70, totalTurns: 70, hasMore: true, loadedMessageCount: 2,
+    };
+
+    act(() => {
+      window.beginCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-older', sessionId: 'session-1', mode: 'prepend',
+      }));
+      window.appendCodexHistoryPageBatch!('page-older', JSON.stringify([
+        { type: 'user', content: 'older-user' },
+        { type: 'assistant', content: 'older-answer' },
+      ]));
+      window.completeCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-older', sessionId: 'session-1', mode: 'prepend',
+        fromTurn: 10, toTurn: 40, totalTurns: 70, hasMore: true, loadedMessageCount: 2,
+      }));
+    });
+
+    expect(buffer.current.map(message => message.content)).toEqual([
+      'older-user', 'older-answer', 'current-user', 'streaming-answer',
+    ]);
+    expect(opts.streamingMessageIndexRef.current).toBe(3);
+  });
+
+  it('drops a late Codex history page from a previously selected session', () => {
+    const { opts, buffer } = createOptsWithMessages([{ type: 'user', content: 'current' }]);
+    opts.currentSessionIdRef.current = 'session-current';
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.beginCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-old', sessionId: 'session-old', mode: 'prepend',
+      }));
+      window.appendCodexHistoryPageBatch!('page-old', JSON.stringify([
+        { type: 'user', content: 'stale' },
+      ]));
+      window.completeCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-old', sessionId: 'session-old', mode: 'prepend',
+        fromTurn: 0, toTurn: 30, totalTurns: 60, hasMore: false, loadedMessageCount: 1,
+      }));
+    });
+
+    expect(buffer.current.map(message => message.content)).toEqual(['current']);
+  });
+
+  it('rejects a non-contiguous Codex history page and allows the UI to retry', () => {
+    const { opts, buffer } = createOptsWithMessages([{ type: 'user', content: 'current' }]);
+    opts.currentSessionIdRef.current = 'session-1';
+    renderHook(() => useWindowCallbacks(opts));
+    window.__codexHistoryPageInfo = {
+      pageId: 'page-current', sessionId: 'session-1', mode: 'replace',
+      fromTurn: 40, toTurn: 70, totalTurns: 70, hasMore: true, loadedMessageCount: 1,
+    };
+
+    act(() => {
+      window.beginCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-gap', sessionId: 'session-1', mode: 'prepend',
+      }));
+      window.completeCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-gap', sessionId: 'session-1', mode: 'prepend',
+        fromTurn: 0, toTurn: 30, totalTurns: 70, hasMore: false, loadedMessageCount: 0,
+      }));
+    });
+
+    expect(buffer.current.map(message => message.content)).toEqual(['current']);
+    expect(opts.addToast).toHaveBeenCalledWith(
+      'Codex history changed while loading; please retry',
+      'error',
+    );
+  });
+
+  it('patches only the transported tail when the full prefix is present', () => {
+    const initial = Array.from({ length: 400 }, (_, index): ClaudeMessage => ({
+      type: index % 2 === 0 ? 'user' : 'assistant',
+      content: `old-${index}`,
+    }));
+    const { opts, buffer } = createOptsWithMessages(initial);
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => window.updateMessageTail!(JSON.stringify([
+      { type: 'user', content: 'new-398' },
+      { type: 'assistant', content: 'new-399' },
+    ]), 398, 7));
+
+    expect(buffer.current).toHaveLength(400);
+    expect(buffer.current[397]?.content).toBe('old-397');
+    expect(buffer.current[398]?.content).toBe('new-398');
+    expect(buffer.current[399]?.content).toBe('new-399');
+    expect(window.__messageBaseIndex).toBe(0);
+    expect(window.__minAcceptedUpdateSequence).toBe(7);
+  });
+
+  it('keeps prepended history aligned when patching the backend tail', () => {
+    const initial = Array.from({ length: 400 }, (_, index): ClaudeMessage => ({
+      type: index % 2 === 0 ? 'user' : 'assistant',
+      content: `current-${index}`,
+    }));
+    const older = Array.from({ length: 100 }, (_, index): ClaudeMessage => ({
+      type: index % 2 === 0 ? 'user' : 'assistant',
+      content: `older-${index}`,
+    }));
+    const { opts, buffer } = createOptsWithMessages(initial);
+    opts.currentSessionIdRef.current = 'session-1';
+    renderHook(() => useWindowCallbacks(opts));
+    window.__codexHistoryPageInfo = {
+      pageId: 'page-current', sessionId: 'session-1', mode: 'replace',
+      fromTurn: 40, toTurn: 70, totalTurns: 70, hasMore: true, loadedMessageCount: 400,
+    };
+
+    act(() => {
+      window.beginCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-older', sessionId: 'session-1', mode: 'prepend',
+      }));
+      window.appendCodexHistoryPageBatch!('page-older', JSON.stringify(older));
+      window.completeCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-older', sessionId: 'session-1', mode: 'prepend',
+        fromTurn: 10, toTurn: 40, totalTurns: 70, hasMore: true, loadedMessageCount: 100,
+      }));
+      window.updateMessageTail!(JSON.stringify([
+        { type: 'user', content: 'updated-398' },
+        { type: 'assistant', content: 'updated-399' },
+      ]), 398, 7);
+    });
+
+    expect(buffer.current).toHaveLength(500);
+    expect(buffer.current[99]?.content).toBe('older-99');
+    expect(buffer.current[100]?.content).toBe('current-0');
+    expect(buffer.current[497]?.content).toBe('current-397');
+    expect(buffer.current[498]?.content).toBe('updated-398');
+    expect(buffer.current[499]?.content).toBe('updated-399');
+    expect(window.__prependedHistoryMessageCount).toBe(100);
+    expect(window.__messageBaseIndex).toBe(0);
+  });
+
+  it('preserves prepended history and its cursor across a full backend snapshot', () => {
+    const { opts, buffer } = createOptsWithMessages([
+      { type: 'user', content: 'current-user' },
+      { type: 'assistant', content: 'current-answer' },
+    ]);
+    opts.currentSessionIdRef.current = 'session-1';
+    renderHook(() => useWindowCallbacks(opts));
+    window.__codexHistoryPageInfo = {
+      pageId: 'page-current', sessionId: 'session-1', mode: 'replace',
+      fromTurn: 40, toTurn: 70, totalTurns: 70, hasMore: true, loadedMessageCount: 2,
+    };
+
+    act(() => {
+      window.beginCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-older', sessionId: 'session-1', mode: 'prepend',
+      }));
+      window.appendCodexHistoryPageBatch!('page-older', JSON.stringify([
+        { type: 'user', content: 'older-user' },
+        { type: 'assistant', content: 'older-answer' },
+      ]));
+      window.completeCodexHistoryPage!(JSON.stringify({
+        pageId: 'page-older', sessionId: 'session-1', mode: 'prepend',
+        fromTurn: 10, toTurn: 40, totalTurns: 70, hasMore: true, loadedMessageCount: 2,
+      }));
+      window.updateMessages!(JSON.stringify([
+        { type: 'user', content: 'current-user' },
+        { type: 'assistant', content: 'updated-answer' },
+        { type: 'user', content: 'new-user' },
+      ]), 8);
+    });
+
+    expect(buffer.current.map(message => message.content)).toEqual([
+      'older-user', 'older-answer', 'current-user', 'updated-answer', 'new-user',
+    ]);
+    expect(window.__prependedHistoryMessageCount).toBe(2);
+    expect(window.__codexHistoryPageInfo?.fromTurn).toBe(10);
+  });
+
+  it('reconstructs settled turn metadata after a tail update', () => {
+    const { opts, buffer } = createOptsWithMessages([]);
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => window.updateMessageTail!(JSON.stringify([
+      {
+        type: 'user',
+        content: 'question',
+        raw: { type: 'user', timestamp: '2026-07-23T10:00:00.000Z' },
+      },
+      {
+        type: 'assistant',
+        content: 'answer',
+        raw: {
+          type: 'assistant',
+          timestamp: '2026-07-23T10:00:05.000Z',
+          message: {
+            id: 'msg-1',
+            usage: { input_tokens: 12, output_tokens: 3 },
+            content: [{ type: 'text', text: 'answer' }],
+          },
+        },
+      },
+    ]), 0, 1));
+
+    expect(buffer.current[1]?.durationMs).toBe(5_000);
+    expect((buffer.current[1]?.raw as Record<string, unknown>)?.turnUsage).toEqual({
+      input_tokens: 12,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 3,
+    });
+  });
+
+  it('keeps a recreated tail window aligned across growth and compaction', () => {
+    const { opts, buffer } = createOptsWithMessages([]);
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => window.updateMessageTail!(JSON.stringify([
+      { type: 'user', content: 'message-220' },
+      { type: 'assistant', content: 'message-221' },
+    ]), 220, 7));
+    expect(buffer.current.map((message) => message.content)).toEqual(['message-220', 'message-221']);
+    expect(window.__messageBaseIndex).toBe(220);
+
+    act(() => window.updateMessageTail!(JSON.stringify([
+      { type: 'user', content: 'message-221' },
+      { type: 'assistant', content: 'message-222' },
+    ]), 221, 8));
+    expect(buffer.current.map((message) => message.content)).toEqual(['message-221', 'message-222']);
+    expect(window.__messageBaseIndex).toBe(221);
+
+    act(() => window.updateMessageTail!(JSON.stringify([
+      { type: 'user', content: 'compacted-170' },
+      { type: 'assistant', content: 'compacted-171' },
+    ]), 170, 9));
+    expect(buffer.current.map((message) => message.content)).toEqual(['compacted-170', 'compacted-171']);
+    expect(window.__messageBaseIndex).toBe(170);
+  });
+
+  it('ignores stale or invalid long-conversation tail updates', () => {
+    const { opts, buffer } = createOptsWithMessages([
+      { type: 'user', content: 'current' },
+      { type: 'assistant', content: 'answer' },
+    ]);
+    window.__minAcceptedUpdateSequence = 8;
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => window.updateMessageTail!(JSON.stringify([
+      { type: 'assistant', content: 'stale' },
+    ]), 1, 7));
+    act(() => window.updateMessageTail!(JSON.stringify([
+      { type: 'assistant', content: 'invalid-base' },
+    ]), '1oops', 9));
+
+    expect(buffer.current.map((message) => message.content)).toEqual(['current', 'answer']);
+    expect(window.__minAcceptedUpdateSequence).toBe(8);
+  });
+
+  it('resets the tail base when a full snapshot arrives', () => {
+    const { opts, buffer } = createOptsWithMessages([]);
+    renderHook(() => useWindowCallbacks(opts));
+    act(() => window.updateMessageTail!(JSON.stringify([
+      { type: 'assistant', content: 'tail-only' },
+    ]), 220, 7));
+
+    act(() => window.updateMessages!(JSON.stringify([
+      { type: 'user', content: 'full-user' },
+      { type: 'assistant', content: 'full-answer' },
+    ]), 8));
+
+    expect(buffer.current.map((message) => message.content)).toEqual(['full-user', 'full-answer']);
+    expect(window.__messageBaseIndex).toBe(0);
   });
 
   it('patchMessageUuid updates the latest unresolved user message using raw text fallback', () => {
@@ -556,6 +1254,7 @@ describe('useWindowCallbacks integration', () => {
       streamingMessageIndexRef,
     });
     renderHook(() => useWindowCallbacks(opts));
+    window.__prependedHistoryMessageCount = 12;
 
     act(() => {
       window.clearMessages!();
@@ -570,6 +1269,7 @@ describe('useWindowCallbacks integration', () => {
     expect(isStreamingRef.current).toBe(false);
     expect(streamingContentRef.current).toBe('');
     expect(streamingMessageIndexRef.current).toBe(-1);
+    expect(window.__prependedHistoryMessageCount).toBe(0);
   });
 
   // ===== clearMessages forces a webview repaint to clear JCEF ghosting =====
@@ -810,7 +1510,7 @@ describe('useWindowCallbacks integration', () => {
   });
 
   it('onSubagentHistoryLoaded skips updates only when history payload is truly unchanged', () => {
-    const opts = createOptions();
+    const opts = createOptions({ currentSessionIdRef: { current: 'session-1' } });
     renderHook(() => useWindowCallbacks(opts));
 
     const firstPayload = {
@@ -846,6 +1546,30 @@ describe('useWindowCallbacks integration', () => {
     const updatedState = thirdUpdater(initialState);
     expect(updatedState).not.toBe(initialState);
     expect(updatedState['task-1'].messages[0].content[0].text).toBe('final result');
+  });
+
+  it('reassembles oversized subagent history before updating state', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+    const payload = JSON.stringify({
+      success: true,
+      toolUseId: 'task-1',
+      messages: [{ type: 'assistant', content: 'large result' }],
+    });
+    const midpoint = Math.floor(payload.length / 2);
+
+    act(() => {
+      window.onSubagentHistoryChunk?.('transfer-1', payload.slice(0, midpoint), false);
+    });
+    expect(opts.setSubagentHistories).not.toHaveBeenCalled();
+
+    act(() => {
+      window.onSubagentHistoryChunk?.('transfer-1', payload.slice(midpoint), true);
+    });
+
+    expect(opts.setSubagentHistories).toHaveBeenCalledTimes(1);
+    const updater = (opts.setSubagentHistories as any).mock.calls[0][0] as (prev: Record<string, unknown>) => Record<string, any>;
+    expect(updater({})['task-1'].messages[0].content).toBe('large result');
   });
 
   // ===== onStreamEnd idempotency (dual-path delivery) =====

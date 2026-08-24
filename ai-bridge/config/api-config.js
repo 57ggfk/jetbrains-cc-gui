@@ -11,7 +11,7 @@ import { getClaudeDir, getCodemossDir, getManagedSettingsPath } from '../utils/p
 const DEBUG = process.env.CLAUDE_DEBUG === '1' || process.env.CLAUDE_DEBUG === 'true';
 function debugLog(...args) {
   if (DEBUG) {
-    console.log(...args);
+    console.error(...args);
   }
 }
 
@@ -126,6 +126,7 @@ function isEnvFlagEnabled(value) {
 // process.env by setModelEnvironmentVariables() each turn.
 const MODEL_ROUTING_ENV_VARS = [
   'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
@@ -202,6 +203,15 @@ export function buildWebviewControlledSettingsOverride(modelId) {
     MAX_THINKING_TOKENS: '',
   };
 
+  // Clear model routing vars from settings.json so the per-request values
+  // set by setModelEnvironmentVariables() (via process.env) are the single
+  // source of truth. Without this, a stale ANTHROPIC_MODEL in settings.json
+  // overrides the webview-selected model, causing all model families to
+  // resolve to the same value (issue #1509).
+  for (const varName of MODEL_ROUTING_ENV_VARS) {
+    env[varName] = '';
+  }
+
   const normalizedModel = typeof modelId === 'string' ? modelId.trim() : '';
   if (normalizedModel) {
     env.CLAUDE_CODE_DISABLE_1M_CONTEXT = /\[1m\]$/i.test(normalizedModel) ? '' : '1';
@@ -231,9 +241,12 @@ export function buildWebviewControlledSettingsOverride(modelId) {
  * Reads settings via loadClaudeSettings() (same source as setupApiKey) so the
  * auth-decision and the provider-management-decision always see the same env.
  *
- * @returns {boolean} true unless a cloud provider switch is active in settings.
+ * @returns {boolean} true unless CLI login or a cloud provider switch is active.
  */
 function shouldHostManageProvider() {
+  if (getClaudeRuntimeState().access === 'cli_login') {
+    return false;
+  }
   const settings = loadClaudeSettings();
   return !CLOUD_PROVIDER_FLAGS.some((flag) => isEnvFlagEnabled(settings?.env?.[flag]));
 }

@@ -220,6 +220,7 @@ function runBuildCliEnv(tempHome) {
 
 test('isWebviewControlledEnvVar classifies model, context, and reasoning controls correctly', () => {
   assert.equal(isWebviewControlledEnvVar('ANTHROPIC_MODEL'), true);
+  assert.equal(isWebviewControlledEnvVar('ANTHROPIC_DEFAULT_FABLE_MODEL'), true);
   assert.equal(isWebviewControlledEnvVar('anthropic_model'), true); // case-insensitive
   assert.equal(isWebviewControlledEnvVar('CLAUDE_CODE_EFFORT_LEVEL'), true);
   assert.equal(isWebviewControlledEnvVar('MAX_THINKING_TOKENS'), true);
@@ -251,10 +252,23 @@ test('buildCliEnv strips stale CLI override env vars and sets host-managed for f
 });
 
 test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env precedence', () => {
+  // Model routing vars are cleared so settings.json values cannot override
+  // the per-request process.env values set by setModelEnvironmentVariables().
+  const modelRoutingOverrides = {
+    ANTHROPIC_MODEL: '',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: '',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: '',
+    ANTHROPIC_SMALL_FAST_MODEL: '',
+    CLAUDE_CODE_SUBAGENT_MODEL: '',
+  };
+
   assert.deepEqual(buildWebviewControlledSettingsOverride('claude-sonnet-4-6[1m]'), {
     env: {
       CLAUDE_CODE_EFFORT_LEVEL: '',
       MAX_THINKING_TOKENS: '',
+      ...modelRoutingOverrides,
       CLAUDE_CODE_DISABLE_1M_CONTEXT: '',
     },
   });
@@ -263,6 +277,7 @@ test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env
     env: {
       CLAUDE_CODE_EFFORT_LEVEL: '',
       MAX_THINKING_TOKENS: '',
+      ...modelRoutingOverrides,
       CLAUDE_CODE_DISABLE_1M_CONTEXT: '1',
     },
   });
@@ -271,6 +286,7 @@ test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env
     env: {
       CLAUDE_CODE_EFFORT_LEVEL: '',
       MAX_THINKING_TOKENS: '',
+      ...modelRoutingOverrides,
     },
   });
 });
@@ -294,6 +310,27 @@ test('buildCliEnv leaves CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST unset for cloud pr
     assert.equal(env.ENTRYPOINT, 'cli');
     assert.equal(env.USER_TYPE, 'external');
   }
+});
+
+test('buildCliEnv leaves CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST unset for CLI login', () => {
+  // Regression guard for #1327: CLI login relies on the Claude CLI's own OAuth
+  // credentials. The host-managed flag makes the CLI strip its native credential
+  // lookup, so an authenticated user gets "Not logged in · Please run /login".
+  // cli_login is signaled purely by ~/.codemoss/config.json (claude.current), so
+  // no cloud-provider flag is present — the pre-fix code wrongly defaulted to
+  // host-managed here. The flag must be absent, even when process.env carries an
+  // inherited copy from a parent Claude Code host.
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-api-config-'));
+  writeCodemossClaudeConfig(tempHome, '__cli_login__');
+  writeClaudeSettingsEnv(tempHome, {});
+
+  const env = runBuildCliEnv(tempHome);
+
+  assert.equal(env.HOST_MANAGED, undefined,
+    'CLI login must suppress the host-managed flag (and clear any inherited copy)');
+  // Identity env must still be present regardless of provider mode.
+  assert.equal(env.ENTRYPOINT, 'cli');
+  assert.equal(env.USER_TYPE, 'external');
 });
 
 test('setupApiKey does not fall back to Claude CLI credentials on disk', () => {
