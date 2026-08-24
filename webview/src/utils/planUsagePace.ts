@@ -31,6 +31,8 @@ export interface PlanUsageSnapshot {
   message?: string;
   /** Plan tier, e.g. z.ai {@code level} ("max"). */
   level?: string;
+  /** True when the payload is a cached copy served after a failed refresh probe. */
+  stale?: boolean;
 }
 
 export const PLAN_USAGE_WINDOW_STORAGE_KEY = 'ccgui.planUsage.windowId';
@@ -264,6 +266,7 @@ export function parseCapacityPayload(data: unknown): PlanUsageSnapshot {
     provider: typeof o.provider === 'string' ? o.provider : undefined,
     source: typeof o.source === 'string' ? o.source : 'gateway',
     level: typeof o.level === 'string' ? o.level : undefined,
+    stale: o.stale === true ? true : undefined,
   };
 }
 

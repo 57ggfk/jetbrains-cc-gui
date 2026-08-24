@@ -157,6 +157,153 @@ public class ClaudePlanUsageServiceTest {
                 ClaudePlanUsageService.monitorUrl("http://localhost:8080/api/anthropic"));
     }
 
+    @Test
+    public void monitorUrl_rejectsPlainHttpExceptLoopback() {
+        // Bearer tokens must not travel over plaintext to a remote host
+        assertNull(ClaudePlanUsageService.monitorUrl("http://api.z.ai/api/anthropic"));
+        assertNull(ClaudePlanUsageService.monitorUrl("http://z.ai/api/anthropic"));
+        // Loopback proxies (local dev / tests) may use plain HTTP
+        assertEquals("http://127.0.0.1:9000/api/monitor/usage/quota/limit",
+                ClaudePlanUsageService.monitorUrl("http://127.0.0.1:9000/api/anthropic"));
+        assertEquals("http://localhost:8080/api/monitor/usage/quota/limit",
+                ClaudePlanUsageService.monitorUrl("http://localhost:8080/api/anthropic"));
+    }
+
+    @Test
+    public void parseZaiQuota_duplicatePeriodsMergeKeepingWorst() {
+        JsonObject body = JsonParser.parseString("""
+                {"data":{"limits":[
+                  {"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":10,"nextResetTime":1786624965401},
+                  {"type":"CREDIT_LIMIT","unit":3,"number":5,"percentage":20,"nextResetTime":1786624965401}
+                ]}}
+                """).getAsJsonObject();
+        JsonObject payload = ClaudePlanUsageService.parseZaiQuota(body);
+
+        com.google.gson.JsonArray windows = payload.getAsJsonArray("windows");
+        assertEquals(1, windows.size());
+        JsonObject w = windows.get(0).getAsJsonObject();
+        assertEquals("5h", w.get("id").getAsString());
+        assertEquals(20.0, w.get("used_pct").getAsDouble(), 0.01);
+        assertEquals(20.0, payload.get("capacity_pct").getAsDouble(), 0.01);
+    }
+
+    // ===== probe pipeline (transport injected) =====
+
+    @org.junit.After
+    public void tearDown() {
+        ClaudePlanUsageService.setZaiTransportForTests(null);
+        ClaudePlanUsageService.resetZaiCacheForTests();
+    }
+
+    @Test
+    public void resolveViaZaiMonitor_sendsBearerTokenToMonitorUrl() {
+        String[] seen = new String[2];
+        ClaudePlanUsageService.setZaiTransportForTests((url, token) -> {
+            seen[0] = url;
+            seen[1] = token;
+            return zaiBody(42);
+        });
+
+        JsonObject payload = ClaudePlanUsageService.resolveViaZaiMonitor(
+                settingsWithBaseAndToken("https://api.z.ai/api/anthropic", "glm-secret"), 1000L);
+
+        assertEquals("https://api.z.ai/api/monitor/usage/quota/limit", seen[0]);
+        assertEquals("glm-secret", seen[1]);
+        assertEquals(42.0, payload.get("capacity_pct").getAsDouble(), 0.01);
+    }
+
+    @Test
+    public void resolveViaZaiMonitor_fallsBackToApiKeyWhenAuthTokenMissing() {
+        String[] seen = new String[1];
+        ClaudePlanUsageService.setZaiTransportForTests((url, token) -> {
+            seen[0] = token;
+            return zaiBody(1);
+        });
+
+        JsonObject settings = settingsWithBase("https://api.z.ai/api/anthropic");
+        settings.getAsJsonObject("env").addProperty("ANTHROPIC_API_KEY", "sk-fallback");
+        ClaudePlanUsageService.resolveViaZaiMonitor(settings, 1000L);
+
+        assertEquals("sk-fallback", seen[0]);
+    }
+
+    @Test
+    public void resolveViaZaiMonitor_cacheTtlEnforced() {
+        int[] calls = {0};
+        ClaudePlanUsageService.setZaiTransportForTests((url, token) -> {
+            calls[0]++;
+            return zaiBody(10);
+        });
+        JsonObject settings = settingsWithBaseAndToken("https://api.z.ai/api/anthropic", "t");
+        long t0 = 1_000_000L;
+
+        ClaudePlanUsageService.resolveViaZaiMonitor(settings, t0);
+        assertEquals(1, calls[0]);
+        // Within TTL → served from cache, no second probe
+        ClaudePlanUsageService.resolveViaZaiMonitor(settings, t0 + ClaudePlanUsageService.ZAI_CACHE_TTL_MS - 1);
+        assertEquals(1, calls[0]);
+        // TTL expired → probes again
+        ClaudePlanUsageService.resolveViaZaiMonitor(settings, t0 + ClaudePlanUsageService.ZAI_CACHE_TTL_MS + 1);
+        assertEquals(2, calls[0]);
+    }
+
+    @Test
+    public void resolveViaZaiMonitor_cacheKeyedByUrlAndToken() {
+        int[] calls = {0};
+        ClaudePlanUsageService.setZaiTransportForTests((url, token) -> {
+            calls[0]++;
+            return zaiBody(10);
+        });
+        long t0 = 1_000_000L;
+
+        ClaudePlanUsageService.resolveViaZaiMonitor(
+                settingsWithBaseAndToken("https://api.z.ai/api/anthropic", "account-a"), t0);
+        assertEquals(1, calls[0]);
+        // Same URL but a different token (account switch) must not reuse the cache
+        ClaudePlanUsageService.resolveViaZaiMonitor(
+                settingsWithBaseAndToken("https://api.z.ai/api/anthropic", "account-b"), t0 + 1);
+        assertEquals(2, calls[0]);
+    }
+
+    @Test
+    public void resolveViaZaiMonitor_staleFallbackOnProbeFailure() {
+        boolean[] fail = {false};
+        ClaudePlanUsageService.setZaiTransportForTests((url, token) -> {
+            if (fail[0]) {
+                throw new IllegalStateException("boom");
+            }
+            return zaiBody(33);
+        });
+        JsonObject settings = settingsWithBaseAndToken("https://api.z.ai/api/anthropic", "t");
+        long t0 = 1_000_000L;
+
+        ClaudePlanUsageService.resolveViaZaiMonitor(settings, t0);
+
+        fail[0] = true;
+        // Probe fails with an expired-but-recent cache → stale payload
+        JsonObject stale = ClaudePlanUsageService.resolveViaZaiMonitor(
+                settings, t0 + ClaudePlanUsageService.ZAI_CACHE_TTL_MS + 1);
+        assertEquals(33.0, stale.get("capacity_pct").getAsDouble(), 0.01);
+        assertTrue(stale.get("stale").getAsBoolean());
+
+        // Cache older than the stale cap → give up (null → caller falls back)
+        assertNull(ClaudePlanUsageService.resolveViaZaiMonitor(
+                settings, t0 + ClaudePlanUsageService.ZAI_STALE_MAX_MS + 1));
+    }
+
+    private static JsonObject zaiBody(double pct) {
+        return JsonParser.parseString(
+                "{\"data\":{\"level\":\"max\",\"limits\":["
+                        + "{\"type\":\"CREDIT_LIMIT\",\"unit\":3,\"number\":5,\"percentage\":" + pct
+                        + ",\"nextResetTime\":1786624965401}]}}").getAsJsonObject();
+    }
+
+    private static JsonObject settingsWithBaseAndToken(String base, String token) {
+        JsonObject settings = settingsWithBase(base);
+        settings.getAsJsonObject("env").addProperty("ANTHROPIC_AUTH_TOKEN", token);
+        return settings;
+    }
+
     private static JsonObject settingsWithBase(String base) {
         JsonObject settings = new JsonObject();
         JsonObject env = new JsonObject();

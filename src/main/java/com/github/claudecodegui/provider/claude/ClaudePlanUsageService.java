@@ -13,8 +13,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Claude plan-usage snapshot builder + resolver.
@@ -38,7 +38,14 @@ import java.util.List;
  * <p>The webview polls {@code get_claude_plan_usage} (~every 120s, like Gemini).
  */
 public final class ClaudePlanUsageService {
-    private static final long ZAI_CACHE_TTL_MS = 60_000L;
+    /**
+     * Fresh-cache TTL. Set just under the webview's 120s poll cadence so that
+     * back-to-back polls (multiple tool windows, manual refresh) dedupe onto a
+     * single probe; a regular 120s poll always re-probes.
+     */
+    static final long ZAI_CACHE_TTL_MS = 115_000L;
+    /** Max age for serving a stale cached payload after repeated probe failures. */
+    static final long ZAI_STALE_MAX_MS = 30 * 60_000L;
     private static final long HTTP_TIMEOUT_MS = 15_000L;
     private static final Logger LOG = Logger.getInstance(ClaudePlanUsageService.class);
 
@@ -46,6 +53,9 @@ public final class ClaudePlanUsageService {
     private static volatile JsonObject cachedRateLimit;
 
     private static volatile ZaiCache cachedZai;
+
+    /** Test-only seam replacing the real HTTP probe. */
+    private static volatile ZaiTransport transportOverride;
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -76,14 +86,21 @@ public final class ClaudePlanUsageService {
      * Resolve the plan-usage payload for the webview poll. Probes the z.ai monitor
      * endpoint on a z.ai backend; otherwise returns the cached rate_limit snapshot
      * (real Anthropic). Falls back to an unavailable marker.
+     *
+     * <p>The settings service is passed in by the caller (which holds a long-lived
+     * instance) — constructing a fresh {@code CodemossSettingsService} per poll would
+     * rebuild its whole manager graph every 120s. Settings are still re-read from
+     * disk on each call, so edits to {@code settings.json} are picked up.
      */
-    public static JsonObject resolvePlanUsagePayload() {
+    public static JsonObject resolvePlanUsagePayload(CodemossSettingsService settingsService) {
         try {
-            JsonObject settings = new CodemossSettingsService().readClaudeSettings();
-            if (isZaiBackend(settings)) {
-                JsonObject zai = resolveViaZaiMonitor(settings);
-                if (zai != null) {
-                    return zai;
+            if (settingsService != null) {
+                JsonObject settings = settingsService.readClaudeSettings();
+                if (isZaiBackend(settings)) {
+                    JsonObject zai = resolveViaZaiMonitor(settings);
+                    if (zai != null) {
+                        return zai;
+                    }
                 }
             }
         } catch (Exception e) {
@@ -117,11 +134,10 @@ public final class ClaudePlanUsageService {
     }
 
     static JsonObject resolveViaZaiMonitor(JsonObject settings) {
-        long now = System.currentTimeMillis();
-        ZaiCache c = cachedZai;
-        if (c != null && now - c.atMs < ZAI_CACHE_TTL_MS && c.payload != null) {
-            return c.payload.deepCopy();
-        }
+        return resolveViaZaiMonitor(settings, System.currentTimeMillis());
+    }
+
+    static JsonObject resolveViaZaiMonitor(JsonObject settings, long nowMs) {
         String base = envString(settings, "ANTHROPIC_BASE_URL");
         String token = envString(settings, "ANTHROPIC_AUTH_TOKEN");
         if (token == null) {
@@ -131,17 +147,27 @@ public final class ClaudePlanUsageService {
         if (url == null) {
             return null;
         }
+        // Key the cache by endpoint + credential so an account/base-URL switch
+        // never serves the previous account's quota.
+        String cacheKey = url + '\n' + token;
+
+        ZaiCache c = cachedZai;
+        if (c != null && c.key.equals(cacheKey) && nowMs - c.atMs < ZAI_CACHE_TTL_MS) {
+            return c.payload.deepCopy();
+        }
         try {
             JsonObject body = httpGetJson(url, token);
             JsonObject payload = parseZaiQuota(body);
             if (payload != null) {
-                cachedZai = new ZaiCache(now, payload);
+                cachedZai = new ZaiCache(nowMs, cacheKey, payload);
                 return payload.deepCopy();
             }
         } catch (Exception e) {
             LOG.warn("z.ai quota probe failed: " + e.getMessage());
         }
-        if (c != null && c.payload != null) {
+        // Serve the last good payload while probes keep failing — but only for a
+        // bounded window, so a long outage doesn't masquerade as live data.
+        if (c != null && c.key.equals(cacheKey) && nowMs - c.atMs < ZAI_STALE_MAX_MS) {
             JsonObject copy = c.payload.deepCopy();
             copy.addProperty("stale", true);
             return copy;
@@ -149,13 +175,24 @@ public final class ClaudePlanUsageService {
         return null;
     }
 
-    /** Derive {@code <origin>/api/monitor/usage/quota/limit} from the anthropic base URL (port kept). */
+    /**
+     * Derive {@code <origin>/api/monitor/usage/quota/limit} from the anthropic base URL
+     * (port kept). The Bearer token rides along, so plain HTTP is only allowed for
+     * loopback targets (local proxies); anything else must be TLS.
+     */
     static String monitorUrl(String baseUrl) {
         try {
             URI u = URI.create(baseUrl);
             String scheme = u.getScheme();
             String host = u.getHost();
             if (scheme == null || host == null) {
+                return null;
+            }
+            boolean loopback = host.equalsIgnoreCase("localhost")
+                    || host.equals("127.0.0.1")
+                    || host.equals("::1");
+            if (!"https".equalsIgnoreCase(scheme)
+                    && !("http".equalsIgnoreCase(scheme) && loopback)) {
                 return null;
             }
             int port = u.getPort();
@@ -185,10 +222,10 @@ public final class ClaudePlanUsageService {
         }
         String level = asString(data, "level");
 
-        List<JsonObject> windows = new ArrayList<>();
-        Double primary5h = null;
-        Double maxPct = null;
-        String firstPeriod = null;
+        // Two limit types can map to the same window (e.g. TOKENS_LIMIT and
+        // CREDIT_LIMIT both with unit=3 → "5h"); merge them, surfacing the worse
+        // usage, so the frontend never sees duplicate window ids.
+        Map<String, JsonObject> byPeriod = new LinkedHashMap<>();
         for (JsonElement el : data.getAsJsonArray("limits")) {
             if (!el.isJsonObject()) {
                 continue;
@@ -204,6 +241,17 @@ public final class ClaudePlanUsageService {
             Long resetsAtMs = asLong(lim, "nextResetTime", "next_reset_time");
             String resetAt = resetsAtMs != null ? Instant.ofEpochMilli(resetsAtMs).toString() : null;
 
+            JsonObject existing = byPeriod.get(period);
+            if (existing != null) {
+                if (pct > existing.get("used_pct").getAsDouble()) {
+                    existing.addProperty("used_pct", pct);
+                }
+                if (!existing.has("reset_at") && resetAt != null) {
+                    existing.addProperty("reset_at", resetAt);
+                }
+                continue;
+            }
+
             JsonObject w = new JsonObject();
             w.addProperty("id", period);
             w.addProperty("used_pct", pct);
@@ -211,32 +259,34 @@ public final class ClaudePlanUsageService {
                 w.addProperty("reset_at", resetAt);
             }
             w.addProperty("period_type", period);
-            windows.add(w);
-
-            if (firstPeriod == null) {
-                firstPeriod = period;
-            }
-            if ("5h".equals(period)) {
-                primary5h = pct;
-            }
-            if (maxPct == null || pct > maxPct) {
-                maxPct = pct;
-            }
+            byPeriod.put(period, w);
         }
-        if (windows.isEmpty()) {
+        if (byPeriod.isEmpty()) {
             return null;
         }
 
-        double capacity = primary5h != null ? primary5h : (maxPct != null ? maxPct : 0);
+        Double primary5h = null;
+        double maxPct = 0;
+        for (JsonObject w : byPeriod.values()) {
+            double pct = w.get("used_pct").getAsDouble();
+            if ("5h".equals(w.get("id").getAsString())) {
+                primary5h = pct;
+            }
+            if (pct > maxPct) {
+                maxPct = pct;
+            }
+        }
+
+        double capacity = primary5h != null ? primary5h : maxPct;
         JsonObject out = new JsonObject();
         out.addProperty("ok", true);
         out.addProperty("present", true);
         out.addProperty("provider", "claude");
         out.addProperty("source", "zai-quota-limit");
         out.addProperty("capacity_pct", capacity);
-        out.addProperty("period_type", firstPeriod);
+        out.addProperty("period_type", byPeriod.keySet().iterator().next());
         JsonArray arr = new JsonArray();
-        for (JsonObject w : windows) {
+        for (JsonObject w : byPeriod.values()) {
             arr.add(w);
         }
         out.add("windows", arr);
@@ -246,7 +296,12 @@ public final class ClaudePlanUsageService {
         return out;
     }
 
-    /** Map a z.ai limit to a window id/period. unit: 3=hours(5h), 6=weeks(7d), 4=days(7d). */
+    /**
+     * Map a z.ai limit to a window id/period. Observed z.ai payloads use
+     * unit 3=hours (number=5 → 5h), unit 6=weeks (number=1 → 7d) and unit 4=days
+     * (number=7 → 7d). The {@code number} field is assumed to match those shapes —
+     * a hypothetical unit=4/number=1 (1-day) window would still be labelled 7d.
+     */
     static String zaiPeriod(JsonObject lim, String type) {
         if (type != null && type.toUpperCase().contains("TIME")) {
             return "monthly";
@@ -267,6 +322,10 @@ public final class ClaudePlanUsageService {
     }
 
     private static JsonObject httpGetJson(String url, String token) throws Exception {
+        ZaiTransport override = transportOverride;
+        if (override != null) {
+            return override.get(url, token);
+        }
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofMillis(HTTP_TIMEOUT_MS))
@@ -280,6 +339,21 @@ public final class ClaudePlanUsageService {
             throw new IllegalStateException("z.ai monitor HTTP " + resp.statusCode());
         }
         return JsonParser.parseString(resp.body()).getAsJsonObject();
+    }
+
+    /** Test-only: replace the HTTP transport. Pass null to restore the real one. */
+    static void setZaiTransportForTests(ZaiTransport transport) {
+        transportOverride = transport;
+    }
+
+    /** Test-only: drop the cached z.ai payload. */
+    static void resetZaiCacheForTests() {
+        cachedZai = null;
+    }
+
+    /** Transport seam for the z.ai monitor probe — production hits HTTP, tests substitute. */
+    interface ZaiTransport {
+        JsonObject get(String url, String token) throws Exception;
     }
 
     // ===== real Anthropic rate_limit_event =====
@@ -403,10 +477,12 @@ public final class ClaudePlanUsageService {
 
     private static final class ZaiCache {
         final long atMs;
+        final String key;
         final JsonObject payload;
 
-        ZaiCache(long atMs, JsonObject payload) {
+        ZaiCache(long atMs, String key, JsonObject payload) {
             this.atMs = atMs;
+            this.key = key;
             this.payload = payload;
         }
     }
