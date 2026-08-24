@@ -220,14 +220,22 @@ export function useFileTags({
       const hashIndex = filePath.indexOf('#');
       const pureFilePath = hashIndex !== -1 ? filePath.substring(0, hashIndex) : filePath;
       const pureFileName = pureFilePath.split(/[/\\]/).pop() || pureFilePath;
+      const isRegistered = pathMappingRef.current.has(pureFilePath)
+        || pathMappingRef.current.has(pureFileName)
+        || pathMappingRef.current.has(filePath);
+      if (isRegistered) return true;
+
+      // Preserve the existing single-reference fallback for a manually typed
+      // absolute path or line reference. With multiple @ markers, boundaries
+      // are ambiguous unless the insertion route registered the exact paths;
+      // accepting an absolute-looking fallback there can absorb ordinary text
+      // between two references (issue #1726).
+      const hasSingleAtMarker = currentText.indexOf('@') === currentText.lastIndexOf('@');
+      if (!hasSingleAtMarker) return false;
+
       const hasLineNumber = /#L\d+/.test(filePath);
       const isAbsolutePath = /^[a-zA-Z]:[/\\]/.test(filePath) || filePath.startsWith('/');
-
-      return pathMappingRef.current.has(pureFilePath)
-        || pathMappingRef.current.has(pureFileName)
-        || pathMappingRef.current.has(filePath)
-        || hasLineNumber
-        || isAbsolutePath;
+      return hasLineNumber || isAbsolutePath;
     };
 
     const matches = findMatches(currentText);

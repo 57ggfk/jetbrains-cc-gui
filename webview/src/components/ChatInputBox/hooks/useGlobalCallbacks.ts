@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { createTextFragment } from '../utils/selectionUtils.js';
 import { makeQuoteToken, registerQuote } from '../utils/quoteRegistry.js';
+import {
+  registerAbsoluteFileReference,
+  registerLineFileReference,
+} from '../utils/fileReferences.js';
 
 interface UseGlobalCallbacksOptions {
   editableRef: React.RefObject<HTMLDivElement | null>;
@@ -39,21 +43,14 @@ export function useGlobalCallbacks({
     /**
      * Insert a single file path into the input box
      */
-    const insertSingleFilePath = (filePath: string) => {
-      if (!editableRef.current) return;
+    const insertSingleFilePath = (filePath: string): boolean => {
+      if (!editableRef.current) return false;
 
-      const absolutePath = filePath.trim();
-      if (!absolutePath) return;
+      const absolutePath = registerAbsoluteFileReference(pathMappingRef.current, filePath);
+      if (!absolutePath) return false;
 
-      // Add path to path mapping
-      const fileName = absolutePath.split(/[/\\]/).pop() || absolutePath;
-
-      // Add path to pathMappingRef to make it a "valid reference"
-      pathMappingRef.current.set(fileName, absolutePath);
-      pathMappingRef.current.set(absolutePath, absolutePath);
-
-      // Insert file path into input box (auto-add @ prefix), add space to trigger rendering
-      const pathToInsert = (filePath.startsWith('@') ? filePath : `@${filePath}`) + ' ';
+      // File identity comes from exact registration, not inferred separators.
+      const pathToInsert = `@${absolutePath} `;
 
       const selection = window.getSelection();
       if (
@@ -99,37 +96,47 @@ export function useGlobalCallbacks({
         selection?.removeAllRanges();
         selection?.addRange(range);
       }
+      return true;
     };
 
-    window.handleFilePathFromJava = (filePathInput: string | string[]) => {
+    const normalizeFilePathInput = (
+      filePathInput: string | string[],
+      allowJsonArrayString: boolean,
+    ): string[] => {
+      if (Array.isArray(filePathInput)) {
+        return filePathInput.filter((filePath): filePath is string => typeof filePath === 'string');
+      }
+      if (typeof filePathInput !== 'string') return [];
+
+      if (allowJsonArrayString) {
+        try {
+          const parsed: unknown = JSON.parse(filePathInput);
+          if (Array.isArray(parsed)) {
+            return parsed.filter((filePath): filePath is string => typeof filePath === 'string');
+          }
+        } catch {
+          // Treat the legacy string as one path below.
+        }
+      }
+      return [filePathInput];
+    };
+
+    const insertFileReferences = (
+      filePathInput: string | string[],
+      allowJsonArrayString = false,
+    ) => {
       try {
         if (!editableRef.current) return;
 
-        // Normalize input to string array.
-        // Java side (v0.1.9+) passes a JS array directly via executeJavaScript,
-        // so Array.isArray branch is the primary path.
-        // The string branch is kept for backward compatibility with older Java
-        // versions that passed a single string. It can be removed once v0.1.8
-        // support is no longer needed.
-        let filePaths: string[];
-        if (Array.isArray(filePathInput)) {
-          filePaths = filePathInput;
-        } else if (typeof filePathInput === 'string') {
-          try {
-            const parsed: unknown = JSON.parse(filePathInput);
-            filePaths = Array.isArray(parsed) ? parsed : [filePathInput];
-          } catch {
-            filePaths = [filePathInput];
-          }
-        } else {
-          return;
-        }
-
-        // Insert all file paths
+        const filePaths = normalizeFilePathInput(filePathInput, allowJsonArrayString);
+        let insertedCount = 0;
         for (const filePath of filePaths) {
-          if (filePath && filePath.trim()) {
-            insertSingleFilePath(filePath.trim());
+          if (insertSingleFilePath(filePath)) {
+            insertedCount++;
           }
+        }
+        if (insertedCount === 0) {
+          return;
         }
 
         // Close all completion menus
@@ -146,8 +153,20 @@ export function useGlobalCallbacks({
           renderFileTags();
         });
       } catch (error) {
-        console.error('[useGlobalCallbacks] handleFilePathFromJava failed:', error);
+        console.error('[useGlobalCallbacks] insertFileReferencesAtCursor failed:', error);
       }
+    };
+
+    // Dedicated structured bridge used by the project-tree action. The Java
+    // side passes an actual array literal, while the string form supports one
+    // legacy path without guessing where spaces should split.
+    window.insertFileReferencesAtCursor = (filePathInput: string | string[]) => {
+      insertFileReferences(filePathInput);
+    };
+
+    // Keep the older callback for compatibility with existing integrations.
+    window.handleFilePathFromJava = (filePathInput: string | string[]) => {
+      insertFileReferences(filePathInput, true);
     };
 
     // Initial focus — but only if no other input/editable element is focused (B-013)
@@ -160,6 +179,7 @@ export function useGlobalCallbacks({
 
     // Cleanup function
     return () => {
+      delete window.insertFileReferencesAtCursor;
       delete window.handleFilePathFromJava;
     };
   }, [
@@ -244,15 +264,23 @@ export function useGlobalCallbacks({
       try {
         if (!editableRef.current) return;
 
+        // The generic bridge remains for selected code. Only the strict
+        // single line-number form is registered as a file reference; ordinary
+        // code and arbitrary @ text are inserted byte-for-byte as snippets.
+        const lineReference = registerLineFileReference(pathMappingRef.current, selectionInfo);
+        const normalizedSelectionInfo = lineReference
+          ? `@${lineReference}`
+          : selectionInfo;
+
         // Read caret BEFORE focus() to avoid focus side-effects on selection.
         // If caret is inside the editable, insert at caret. Otherwise (e.g. window
         // just regained focus from an external IDE action with no prior caret),
         // fall back to appending at the end with a leading newline separator.
-        const insertedAtCaret = tryInsertExternalSnippetAtCaret(selectionInfo);
+        const insertedAtCaret = tryInsertExternalSnippetAtCaret(normalizedSelectionInfo);
 
         if (!insertedAtCaret) {
           editableRef.current.focus();
-          appendExternalSnippetToEnd(selectionInfo);
+          appendExternalSnippetToEnd(normalizedSelectionInfo);
         }
 
         // Trigger state update
@@ -356,5 +384,5 @@ export function useGlobalCallbacks({
       delete window.focusChatInput;
       delete window.addQuotedSnippet;
     };
-  }, [editableRef, getTextContent, renderFileTags, renderQuoteTags, adjustHeight, onInput, setHasContent, focusInput]);
+  }, [editableRef, pathMappingRef, getTextContent, renderFileTags, renderQuoteTags, adjustHeight, onInput, setHasContent, focusInput]);
 }
