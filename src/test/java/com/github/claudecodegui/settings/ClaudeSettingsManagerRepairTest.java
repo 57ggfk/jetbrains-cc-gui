@@ -7,10 +7,12 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -52,9 +54,17 @@ public class ClaudeSettingsManagerRepairTest {
 
     @After
     public void tearDown() throws Exception {
-        if (originalHomeDir != null) {
-            setCachedHomeDirectory(originalHomeDir);
-            originalHomeDir = null;
+        // Always restore the cached home — including when the original value
+        // was null (never initialized) — so later tests see the pristine state.
+        setCachedHomeDirectory(originalHomeDir);
+        originalHomeDir = null;
+        if (tempHome != null) {
+            try (java.util.stream.Stream<Path> paths = Files.walk(tempHome)) {
+                paths.sorted(Comparator.reverseOrder())
+                        .map(Path::toFile)
+                        .forEach(File::delete);
+            }
+            tempHome = null;
         }
     }
 
@@ -171,5 +181,21 @@ public class ClaudeSettingsManagerRepairTest {
         JsonObject after = manager.readClaudeSettings();
         assertTrue("user-added top-level field 'hooks' must remain", after.has("hooks"));
         assertEquals(42, after.get("custom").getAsInt());
+    }
+
+    /**
+     * A provider without settingsConfig (e.g. written by an older plugin
+     * version) is a graceful no-op — it must not throw on every window open,
+     * and must not create settings.json.
+     */
+    @Test
+    public void missingSettingsConfigIsAGracefulNoOp() throws Exception {
+        JsonObject provider = new JsonObject();
+        provider.addProperty("id", "p1");
+
+        boolean changed = manager.repairMissingProviderFields(provider);
+
+        assertFalse("missing settingsConfig must report no change", changed);
+        assertFalse("settings.json must not be created", Files.exists(settingsPath));
     }
 }

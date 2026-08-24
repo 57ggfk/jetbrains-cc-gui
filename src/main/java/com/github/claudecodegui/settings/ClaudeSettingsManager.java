@@ -462,7 +462,10 @@ public class ClaudeSettingsManager {
             throw new IllegalArgumentException("Provider cannot be null");
         }
         if (!provider.has("settingsConfig") || provider.get("settingsConfig").isJsonNull()) {
-            throw new IllegalArgumentException("Provider is missing settingsConfig");
+            // Older configs may predate settingsConfig — treat as nothing to
+            // repair rather than spamming a startup exception on every window open.
+            LOG.warn("[ClaudeSettingsManager] Provider is missing settingsConfig, nothing to repair");
+            return false;
         }
 
         JsonObject settingsConfig = provider.getAsJsonObject("settingsConfig");
