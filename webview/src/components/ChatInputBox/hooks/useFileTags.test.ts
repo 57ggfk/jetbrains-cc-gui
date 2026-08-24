@@ -71,6 +71,20 @@ describe('useFileTags', () => {
     expect(editable.textContent).toBe(rawText);
   });
 
+  it('keeps the manual absolute-path fallback when other @ markers are ordinary text', () => {
+    const editable = createEditable();
+    editable.textContent = 'email user@example.com about @/workspace/src/App.ts ';
+    mockSelection();
+
+    const { result } = setupHook(editable);
+
+    result.current.renderFileTags();
+
+    const tags = editable.querySelectorAll('.file-tag');
+    expect(tags.length).toBe(1);
+    expect(tags[0].getAttribute('data-file-path')).toBe('/workspace/src/App.ts');
+  });
+
   it('does not close completions or rewrite DOM for in-progress @query', () => {
     const editable = createEditable();
     editable.textContent = '@b';

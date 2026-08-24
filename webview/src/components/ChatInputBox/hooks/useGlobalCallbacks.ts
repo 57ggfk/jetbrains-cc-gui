@@ -41,16 +41,11 @@ export function useGlobalCallbacks({
   // Register global function to receive file path from Java
   useEffect(() => {
     /**
-     * Insert a single file path into the input box
+     * Insert text at the caret, or append at the end when the caret is not a
+     * valid insertion point inside the input box.
      */
-    const insertSingleFilePath = (filePath: string): boolean => {
-      if (!editableRef.current) return false;
-
-      const absolutePath = registerAbsoluteFileReference(pathMappingRef.current, filePath);
-      if (!absolutePath) return false;
-
-      // File identity comes from exact registration, not inferred separators.
-      const pathToInsert = `@${absolutePath} `;
+    const insertTextAtCaretOrEnd = (textToInsert: string) => {
+      if (!editableRef.current) return;
 
       const selection = window.getSelection();
       if (
@@ -65,7 +60,7 @@ export function useGlobalCallbacks({
         // deleteContents() - that wiped the existing content (#1700). Only a
         // collapsed caret is a real insertion point; otherwise append at end.
         if (!range.collapsed) {
-          const textNode = document.createTextNode(pathToInsert);
+          const textNode = document.createTextNode(textToInsert);
           editableRef.current.appendChild(textNode);
           const appendRange = document.createRange();
           appendRange.setStartAfter(textNode);
@@ -74,7 +69,7 @@ export function useGlobalCallbacks({
           selection.addRange(appendRange);
         } else {
           range.deleteContents();
-          const textNode = document.createTextNode(pathToInsert);
+          const textNode = document.createTextNode(textToInsert);
           range.insertNode(textNode);
 
           // Move cursor after inserted text
@@ -86,7 +81,7 @@ export function useGlobalCallbacks({
       } else {
         // Cursor not inside input box, append to end
         // Use appendChild instead of innerText to avoid breaking existing file tags
-        const textNode = document.createTextNode(pathToInsert);
+        const textNode = document.createTextNode(textToInsert);
         editableRef.current.appendChild(textNode);
 
         // Move cursor to end
@@ -96,6 +91,19 @@ export function useGlobalCallbacks({
         selection?.removeAllRanges();
         selection?.addRange(range);
       }
+    };
+
+    /**
+     * Insert a single file path into the input box
+     */
+    const insertSingleFilePath = (filePath: string): boolean => {
+      if (!editableRef.current) return false;
+
+      const absolutePath = registerAbsoluteFileReference(pathMappingRef.current, filePath);
+      if (!absolutePath) return false;
+
+      // File identity comes from exact registration, not inferred separators.
+      insertTextAtCaretOrEnd(`@${absolutePath} `);
       return true;
     };
 
@@ -129,13 +137,26 @@ export function useGlobalCallbacks({
         if (!editableRef.current) return;
 
         const filePaths = normalizeFilePathInput(filePathInput, allowJsonArrayString);
-        let insertedCount = 0;
+        let handledCount = 0;
         for (const filePath of filePaths) {
           if (insertSingleFilePath(filePath)) {
-            insertedCount++;
+            handledCount++;
+            continue;
+          }
+          // Never silently drop content from a Java bridge: a payload that
+          // fails strict registration (e.g. a legacy relative path) is kept
+          // as ordinary text instead of becoming an unrenderable file tag.
+          const plainText = filePath?.trim();
+          if (plainText) {
+            console.warn(
+              '[useGlobalCallbacks] Not an absolute file reference, inserting as plain text:',
+              plainText,
+            );
+            insertTextAtCaretOrEnd(`${plainText} `);
+            handledCount++;
           }
         }
-        if (insertedCount === 0) {
+        if (handledCount === 0) {
           return;
         }
 

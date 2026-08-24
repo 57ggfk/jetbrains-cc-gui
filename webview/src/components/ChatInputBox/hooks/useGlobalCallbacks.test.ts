@@ -257,6 +257,18 @@ describe('useGlobalCallbacks', () => {
     );
   });
 
+  it('keeps a legacy non-absolute payload as plain text instead of dropping it', () => {
+    const editable = createEditable();
+    const { getTextContent, pathMappingRef } = renderUseGlobalCallbacks(editable);
+
+    window.handleFilePathFromJava?.('docs/relative/note.md');
+    vi.runAllTimers();
+
+    expect(getTextContent()).toBe('docs/relative/note.md ');
+    expect(pathMappingRef.current.size).toBe(0);
+    expect(editable.querySelectorAll('.file-tag')).toHaveLength(0);
+  });
+
   it('keeps ordinary text separate across repeated external file insertions and reparsing', () => {
     const editable = createEditable();
     const { result } = renderFileReferenceHarness(editable);

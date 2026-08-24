@@ -226,12 +226,13 @@ export function useFileTags({
       if (isRegistered) return true;
 
       // Preserve the existing single-reference fallback for a manually typed
-      // absolute path or line reference. With multiple @ markers, boundaries
-      // are ambiguous unless the insertion route registered the exact paths;
-      // accepting an absolute-looking fallback there can absorb ordinary text
-      // between two references (issue #1726).
-      const hasSingleAtMarker = currentText.indexOf('@') === currentText.lastIndexOf('@');
-      if (!hasSingleAtMarker) return false;
+      // absolute path or line reference. Boundaries are only ambiguous when
+      // another @ marker also starts an absolute-looking path; ordinary @
+      // text (emails, annotations) must not disable the fallback. Accepting
+      // an absolute-looking fallback alongside another path-like marker can
+      // absorb ordinary text between two references (issue #1726).
+      const absoluteAtMarkers = currentText.match(/@(?=(?:[a-zA-Z]:[/\\]|\\\\|\/))/g);
+      if (absoluteAtMarkers !== null && absoluteAtMarkers.length > 1) return false;
 
       const hasLineNumber = /#L\d+/.test(filePath);
       const isAbsolutePath = /^[a-zA-Z]:[/\\]/.test(filePath) || filePath.startsWith('/');

@@ -155,6 +155,9 @@ public class ClaudeChatWindow {
     private volatile boolean slashCommandsFetched = false;
     private final AtomicBoolean restoredHistoryLoadStarted = new AtomicBoolean(false);
 
+    // Shared serializer for structured bridges (Gson instances are thread-safe).
+    private static final Gson GSON = new Gson();
+
     // Daemon event listener for AI title forwarding. Held so it can be removed on dispose.
     private DaemonBridge.DaemonEventListener titleEventListener;
     private volatile int fetchedSlashCommandsCount = 0;
@@ -2750,10 +2753,15 @@ public class ClaudeChatWindow {
 
         // Gson emits a JavaScript array literal, preserving each complete path
         // (including spaces) as one typed callback argument.
-        String pathsJson = new Gson().toJson(filePaths);
-        if (browser != null) {
-            browser.getComponent().requestFocus();
-        }
+        String pathsJson = GSON.toJson(filePaths);
+        // This method can run on a bridge callback thread (frontend-ready
+        // flush), so touch the Swing component on the EDT.
+        ApplicationManager.getApplication().invokeLater(() -> {
+            JBCefBrowser targetBrowser = this.browser;
+            if (!this.disposed && targetBrowser != null) {
+                targetBrowser.getComponent().requestFocus();
+            }
+        });
         executeJavaScriptCode("window.insertFileReferencesAtCursor?.(" + pathsJson + ");");
     }
 
