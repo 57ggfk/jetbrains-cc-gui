@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DSH_PRESETS, getUserDshPresetOptions } from '../types';
 import { useDropdownPosition } from '../../../hooks/useDropdownPosition';
@@ -28,17 +28,28 @@ const MODE_TEXT_STYLE: React.CSSProperties = {
 interface DshPresetSelectProps {
   value: string;
   onChange: (preset: string) => void;
+  embedded?: boolean;
+  triggerRef?: React.RefObject<HTMLElement | null>;
+  onClose?: () => void;
 }
 
-export const DshPresetSelect = ({ value, onChange }: DshPresetSelectProps) => {
+export const DshPresetSelect = ({
+  value,
+  onChange,
+  embedded = false,
+  triggerRef,
+  onClose,
+}: DshPresetSelectProps) => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { positionedStyle, recalculate } = useDropdownPosition({
-    buttonRef,
+  const { positionedStyle, maxHeight, maxWidth, recalculate } = useDropdownPosition({
+    buttonRef: (embedded ? triggerRef : buttonRef) as React.RefObject<HTMLElement | null>,
     dropdownRef,
     minWidth: 260,
+    maxWidth: 360,
+    submenu: embedded,
   });
 
   const options = useMemo(
@@ -66,10 +77,11 @@ export const DshPresetSelect = ({ value, onChange }: DshPresetSelectProps) => {
   const handleSelect = useCallback((presetId: string) => {
     onChange(presetId);
     setIsOpen(false);
-  }, [onChange]);
+    onClose?.();
+  }, [onChange, onClose]);
 
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (embedded || !isOpen) return undefined;
 
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -87,26 +99,31 @@ export const DshPresetSelect = ({ value, onChange }: DshPresetSelectProps) => {
       clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isOpen]);
+  }, [embedded, isOpen]);
 
-  return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        ref={buttonRef}
-        className="selector-button"
-        onClick={handleToggle}
-        title={t('dshPresets.title', { defaultValue: getPresetText(currentPreset.id, 'description') })}
-      >
-        <span className="codicon codicon-robot" />
-        <span className="selector-button-text">{getPresetText(currentPreset.id, 'label')}</span>
-        <span className={`codicon codicon-chevron-${isOpen ? 'up' : 'down'}`} style={CHEVRON_ICON_STYLE} />
-      </button>
+  useLayoutEffect(() => {
+    if (embedded || isOpen) {
+      recalculate();
+    }
+  }, [embedded, isOpen, recalculate]);
 
-      {isOpen && (
+  const dropdownStyle: React.CSSProperties = embedded
+    ? {
+        minWidth: 0,
+        maxWidth: maxWidth ?? 360,
+        maxHeight: maxHeight ? `${Math.min(300, maxHeight)}px` : '300px',
+        overflowY: 'auto',
+        ...positionedStyle,
+      }
+    : { ...DROPDOWN_STYLE, ...positionedStyle };
+
+  const renderDropdown = () => (
         <div
           ref={dropdownRef}
           className="selector-dropdown"
-          style={{ ...DROPDOWN_STYLE, ...positionedStyle }}
+          data-testid="dsh-preset-dropdown"
+          style={dropdownStyle}
+          onMouseEnter={(event) => event.stopPropagation()}
         >
           {options.map((preset) => (
             <div
@@ -127,7 +144,26 @@ export const DshPresetSelect = ({ value, onChange }: DshPresetSelectProps) => {
             </div>
           ))}
         </div>
-      )}
+  );
+
+  if (embedded) {
+    return renderDropdown();
+  }
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        ref={buttonRef}
+        className="selector-button"
+        onClick={handleToggle}
+        title={t('dshPresets.title', { defaultValue: getPresetText(currentPreset.id, 'description') })}
+      >
+        <span className="codicon codicon-robot" />
+        <span className="selector-button-text">{getPresetText(currentPreset.id, 'label')}</span>
+        <span className={`codicon codicon-chevron-${isOpen ? 'up' : 'down'}`} style={CHEVRON_ICON_STYLE} />
+      </button>
+
+      {isOpen && renderDropdown()}
     </div>
   );
 };

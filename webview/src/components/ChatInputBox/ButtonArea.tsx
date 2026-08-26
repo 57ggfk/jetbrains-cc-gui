@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { DEFAULT_CLAUDE_MODEL_ID } from './types';
-import { CodexFastModeSelect, ConfigSelect, DshPresetSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
+import { ConfigSelect, ModeSelect, ModelConfigSelect, ProviderSelect } from './selectors';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
@@ -294,9 +294,9 @@ export const ButtonArea = ({
           compact
         />
         <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
-        <ModelSelect
-          value={selectedModel}
-          onChange={handleModelSelect}
+        <ModelConfigSelect
+          selectedModel={selectedModel}
+          onModelSelect={handleModelSelect}
           models={availableModels}
           currentProvider={currentProvider}
           loading={cliModelsLoading}
@@ -305,14 +305,13 @@ export const ButtonArea = ({
           onAddModel={onAddModel}
           longContextEnabled={longContextEnabled}
           onLongContextChange={onLongContextChange}
+          reasoningEffort={reasoningEffort}
+          onReasoningChange={handleReasoningChange}
+          codexFastMode={codexFastMode}
+          onCodexFastModeChange={handleCodexFastModeChange}
+          dshPreset={dshPreset}
+          onDshPresetChange={handleDshPresetChange}
         />
-        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
-        {currentProvider === 'codex' && (
-          <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
-        )}
-        {currentProvider === 'dsh' && (
-          <DshPresetSelect value={dshPreset} onChange={handleDshPresetChange} />
-        )}
       </div>
 
       {/* Right side: tool buttons */}

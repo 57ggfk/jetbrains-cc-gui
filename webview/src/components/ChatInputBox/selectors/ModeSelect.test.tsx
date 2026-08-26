@@ -5,6 +5,7 @@ import { ModeSelect } from './ModeSelect';
 
 const LABELS: Record<string, string> = {
   'modes.default.label': 'Default Mode',
+  'modes.default.shortLabel': 'Default',
   'ompModes.default.label': 'Default',
   'ompModes.smol.label': 'Smol',
   'ompModes.slow.label': 'Slow',
@@ -88,6 +89,16 @@ describe('ModeSelect', () => {
 
     expect(screen.getByText('Plan')).toBeTruthy();
     expect(screen.getByText('Vision')).toBeTruthy();
+  });
+
+  it('shows a compact short label on the trigger and the full label in the menu', () => {
+    render(<ModeSelect value="default" onChange={vi.fn()} provider="claude" />);
+
+    expect(screen.getByRole('button').textContent).toContain('Default');
+    expect(screen.getByRole('button').textContent).not.toContain('Default Mode');
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('Default Mode')).toBeTruthy();
   });
 
   it('hides smol/slow for the claude provider while keeping the four claude modes', () => {
