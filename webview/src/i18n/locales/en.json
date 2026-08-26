@@ -658,7 +658,7 @@
         },
         "dsh": {
           "name": "DeepSeek Harness",
-          "description": "DeepSeek terminal agent harness (persistent dsh web host)"
+          "description": "DeepSeek terminal agent CLI (dsh)"
         }
       },
       "installDialog": {
@@ -678,7 +678,10 @@
       "moreComingSoon": "More coming soon",
       "copyPath": "Copy path",
       "dsh": {
-        "cardTitle": "DeepSeek Harness (DSH)",
+        "groupTitle": "DeepSeek Harness",
+        "cliRowTitle": "CLI install",
+        "cardTitle": "Local host",
+        "rowHint": "Start or adopt the local dsh web host",
         "hint": "One persistent local dsh web host serves all sessions; the plugin adopts a running host instead of spawning a second one.",
         "state": {
           "checking": "Checking…",
@@ -691,7 +694,8 @@
         "openWebUi": "Open DSH Web UI",
         "startHost": "Start host",
         "stopHost": "Stop host (plugin-spawned only)",
-        "autoStart": "Auto-start when needed"
+        "autoStart": "Auto-start when needed",
+        "moreActions": "More"
       }
     },
     "pluginModels": {

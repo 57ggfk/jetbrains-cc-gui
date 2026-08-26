@@ -870,7 +870,7 @@
         },
         "dsh": {
           "name": "DeepSeek Harness",
-          "description": "DeepSeek 終端智慧體宿主（常駐 dsh web）"
+          "description": "DeepSeek 終端智慧體 CLI（dsh）"
         }
       },
       "installDialog": {
@@ -890,7 +890,10 @@
       "moreComingSoon": "即將支援更多",
       "copyPath": "複製路徑",
       "dsh": {
-        "cardTitle": "DeepSeek Harness (DSH)",
+        "groupTitle": "DeepSeek Harness",
+        "cliRowTitle": "CLI 安裝",
+        "cardTitle": "本機宿主",
+        "rowHint": "啟動或接管本機 dsh web",
         "hint": "DSH 由本機一個常駐 dsh web 宿主承載所有工作階段；外掛會接管已在執行的宿主，而不會重複啟動。",
         "state": {
           "checking": "檢測中…",
@@ -903,7 +906,8 @@
         "openWebUi": "開啟 DSH Web UI",
         "startHost": "立即啟動",
         "stopHost": "關閉（僅限外掛啟動的宿主）",
-        "autoStart": "需要時自動啟動"
+        "autoStart": "需要時自動啟動",
+        "moreActions": "更多"
       }
     }
   },

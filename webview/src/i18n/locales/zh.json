@@ -658,7 +658,7 @@
         },
         "dsh": {
           "name": "DeepSeek Harness",
-          "description": "DeepSeek 终端智能体宿主（常驻 dsh web）"
+          "description": "DeepSeek 终端智能体 CLI（dsh）"
         }
       },
       "installDialog": {
@@ -678,7 +678,10 @@
       "moreComingSoon": "即将支持更多",
       "copyPath": "复制路径",
       "dsh": {
-        "cardTitle": "DeepSeek Harness (DSH)",
+        "groupTitle": "DeepSeek Harness",
+        "cliRowTitle": "CLI 安装",
+        "cardTitle": "本机宿主",
+        "rowHint": "启动或接管本机 dsh web",
         "hint": "DSH 由本机一个常驻 dsh web 宿主承载所有会话；插件会接管已在运行的宿主，而不会重复启动。",
         "state": {
           "checking": "检测中…",
@@ -691,7 +694,8 @@
         "openWebUi": "打开 DSH Web UI",
         "startHost": "立即启动",
         "stopHost": "关闭（仅限插件启动的宿主）",
-        "autoStart": "需要时自动启动"
+        "autoStart": "需要时自动启动",
+        "moreActions": "更多"
       }
     },
     "pluginModels": {

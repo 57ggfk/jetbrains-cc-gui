@@ -31,6 +31,8 @@ const translations: Record<string, string> = {
   'settings.cli.tools.omp.description': 'OMP desc',
   'settings.cli.tools.dsh.name': 'DeepSeek Harness',
   'settings.cli.tools.dsh.description': 'DSH desc',
+  'settings.cli.dsh.groupTitle': 'DeepSeek Harness',
+  'settings.cli.dsh.cliRowTitle': 'CLI install',
   'settings.cli.installDialog.title': 'Install {{name}}',
   'settings.cli.installDialog.lead': 'Lead {{name}} {{binary}}',
   'settings.cli.installDialog.stepOpenTerminal': 'Open terminal',
@@ -143,14 +145,47 @@ describe('CliSection', () => {
     expect(screen.getByText('PI CLI')).toBeTruthy();
     expect(screen.getByText('OMP CLI')).toBeTruthy();
     expect(screen.getByText('DeepSeek Harness')).toBeTruthy();
+    expect(screen.getByText('CLI install')).toBeTruthy();
+    expect(screen.queryByText('One product, two steps')).toBeNull();
     expect(screen.getByText('v1.2.3')).toBeTruthy();
     expect(screen.getByText('/Users/test/.grok/bin/grok')).toBeTruthy();
     expect(screen.getByText('More coming soon')).toBeTruthy();
 
+    const group = screen.getByTestId('dsh-group');
     const harness = screen.getByText('DeepSeek Harness');
+    const cliRow = screen.getByText('CLI install');
     const connection = screen.getByTestId('dsh-connection-card');
-    expect(harness.compareDocumentPosition(connection) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(group.contains(harness)).toBe(true);
+    expect(group.contains(cliRow)).toBe(true);
+    expect(group.contains(connection)).toBe(true);
+    expect(cliRow.compareDocumentPosition(connection) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('hides the local host card until the DSH CLI is detected as installed', async () => {
+    render(<CliSection />);
+
+    await act(async () => {
+      window.updateCliStatus?.(JSON.stringify({
+        grok: { id: 'grok', name: 'Grok CLI', binaryName: 'grok', installed: false },
+        kimi: { id: 'kimi', name: 'Kimi CLI', binaryName: 'kimi', installed: false },
+        opencode: { id: 'opencode', name: 'OpenCode', binaryName: 'opencode', installed: false },
+        pi: { id: 'pi', name: 'PI CLI', binaryName: 'pi', installed: false },
+        omp: { id: 'omp', name: 'OMP CLI', binaryName: 'omp', installed: false },
+        dsh: { id: 'dsh', name: 'DeepSeek Harness', binaryName: 'dsh', installed: false },
+      }));
+    });
+
+    expect(screen.getByText('DeepSeek Harness')).toBeTruthy();
+    expect(screen.getByText('CLI install')).toBeTruthy();
+    expect(screen.queryByText('Install the CLI first')).toBeNull();
+    expect(screen.queryByTestId('dsh-connection-card')).toBeNull();
+  });
+
+  it('does not show the local host card while CLI detection is still loading', async () => {
+    render(<CliSection />);
+    expect(screen.queryByTestId('dsh-connection-card')).toBeNull();
+    expect(screen.getByText('Loading')).toBeTruthy();
   });
 
   it('opens install guide dialog without auto-installing', async () => {
