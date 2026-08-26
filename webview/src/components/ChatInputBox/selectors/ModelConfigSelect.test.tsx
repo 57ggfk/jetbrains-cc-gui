@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { ModelConfigSelect } from './ModelConfigSelect';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelConfigSelect, SUBMENU_HOVER_DELAY_MS } from './ModelConfigSelect';
 
 vi.mock('antd/es/switch', () => ({
   default: ({
@@ -195,5 +195,82 @@ describe('ModelConfigSelect', () => {
     fireEvent.click(screen.getByTestId('context-switch'));
 
     expect(onLongContextChange).toHaveBeenCalledWith(false);
+  });
+
+  describe('submenu hover delay', () => {
+    const dshModels = [
+      { id: 'grok-4.6', label: 'Grok 4.6' },
+      { id: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash' },
+    ];
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('does not steal the model submenu while the pointer crosses the preset row', () => {
+      render(
+        <ModelConfigSelect
+          selectedModel="grok-4.6"
+          onModelSelect={vi.fn()}
+          models={dshModels}
+          currentProvider="dsh"
+          dshPreset=""
+          onDshPresetChange={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('model-config-trigger'));
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-model'));
+      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-preset'));
+      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+      expect(screen.queryByTestId('dsh-preset-dropdown')).toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_HOVER_DELAY_MS - 1);
+      });
+      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+      expect(screen.queryByTestId('dsh-preset-dropdown')).toBeNull();
+
+      // Arriving in the fly-out (which stops mouseenter bubbling) still
+      // cancels the pending preset switch.
+      fireEvent.mouseOver(screen.getByTestId('model-selector-dropdown'));
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_HOVER_DELAY_MS);
+      });
+      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+      expect(screen.queryByTestId('dsh-preset-dropdown')).toBeNull();
+    });
+
+    it('opens the preset submenu after the pointer rests on it, or immediately on click', () => {
+      render(
+        <ModelConfigSelect
+          selectedModel="grok-4.6"
+          onModelSelect={vi.fn()}
+          models={dshModels}
+          currentProvider="dsh"
+          dshPreset=""
+          onDshPresetChange={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('model-config-trigger'));
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-model'));
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-preset'));
+
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_HOVER_DELAY_MS);
+      });
+      expect(screen.getByTestId('dsh-preset-dropdown')).toBeTruthy();
+      expect(screen.queryByTestId('model-selector-dropdown')).toBeNull();
+
+      fireEvent.click(screen.getByTestId('model-config-option-model'));
+      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+    });
   });
 });

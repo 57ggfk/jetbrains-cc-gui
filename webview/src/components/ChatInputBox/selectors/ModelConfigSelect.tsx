@@ -54,6 +54,13 @@ const CONTEXT_SWITCH_STYLE: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+/**
+ * Delay before switching an already-open fly-out. The model list sits above
+ * the parent rows, so the pointer has to cross "Preset" / "Effort" to reach
+ * it; without a grace period those rows steal the submenu on the way.
+ */
+export const SUBMENU_HOVER_DELAY_MS = 200;
+
 type ActiveSubmenu = 'none' | 'model' | 'effort' | 'speed' | 'preset';
 
 interface ModelConfigSelectProps {
@@ -108,12 +115,66 @@ export const ModelConfigSelect = ({
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<ActiveSubmenu>('none');
+  const activeSubmenuRef = useRef<ActiveSubmenu>(activeSubmenu);
+  activeSubmenuRef.current = activeSubmenu;
+  const hoverTimerRef = useRef<number | undefined>(undefined);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelTriggerRef = useRef<HTMLDivElement>(null);
   const effortTriggerRef = useRef<HTMLDivElement>(null);
   const speedTriggerRef = useRef<HTMLDivElement>(null);
   const presetTriggerRef = useRef<HTMLDivElement>(null);
+
+  const clearHoverTimer = useCallback(() => {
+    if (hoverTimerRef.current !== undefined) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = undefined;
+    }
+  }, []);
+
+  const openSubmenu = useCallback((submenu: ActiveSubmenu) => {
+    clearHoverTimer();
+    setActiveSubmenu(submenu);
+  }, [clearHoverTimer]);
+
+  const scheduleSubmenu = useCallback((submenu: ActiveSubmenu) => {
+    if (activeSubmenuRef.current === submenu) {
+      clearHoverTimer();
+      return;
+    }
+    // First open can be immediate; only switching between fly-outs is delayed.
+    if (activeSubmenuRef.current === 'none') {
+      openSubmenu(submenu);
+      return;
+    }
+    clearHoverTimer();
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = undefined;
+      setActiveSubmenu(submenu);
+    }, SUBMENU_HOVER_DELAY_MS);
+  }, [clearHoverTimer, openSubmenu]);
+
+  const triggerRefFor = (submenu: ActiveSubmenu) => {
+    if (submenu === 'model') return modelTriggerRef.current;
+    if (submenu === 'preset') return presetTriggerRef.current;
+    if (submenu === 'effort') return effortTriggerRef.current;
+    if (submenu === 'speed') return speedTriggerRef.current;
+    return null;
+  };
+
+  /**
+   * Fly-outs stop mouseenter from bubbling. If the pointer crossed another
+   * row on the way, that row armed a delayed switch — arriving inside the
+   * already-open fly-out must cancel it.
+   */
+  const retainActiveSubmenu = useCallback((event: React.MouseEvent) => {
+    const current = activeSubmenuRef.current;
+    if (current === 'none') return;
+    const trigger = triggerRefFor(current);
+    if (trigger?.contains(event.target as Node)) {
+      clearHoverTimer();
+    }
+  }, [clearHoverTimer]);
 
   const { positionedStyle: mainPositionedStyle, recalculate: mainRecalculate } = useDropdownPosition({
     buttonRef,
@@ -183,21 +244,21 @@ export const ModelConfigSelect = ({
   const summaryText = summaryParts.join(' ');
 
   const closeMenu = useCallback(() => {
+    clearHoverTimer();
     setIsOpen(false);
     setActiveSubmenu('none');
-  }, []);
+  }, [clearHoverTimer]);
 
   const handleToggle = useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
     const nextOpen = !isOpen;
     setIsOpen(nextOpen);
+    clearHoverTimer();
+    setActiveSubmenu('none');
     if (nextOpen) {
-      setActiveSubmenu('none');
       mainRecalculate();
-    } else {
-      setActiveSubmenu('none');
     }
-  }, [isOpen, mainRecalculate]);
+  }, [clearHoverTimer, isOpen, mainRecalculate]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -229,9 +290,7 @@ export const ModelConfigSelect = ({
     }
   }, [isOpen, mainRecalculate, showEffortRow, showSpeed, showPreset, showContextRow]);
 
-  const openSubmenu = (submenu: ActiveSubmenu) => {
-    setActiveSubmenu(submenu);
-  };
+  useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
 
   return (
     <div style={WRAPPER_STYLE}>
@@ -266,6 +325,7 @@ export const ModelConfigSelect = ({
           className="selector-dropdown model-config-dropdown"
           data-testid="model-config-dropdown"
           style={{ ...DROPDOWN_STYLE, ...mainPositionedStyle }}
+          onMouseOverCapture={retainActiveSubmenu}
         >
           {showContextRow && (
             <div
@@ -276,7 +336,7 @@ export const ModelConfigSelect = ({
                 if (!contextSupported) return;
                 onLongContextChange?.(!longContextEnabled);
               }}
-              onMouseEnter={() => setActiveSubmenu('none')}
+              onMouseEnter={() => scheduleSubmenu('none')}
               style={CONTEXT_SWITCH_STYLE}
               title={contextSupported
                 ? t('models.longContext.tooltipEnabled')
@@ -300,7 +360,7 @@ export const ModelConfigSelect = ({
               ref={effortTriggerRef}
               className={`selector-option${activeSubmenu === 'effort' ? ' selected' : ''}`}
               data-testid="model-config-option-effort"
-              onMouseEnter={() => openSubmenu('effort')}
+              onMouseEnter={() => scheduleSubmenu('effort')}
               onClick={(event) => {
                 event.stopPropagation();
                 openSubmenu('effort');
@@ -331,7 +391,7 @@ export const ModelConfigSelect = ({
               ref={speedTriggerRef}
               className={`selector-option${activeSubmenu === 'speed' ? ' selected' : ''}`}
               data-testid="model-config-option-speed"
-              onMouseEnter={() => openSubmenu('speed')}
+              onMouseEnter={() => scheduleSubmenu('speed')}
               onClick={(event) => {
                 event.stopPropagation();
                 openSubmenu('speed');
@@ -360,7 +420,7 @@ export const ModelConfigSelect = ({
               ref={presetTriggerRef}
               className={`selector-option${activeSubmenu === 'preset' ? ' selected' : ''}`}
               data-testid="model-config-option-preset"
-              onMouseEnter={() => openSubmenu('preset')}
+              onMouseEnter={() => scheduleSubmenu('preset')}
               onClick={(event) => {
                 event.stopPropagation();
                 openSubmenu('preset');
@@ -390,7 +450,7 @@ export const ModelConfigSelect = ({
             ref={modelTriggerRef}
             className={`selector-option${activeSubmenu === 'model' ? ' selected' : ''}`}
             data-testid="model-config-option-model"
-            onMouseEnter={() => openSubmenu('model')}
+            onMouseEnter={() => scheduleSubmenu('model')}
             onClick={(event) => {
               event.stopPropagation();
               openSubmenu('model');
