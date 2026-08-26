@@ -363,11 +363,18 @@ public final class ClaudePlanUsageService {
         if (utilization == null || !Double.isFinite(utilization)) {
             return null;
         }
-        double pct = clampPct(utilization <= 1.0 ? utilization * 100.0 : utilization);
+        // The CLI documents utilization as a fraction of the window (0-1, and
+        // exceeding 1 when over capacity), so scale it to a percent. The <= 10
+        // guard only protects against a hypothetical already-percent payload
+        // (0-100) from being scaled twice.
+        double pct = clampPct(utilization <= 10.0 ? utilization * 100.0 : utilization);
 
-        Long resetsAtMs = asLong(rateLimitInfo, "resetsAt", "resets_at", "resetAt");
+        // resetsAt is unix epoch SECONDS in the CLI schema (the CLI computes
+        // `resetsAt - Date.now()/1000`), not millis — convert before use.
+        Long resetsAtSec = asLong(rateLimitInfo, "resetsAt", "resets_at", "resetAt");
+        Long resetsAtMs = resetsAtSec != null ? resetsAtSec * 1000L : null;
         String resetAt = resetsAtMs != null ? Instant.ofEpochMilli(resetsAtMs).toString() : null;
-        String periodType = resetsAtMs != null ? periodTypeFromResetMs(resetsAtMs) : "5h";
+        String periodType = periodTypeFromRateLimit(rateLimitInfo, resetsAtMs);
 
         JsonObject window = new JsonObject();
         window.addProperty("id", periodType);
@@ -395,6 +402,27 @@ public final class ClaudePlanUsageService {
             out.addProperty("rate_limit_status", status);
         }
         return out;
+    }
+
+    /**
+     * Window classification prefers the CLI-provided {@code rateLimitType}
+     * ({@code five_hour} / {@code seven_day} / {@code seven_day_sonnet} / …) over
+     * the reset-delta heuristic, which only survives as a fallback.
+     */
+    static String periodTypeFromRateLimit(JsonObject rateLimitInfo, Long resetsAtMs) {
+        String type = asString(rateLimitInfo, "rateLimitType");
+        if (type == null) {
+            type = asString(rateLimitInfo, "rate_limit_type");
+        }
+        if (type != null) {
+            if (type.startsWith("five_hour")) {
+                return "5h";
+            }
+            if (type.startsWith("seven_day")) {
+                return "7d";
+            }
+        }
+        return resetsAtMs != null ? periodTypeFromResetMs(resetsAtMs) : "5h";
     }
 
     static String periodTypeFromResetMs(long resetsAtMs) {
