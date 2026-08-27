@@ -879,6 +879,18 @@ export interface ChatInputBoxProps {
   messageQueue?: QueuedMessage[];
   /** Remove message from queue callback */
   onRemoveFromQueue?: (id: string) => void;
+  /** Update a queued message */
+  onUpdateQueue?: (id: string, content: string) => void;
+  /** Move a queued message one position earlier */
+  onMoveUpQueue?: (id: string) => void;
+  /** Move a queued message one position later */
+  onMoveDownQueue?: (id: string) => void;
+  /** Move a queued message to the next execution position */
+  onMoveToFrontQueue?: (id: string) => void;
+  /** Move a queued message to the last execution position */
+  onMoveToBackQueue?: (id: string) => void;
+  /** Move a queued message to the next execution position without interruption */
+  onInsertQueue?: (id: string) => void;
 
   /** Whether auto open file is enabled */
   autoOpenFileEnabled?: boolean;

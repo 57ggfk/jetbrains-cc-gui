@@ -24,6 +24,18 @@ export interface UseMessageQueueReturn {
   dequeue: (id: string) => void;
   /** Clear entire queue */
   clearQueue: () => void;
+  /** Update the content of a queued message */
+  update: (id: string, content: string) => void;
+  /** Move a queued message one position earlier */
+  moveUp: (id: string) => void;
+  /** Move a queued message one position later */
+  moveDown: (id: string) => void;
+  /** Move a queued message to the next execution position */
+  moveToFront: (id: string) => void;
+  /** Move a queued message to the last execution position */
+  moveToBack: (id: string) => void;
+  /** Move a queued message to the next execution position without interruption */
+  insert: (id: string) => void;
   /** Whether queue has items */
   hasQueuedMessages: boolean;
 }
@@ -66,6 +78,72 @@ export function useMessageQueue({
     setQueue([]);
   }, []);
 
+  // Update a queued message while preserving its metadata and position.
+  const update = useCallback((id: string, content: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(item => item.id === id);
+      if (index === -1) return prev;
+
+      const next = [...prev];
+      next[index] = { ...next[index], content };
+      return next;
+    });
+  }, []);
+
+  // Move a queued message one position earlier in logical execution order.
+  const moveUp = useCallback((id: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(item => item.id === id);
+      if (index <= 0) return prev;
+
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+      return next;
+    });
+  }, []);
+
+  // Move a queued message one position later in logical execution order.
+  const moveDown = useCallback((id: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(item => item.id === id);
+      if (index === -1 || index === prev.length - 1) return prev;
+
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
+      return next;
+    });
+  }, []);
+
+  // Move a queued message to the next execution position.
+  const moveToFront = useCallback((id: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(item => item.id === id);
+      if (index <= 0) return prev;
+
+      return [prev[index], ...prev.slice(0, index), ...prev.slice(index + 1)];
+    });
+  }, []);
+
+  // Move a queued message to the last execution position.
+  const moveToBack = useCallback((id: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(item => item.id === id);
+      if (index === -1 || index === prev.length - 1) return prev;
+
+      return [...prev.slice(0, index), ...prev.slice(index + 1), prev[index]];
+    });
+  }, []);
+
+  // Insert is a semantic alias for becoming the next queued execution.
+  const insert = useCallback((id: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(item => item.id === id);
+      if (index <= 0) return prev;
+
+      return [prev[index], ...prev.slice(0, index), ...prev.slice(index + 1)];
+    });
+  }, []);
+
   // Auto-execute next message when loading completes
   useEffect(() => {
     // Detect transition from loading to not loading
@@ -93,6 +171,12 @@ export function useMessageQueue({
     enqueue,
     dequeue,
     clearQueue,
+    update,
+    moveUp,
+    moveDown,
+    moveToFront,
+    moveToBack,
+    insert,
     hasQueuedMessages: queue.length > 0,
   };
 }

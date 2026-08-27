@@ -446,6 +446,12 @@ const App = () => {
     queue: messageQueue,
     enqueue: enqueueMessage,
     dequeue: dequeueMessage,
+    update: updateQueuedMessage,
+    moveUp: moveUpQueuedMessage,
+    moveDown: moveDownQueuedMessage,
+    moveToFront: moveQueuedMessageToFront,
+    moveToBack: moveQueuedMessageToBack,
+    insert: insertQueuedMessage,
   } = useMessageQueue({ isLoading: loading, onExecute: executeMessage });
 
   // handleSubmit with queue support (new session and local commands bypass loading check)
@@ -669,6 +675,12 @@ const App = () => {
               onLongContextChange={handleLongContextChange}
               messageQueue={messageQueue}
               onRemoveFromQueue={dequeueMessage}
+              onUpdateQueue={updateQueuedMessage}
+              onMoveUpQueue={moveUpQueuedMessage}
+              onMoveDownQueue={moveDownQueuedMessage}
+              onMoveToFrontQueue={moveQueuedMessageToFront}
+              onMoveToBackQueue={moveQueuedMessageToBack}
+              onInsertQueue={insertQueuedMessage}
             />
           </div>
           {currentView === 'history' && (
