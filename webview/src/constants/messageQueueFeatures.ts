@@ -8,5 +8,5 @@ export const MESSAGE_QUEUE_FEATURES = {
   reorder: true,
   insert: true,
   dragReorder: false,
-  interrupt: false,
+  interrupt: true,
 } as const;

@@ -17,6 +17,7 @@ function renderQueue(overrides: Partial<React.ComponentProps<typeof MessageQueue
     onMoveToFront: vi.fn(),
     onMoveToBack: vi.fn(),
     onInsert: vi.fn(),
+    onInterrupt: vi.fn(),
     ...overrides,
   };
 
@@ -89,5 +90,13 @@ describe('MessageQueue', () => {
 
     expect(props.onInsert).toHaveBeenCalledWith('last');
     expect(props.onRemove).toHaveBeenCalledWith('first');
+  });
+
+  it('routes the interrupt action to its callback with an accessible label', () => {
+    const { props } = renderQueue();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '打断当前任务并优先执行本条' })[0]);
+
+    expect(props.onInterrupt).toHaveBeenCalledWith('last');
   });
 });

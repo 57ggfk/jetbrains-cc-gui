@@ -126,6 +126,7 @@ export interface ChatScreenProps {
   onMoveToFrontQueue: ReturnType<typeof useMessageQueue>['moveToFront'];
   onMoveToBackQueue: ReturnType<typeof useMessageQueue>['moveToBack'];
   onInsertQueue: ReturnType<typeof useMessageQueue>['insert'];
+  onInterruptQueue: ReturnType<typeof useMessageQueue>['interruptAndSendNow'];
 }
 
 /**
@@ -156,7 +157,7 @@ export const ChatScreen = ({
   onStreamingEnabledChange,
   onAutoOpenFileEnabledChange, onLongContextChange,
   messageQueue, onRemoveFromQueue, onUpdateQueue, onMoveUpQueue, onMoveDownQueue,
-  onMoveToFrontQueue, onMoveToBackQueue, onInsertQueue,
+  onMoveToFrontQueue, onMoveToBackQueue, onInsertQueue, onInterruptQueue,
 }: ChatScreenProps) => {
   const { t } = useTranslation();
   const { messages, status, loading, isThinking, streamingActive, loadingStartTime, subagentHistories } = useMessages();
@@ -412,6 +413,7 @@ export const ChatScreen = ({
           onMoveToFrontQueue={onMoveToFrontQueue}
           onMoveToBackQueue={onMoveToBackQueue}
           onInsertQueue={onInsertQueue}
+          onInterruptQueue={onInterruptQueue}
           autoOpenFileEnabled={autoOpenFileEnabled}
           onAutoOpenFileEnabledChange={onAutoOpenFileEnabledChange}
           longContextEnabled={longContextEnabled}

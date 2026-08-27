@@ -40,6 +40,7 @@ export function ChatInputBoxHeader({
    onMoveToFrontQueue,
    onMoveToBackQueue,
    onInsertQueue,
+   onInterruptQueue,
    showOpenSourceBanner,
   onDismissOpenSourceBanner,
   autoOpenFileEnabled,
@@ -76,6 +77,7 @@ export function ChatInputBoxHeader({
    onMoveToFrontQueue?: (id: string) => void;
    onMoveToBackQueue?: (id: string) => void;
    onInsertQueue?: (id: string) => void;
+   onInterruptQueue?: (id: string) => void;
   showOpenSourceBanner?: boolean;
   onDismissOpenSourceBanner?: () => void;
   autoOpenFileEnabled?: boolean;
@@ -174,6 +176,7 @@ export function ChatInputBoxHeader({
            onMoveToFront={onMoveToFrontQueue}
            onMoveToBack={onMoveToBackQueue}
            onInsert={onInsertQueue}
+           onInterrupt={onInterruptQueue}
          />
       )}
 

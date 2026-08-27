@@ -20,6 +20,8 @@ export interface MessageQueueProps {
   onMoveToBack?: (id: string) => void;
   /** Insert item into the next execution position callback */
   onInsert?: (id: string) => void;
+  /** Interrupt the current task and prioritize an item callback */
+  onInterrupt?: (id: string) => void;
 }
 
 /**
@@ -35,6 +37,7 @@ export function MessageQueue({
   onMoveToFront,
   onMoveToBack,
   onInsert,
+  onInterrupt,
 }: MessageQueueProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -206,6 +209,20 @@ export function MessageQueue({
                       aria-label="插入到下一次执行"
                     >
                       <span className="codicon codicon-play" aria-hidden="true" />
+                    </button>
+                  )}
+                  {MESSAGE_QUEUE_FEATURES.interrupt && (
+                    <button
+                      type="button"
+                      className="message-queue-icon-button message-queue-interrupt"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onInterrupt?.(item.id);
+                      }}
+                      title="打断当前任务并优先执行本条"
+                      aria-label="打断当前任务并优先执行本条"
+                    >
+                      <span className="codicon codicon-stop" aria-hidden="true" />
                     </button>
                   )}
                   <button

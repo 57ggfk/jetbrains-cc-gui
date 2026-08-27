@@ -4,12 +4,14 @@ import { useMessageQueue } from './useMessageQueue.js';
 
 function createQueue(isLoading = true) {
   const onExecute = vi.fn();
+  const onInterrupt = vi.fn();
   const hook = renderHook(({ loading }) => useMessageQueue({
     isLoading: loading,
     onExecute,
+    onInterrupt,
   }), { initialProps: { loading: isLoading } });
 
-  return { ...hook, onExecute };
+  return { ...hook, onExecute, onInterrupt };
 }
 
 function enqueueMessages(result: ReturnType<typeof createQueue>['result'], ...contents: string[]) {
@@ -106,5 +108,37 @@ describe('useMessageQueue', () => {
       vi.runAllTimers();
     });
     expect(onExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it('prioritizes a queued message and interrupts while loading, then consumes it once', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute, onInterrupt } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+
+    act(() => result.current.interruptAndSendNow(result.current.queue[1].id));
+
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(onExecute).not.toHaveBeenCalled();
+
+    rerender({ loading: false });
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+  });
+
+  it('removes and executes a queued message immediately when idle', () => {
+    const { result, onExecute, onInterrupt } = createQueue(false);
+    enqueueMessages(result, 'first', 'second');
+
+    act(() => result.current.interruptAndSendNow(result.current.queue[1].id));
+
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(onInterrupt).not.toHaveBeenCalled();
   });
 });

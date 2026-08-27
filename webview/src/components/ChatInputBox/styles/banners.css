@@ -288,6 +288,11 @@
   color: #64b5f6;
 }
 
+.message-queue-interrupt:hover:not(:disabled) {
+  background: var(--error-color);
+  color: white;
+}
+
 .message-queue-item.is-editing {
   position: relative;
   z-index: 1;

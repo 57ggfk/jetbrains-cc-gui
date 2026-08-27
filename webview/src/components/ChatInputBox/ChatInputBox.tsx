@@ -133,6 +133,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
        onMoveToFrontQueue,
        onMoveToBackQueue,
        onInsertQueue,
+       onInterruptQueue,
        autoOpenFileEnabled,
       onAutoOpenFileEnabledChange,
       longContextEnabled = true,
@@ -695,6 +696,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
            onMoveToFrontQueue={onMoveToFrontQueue}
            onMoveToBackQueue={onMoveToBackQueue}
            onInsertQueue={onInsertQueue}
+           onInterruptQueue={onInterruptQueue}
            showOpenSourceBanner={showOpenSourceBanner}
           onDismissOpenSourceBanner={handleDismissOpenSourceBanner}
           autoOpenFileEnabled={autoOpenFileEnabled}

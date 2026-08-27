@@ -891,6 +891,8 @@ export interface ChatInputBoxProps {
   onMoveToBackQueue?: (id: string) => void;
   /** Move a queued message to the next execution position without interruption */
   onInsertQueue?: (id: string) => void;
+  /** Interrupt the current task and prioritize a queued message */
+  onInterruptQueue?: (id: string) => void;
 
   /** Whether auto open file is enabled */
   autoOpenFileEnabled?: boolean;

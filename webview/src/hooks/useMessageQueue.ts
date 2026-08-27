@@ -13,6 +13,8 @@ export interface UseMessageQueueOptions {
   isLoading: boolean;
   /** Callback to execute a message */
   onExecute: (content: string, attachments?: Attachment[]) => void;
+  /** Callback to interrupt the current task */
+  onInterrupt?: () => void;
 }
 
 export interface UseMessageQueueReturn {
@@ -36,6 +38,8 @@ export interface UseMessageQueueReturn {
   moveToBack: (id: string) => void;
   /** Move a queued message to the next execution position without interruption */
   insert: (id: string) => void;
+  /** Interrupt current task and prioritize the selected message */
+  interruptAndSendNow: (id: string) => void;
   /** Whether queue has items */
   hasQueuedMessages: boolean;
 }
@@ -47,8 +51,11 @@ export interface UseMessageQueueReturn {
 export function useMessageQueue({
   isLoading,
   onExecute,
+  onInterrupt,
 }: UseMessageQueueOptions): UseMessageQueueReturn {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
   const prevLoadingRef = useRef(isLoading);
   const isExecutingFromQueueRef = useRef(false);
 
@@ -144,6 +151,21 @@ export function useMessageQueue({
     });
   }, []);
 
+  const interruptAndSendNow = useCallback((id: string) => {
+    const item = queueRef.current.find(message => message.id === id);
+    if (!item) return;
+
+    if (isLoading) {
+      // 保留队列项，由 loading 状态切换后的既有消费逻辑恰好执行一次。
+      moveToFront(id);
+      onInterrupt?.();
+      return;
+    }
+
+    setQueue(prev => prev.filter(message => message.id !== id));
+    onExecute(item.content, item.attachments);
+  }, [isLoading, moveToFront, onInterrupt, onExecute]);
+
   // Auto-execute next message when loading completes
   useEffect(() => {
     // Detect transition from loading to not loading
@@ -177,6 +199,7 @@ export function useMessageQueue({
     moveToFront,
     moveToBack,
     insert,
+    interruptAndSendNow,
     hasQueuedMessages: queue.length > 0,
   };
 }
