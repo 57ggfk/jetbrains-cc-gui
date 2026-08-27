@@ -36,7 +36,7 @@
 - 当前队列本身是前端状态。
 - “插入”定义为移动到逻辑队首，等待当前轮自然结束后执行。
 - “打断”复用现有 `interrupt_session` 事件，不新增后端能力。
-- 打断后不立即发送 `send_message`，而是等待现有 loading 从 `true` 变为 `false` 后，由 hook 的既有自动消费逻辑发送逻辑队首，避免中断未完成时的竞态。
+- 打断后不立即发送 `send_message`，而是等待后端实际触发 `onStreamEnd` 后，再由 hook 消费逻辑队首；不能把前端本地 `loading` 从 `true` 变为 `false` 当作中断完成信号。
 
 ### 2. 保持局部改动
 
@@ -168,9 +168,9 @@
 ### 打断
 
 - `interruptAndSendNow(id)` 是 hook 对 UI 暴露的复合操作。
-- 忙碌时：先 `moveToFront(id)`，再调用 `onInterrupt?.()`；`onInterrupt` 由 `App.tsx` 传入现有 `interruptSession`（其内部会发送 `interrupt_session`）。
+- 忙碌时：先 `moveToFront(id)`，再调用 `onInterrupt?.()`；`onInterrupt` 由 `App.tsx` 传入现有 `interruptSession`（其内部会发送 `interrupt_session`）。目标项仅在后端 `onStreamEnd` 回调抵达后才消费发送。
 - 空闲时：从队列移除该项后，直接调用 `onExecute(content, attachments)`，不调用 `onInterrupt`。
-- 忙碌判断必须读取 hook 当前 render 的 `isLoading`，不由 `MessageQueue` 自行推断。
+- 忙碌判断必须读取 hook 当前 render 的 `isLoading`，不由 `MessageQueue` 自行推断；`interruptSession` 的本地 `loading=false` 不能提前放行消息发送。
 - 按钮提示：`打断当前任务并优先执行本条`；hover 使用红色弱警示。
 
 ### 删除
@@ -215,7 +215,7 @@ interruptAndSendNow: (id: string) => void;
 - `update` 接收的内容由调用方完成 trim；hook 不擅自丢弃用户输入中的换行。
 - `interruptAndSendNow` 在空闲直接执行时，必须先从队列移除，再调用 `onExecute`，防止被自动消费逻辑重复发送。
 - 保留现有 `enqueue`、`dequeue`、`clearQueue`、`hasQueuedMessages` 以及 loading 完成后自动执行 `queue[0]` 的行为。
-- 现有 `setTimeout(..., 50)` 与 `isExecutingFromQueueRef` 保留；本次不重构队列调度时机。
+- 现有 `setTimeout(..., 50)` 与 `isExecutingFromQueueRef` 保留；打断路径增加后端 `onStreamEnd` 放行，避免本地状态切换造成的调度竞态。
 
 ---
 
