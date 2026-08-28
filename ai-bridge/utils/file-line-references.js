@@ -12,7 +12,13 @@
  * act on with their file tools.
  */
 
-const LINE_REFERENCE_PATTERN = /@([^\s@]+)#L(\d+)(?:-L?(\d+))?/g;
+// The `@` must start the string or follow whitespace (`(?<!\S)`). Without the
+// anchor, mid-word `@` false-positives get mangled: `user@host.com#L5` would
+// become `user@host.com (lines 5)`, and refs quoted in code spans like
+// `` `@x/Y.java#L3` `` would be rewritten inside the user's pasted code.
+// Trade-off: `(@file#L1)` (parenthesized) is left untouched — acceptable,
+// since the plugin always emits references at a token boundary.
+const LINE_REFERENCE_PATTERN = /(?<!\S)@([^\s@]+)#L(\d+)(?:-L?(\d+))?/g;
 
 /**
  * @param {string} text

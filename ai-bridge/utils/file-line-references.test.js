@@ -35,6 +35,27 @@ test('leaves non-line references and unrelated text unchanged', () => {
   assert.equal(reformatFileLineReferences('text without references'), 'text without references');
 });
 
+test('reformats a reference after a newline', () => {
+  assert.equal(
+    reformatFileLineReferences('这是什么\n@E:/proj/Foo.java#L7 什么意思'),
+    '这是什么\n@E:/proj/Foo.java (lines 7) 什么意思',
+  );
+});
+
+test('does not rewrite a mid-word @ such as an email address', () => {
+  assert.equal(
+    reformatFileLineReferences('email me at user@host.com#L5 please'),
+    'email me at user@host.com#L5 please',
+  );
+});
+
+test('does not rewrite references quoted in a code span', () => {
+  assert.equal(
+    reformatFileLineReferences('use `@x/Y.java#L3` in code ticks'),
+    'use `@x/Y.java#L3` in code ticks',
+  );
+});
+
 test('passes through empty and non-string values', () => {
   assert.equal(reformatFileLineReferences(''), '');
   assert.equal(reformatFileLineReferences(null), null);
