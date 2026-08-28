@@ -11,6 +11,7 @@ import com.intellij.util.Alarm;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -46,7 +47,7 @@ public class SessionCallbackAdapter implements ClaudeSession.SessionCallback {
     private final AtomicBoolean streamEndStarted = new AtomicBoolean();
     private final AtomicBoolean streamEndSignalSent = new AtomicBoolean();
     private final AtomicLong streamGeneration = new AtomicLong();
-    private volatile String lastSessionId;
+    private final AtomicReference<String> lastSessionId = new AtomicReference<>();
 
     public SessionCallbackAdapter(
             StreamMessageCoalescer streamCoalescer,
@@ -138,11 +139,14 @@ public class SessionCallbackAdapter implements ClaudeSession.SessionCallback {
 
     @Override
     public void onSessionIdReceived(String sessionId) {
-        if (isInactive() || sessionId == null || sessionId.trim().isEmpty()
-                || sessionId.equals(lastSessionId)) {
+        if (isInactive() || sessionId == null || sessionId.trim().isEmpty()) {
             return;
         }
-        lastSessionId = sessionId;
+        // Atomic check-and-record: concurrent emissions of the same id are
+        // forwarded exactly once.
+        if (sessionId.equals(lastSessionId.getAndSet(sessionId))) {
+            return;
+        }
         LOG.info("Session ID: " + sessionId);
         jsTarget.callJavaScript("setSessionId", JsUtils.escapeJs(sessionId));
     }

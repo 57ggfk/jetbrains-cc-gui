@@ -205,9 +205,10 @@ public class HandlerContext {
     }
 
     /**
-     * Execute JavaScript on the EDT (Event Dispatch Thread).
+     * Execute JavaScript through the window's ordered webview event queue
+     * (which marshals to the EDT and batches with callback events).
      */
-    public void executeJavaScriptOnEDT(String jsCode) {
+    public void executeJavaScriptQueued(String jsCode) {
         if (this.disposed || this.jsCallback == null) {
             return;
         }

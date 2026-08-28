@@ -10,8 +10,11 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.Alarm;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.WeakHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -58,6 +61,15 @@ public class StreamMessageCoalescer {
     private long requestedDeliveryEpoch;
     private long deliveryEpoch;
     private LongConsumer requestedAfterFlush;
+    // A message's structural signature depends only on its raw tree, and the
+    // streaming handler reassigns `raw` instead of mutating content blocks in
+    // place (the in-place stamps — turnUsage / uuid / usage — are not part of
+    // the signature). An unchanged raw reference therefore yields the same
+    // signature, so cache by raw identity and recompute only for messages whose
+    // raw changed — typically just the actively-streaming one. Weak keys let
+    // entries for replaced raws and transport copies be garbage-collected.
+    private final Map<JsonObject, String> structuralSignatureCache =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     /**
      * Callback interface to push data to the webview.
@@ -95,6 +107,10 @@ public class StreamMessageCoalescer {
         // Delta-capable providers keep text flowing through the lightweight channel;
         // snapshots remain for structure and final reconciliation.
         String structuralSignature = getStructuralSignature(messages);
+        // Read outside the lock: this calls into HandlerContext, and a stale
+        // read only schedules (or skips) one push that the stream-end flush
+        // reconciles. Keep foreign calls out of the critical section.
+        boolean deltaChannelAvailable = hasDeltaChannel();
         boolean shouldSchedule;
         boolean active;
         synchronized (lock) {
@@ -105,7 +121,6 @@ public class StreamMessageCoalescer {
             boolean structuralChanged = !Objects.equals(latestStructuralSignature, structuralSignature);
             latestStructuralSignature = structuralSignature;
             active = streamActive;
-            boolean deltaChannelAvailable = hasDeltaChannel();
             snapshotPending = snapshotPending || !active || !deltaChannelAvailable || structuralChanged;
             shouldSchedule = !active || !deltaChannelAvailable || structuralChanged;
         }
@@ -353,13 +368,17 @@ public class StreamMessageCoalescer {
             try {
                 snapshotExecutor.execute(this::buildNextSnapshot);
             } catch (RuntimeException e) {
+                final LongConsumer orphanedCallback;
                 synchronized (lock) {
                     snapshotBuildRunning = false;
                     requestedSnapshot = null;
+                    orphanedCallback = requestedAfterFlush;
                     requestedAfterFlush = null;
                 }
                 LOG.warn("Failed to schedule message snapshot serialization: " + e.getMessage(), e);
-                runAfterFlush(afterFlush, sequence);
+                // Run the chained callbacks (which include afterFlush) so a
+                // stream-end signal riding this flush is never silently lost.
+                runAfterFlush(orphanedCallback, sequence);
             }
         }
     }
@@ -459,12 +478,17 @@ public class StreamMessageCoalescer {
             try {
                 snapshotExecutor.execute(this::buildNextSnapshot);
             } catch (RuntimeException e) {
+                final LongConsumer orphanedCallback;
+                final long orphanedSequence;
                 synchronized (lock) {
                     snapshotBuildRunning = false;
                     requestedSnapshot = null;
+                    orphanedCallback = requestedAfterFlush;
+                    orphanedSequence = requestedSequence;
                     requestedAfterFlush = null;
                 }
                 LOG.warn("Failed to continue message snapshot serialization: " + e.getMessage(), e);
+                runAfterFlush(orphanedCallback, orphanedSequence);
             }
         }
         if (!sent && afterFlush == null && LOG.isDebugEnabled()) {
@@ -524,7 +548,9 @@ public class StreamMessageCoalescer {
                 || previous.type == current.type
                 && previous.timestamp == current.timestamp
                 && Objects.equals(previous.content, current.content)
-                && Objects.equals(getMessageStructuralSignature(previous), getMessageStructuralSignature(current));
+                && Objects.equals(
+                        computeMessageStructuralSignature(previous.raw),
+                        computeMessageStructuralSignature(current.raw));
     }
 
     static List<ClaudeSession.Message> copyMessagesForTransport(List<ClaudeSession.Message> messages) {
@@ -538,7 +564,7 @@ public class StreamMessageCoalescer {
         return List.copyOf(copies);
     }
 
-    private static String getStructuralSignature(List<ClaudeSession.Message> messages) {
+    private String getStructuralSignature(List<ClaudeSession.Message> messages) {
         StringBuilder signature = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
             ClaudeSession.Message message = messages.get(i);
@@ -548,14 +574,23 @@ public class StreamMessageCoalescer {
                     .append(':')
                     .append(message.timestamp)
                     .append(':')
-                    .append(getMessageStructuralSignature(message))
+                    .append(getCachedMessageStructuralSignature(message))
                     .append(';');
         }
         return signature.toString();
     }
 
-    private static String getMessageStructuralSignature(ClaudeSession.Message message) {
-        JsonArray blocks = findContentArray(message.raw);
+    private String getCachedMessageStructuralSignature(ClaudeSession.Message message) {
+        JsonObject raw = message.raw;
+        if (raw == null) {
+            return "";
+        }
+        return structuralSignatureCache.computeIfAbsent(
+                raw, StreamMessageCoalescer::computeMessageStructuralSignature);
+    }
+
+    private static String computeMessageStructuralSignature(JsonObject raw) {
+        JsonArray blocks = findContentArray(raw);
         if (blocks == null) {
             return "";
         }
@@ -587,9 +622,7 @@ public class StreamMessageCoalescer {
                 appendElementSignature(signature, block, "src");
                 appendFieldSignature(signature, block, "mediaType");
             } else {
-                signature.append(element.toString().length())
-                        .append(':')
-                        .append(element.toString().hashCode());
+                appendValueSignature(signature, element.toString());
             }
             signature.append('|');
         }
@@ -625,9 +658,30 @@ public class StreamMessageCoalescer {
             signature.append(fieldName).append("=;");
             return;
         }
-        String value = block.get(fieldName).toString();
-        signature.append(fieldName)
-                .append('=').append(value.length()).append(':').append(value.hashCode()).append(';');
+        signature.append(fieldName).append('=');
+        appendValueSignature(signature, block.get(fieldName).toString());
+        signature.append(';');
+    }
+
+    /**
+     * Append a bounded signature for a serialized JSON value. Two independent
+     * hashes (Java string hash + FNV-1a) make a collision-driven missed
+     * structural change practically impossible; the stream-end full flush
+     * remains the final safety net.
+     */
+    private static void appendValueSignature(StringBuilder signature, String value) {
+        signature.append(value.length())
+                .append(':').append(value.hashCode())
+                .append(':').append(fnv1a(value));
+    }
+
+    private static int fnv1a(String value) {
+        int hash = 0x811c9dc5;
+        for (int i = 0; i < value.length(); i++) {
+            hash ^= value.charAt(i);
+            hash *= 0x01000193;
+        }
+        return hash;
     }
 
     private boolean hasDeltaChannel() {

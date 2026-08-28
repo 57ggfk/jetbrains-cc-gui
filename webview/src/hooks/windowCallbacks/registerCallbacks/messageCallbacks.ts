@@ -36,11 +36,16 @@ function getStructuralValueSignature(value: unknown): string {
   } catch {
     return '';
   }
+  // Two independent hashes (Java-style + FNV-1a) make a collision-driven
+  // missed structural change practically impossible.
   let hash = 0;
+  let fnv = 0x811c9dc5;
   for (let i = 0; i < serialized.length; i += 1) {
-    hash = ((hash << 5) - hash + serialized.charCodeAt(i)) | 0;
+    const code = serialized.charCodeAt(i);
+    hash = ((hash << 5) - hash + code) | 0;
+    fnv = Math.imul(fnv ^ code, 0x01000193);
   }
-  return `${serialized.length}:${hash}`;
+  return `${serialized.length}:${hash}:${fnv}`;
 }
 
 /**

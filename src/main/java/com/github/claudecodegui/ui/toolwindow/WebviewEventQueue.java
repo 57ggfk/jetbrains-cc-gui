@@ -150,7 +150,8 @@ final class WebviewEventQueue<T> {
             }
             if (pending.size() >= MAX_PENDING_EVENTS
                     && !dropOneDisposableEvent()
-                    && !dropOneDelta()) {
+                    && !dropOneDelta()
+                    && !(isLifecycle(call) && dropOneNonLifecycle())) {
                 LOG.warn("Dropping webview event because the bounded queue is full: "
                         + (call.functionName != null ? call.functionName : "raw"));
                 return;
@@ -298,6 +299,31 @@ final class WebviewEventQueue<T> {
             }
         }
         return false;
+    }
+
+    /**
+     * Drop the oldest event that is safe to lose so an incoming lifecycle event
+     * (stream start/end, snapshots, raw scripts) can still be queued. Without
+     * this, a full queue would silently discard onStreamEnd and leave the
+     * frontend stuck in the responding state.
+     */
+    private boolean dropOneNonLifecycle() {
+        Iterator<JsCall<T>> iterator = pending.iterator();
+        while (iterator.hasNext()) {
+            if (!isLifecycle(iterator.next())) {
+                iterator.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isLifecycle(JsCall<?> call) {
+        return call.rawScript != null
+                || isMessageSnapshot(call)
+                || isSnapshotResetBoundary(call)
+                || "onStreamEnd".equals(call.functionName)
+                || "onBlockReset".equals(call.functionName);
     }
 
     private static boolean isLatestOnly(JsCall<?> call) {
