@@ -7,6 +7,7 @@
  */
 
 import type { MutableRefObject } from 'react';
+import { MESSAGE_QUEUE_RESET_EVENT } from '../../constants/messageQueueEvents';
 import { forceWebviewRepaint } from '../../utils/forceWebviewRepaint';
 
 export interface ResetTransientUiStateOptions {
@@ -77,6 +78,9 @@ export const buildResetTransientUiState = (opts: ResetTransientUiStateOptions) =
     // Clear JCEF native-rendering ghosting left by the outgoing session's overlays
     // and input-box content after the transition unmounts/reflows them.
     forceWebviewRepaint('session-transition');
+    // 通知消息队列调度器重置：切换期间 onStreamStart/onStreamEnd 被 __sessionTransitioning
+    // 守卫拦截，处于等待相位的调度器永远等不到预期事件，必须显式复位避免卡死跨会话存活。
+    window.dispatchEvent(new CustomEvent(MESSAGE_QUEUE_RESET_EVENT));
   };
 };
 

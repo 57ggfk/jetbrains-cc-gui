@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Attachment } from '../components/ChatInputBox/types';
 import {
   MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT,
+  MESSAGE_QUEUE_RESET_EVENT,
   MESSAGE_QUEUE_STREAM_COMPLETED_EVENT,
   MESSAGE_QUEUE_STREAM_STARTED_EVENT,
   type MessageQueueStreamCompletedDetail,
@@ -350,13 +351,31 @@ export function useMessageQueue({
       }
     };
 
+    // 会话切换时重置调度器：切换期间流事件被 __sessionTransitioning 守卫拦截，
+    // 等待中的相位永远等不到预期事件，必须显式回 idle，避免卡死状态跨会话存活。
+    const handleQueueReset = () => {
+      schedulerStateRef.current = { phase: 'idle' };
+      // 递增 generation，使 releaseInterruptedTarget 挂起的 50ms execute 闭包因
+      // generation 不匹配而失效，切换后不再补发旧会话的目标消息。
+      schedulerGenerationRef.current += 1;
+      if (executeTimerRef.current != null) {
+        clearTimeout(executeTimerRef.current);
+        executeTimerRef.current = null;
+      }
+      // 旧会话遗留的 suppress 标记对新会话无意义，必须清掉，
+      // 否则新会话第一次 loading 下降会被误跳过，队首无法正常自动消费。
+      suppressLoadingAutoConsumeRef.current = false;
+    };
+
     window.addEventListener(MESSAGE_QUEUE_STREAM_STARTED_EVENT, handleStreamStarted);
     window.addEventListener(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, handleStreamCompleted);
     window.addEventListener(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, handleInterruptFailed);
+    window.addEventListener(MESSAGE_QUEUE_RESET_EVENT, handleQueueReset);
     return () => {
       window.removeEventListener(MESSAGE_QUEUE_STREAM_STARTED_EVENT, handleStreamStarted);
       window.removeEventListener(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, handleStreamCompleted);
       window.removeEventListener(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, handleInterruptFailed);
+      window.removeEventListener(MESSAGE_QUEUE_RESET_EVENT, handleQueueReset);
       if (executeTimerRef.current != null) {
         clearTimeout(executeTimerRef.current);
         executeTimerRef.current = null;

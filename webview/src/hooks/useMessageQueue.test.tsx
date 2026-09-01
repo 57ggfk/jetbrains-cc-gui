@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useMessageQueue } from './useMessageQueue.js';
 import {
   MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT,
+  MESSAGE_QUEUE_RESET_EVENT,
   MESSAGE_QUEUE_STREAM_COMPLETED_EVENT,
   MESSAGE_QUEUE_STREAM_STARTED_EVENT,
 } from '../constants/messageQueueEvents.js';
@@ -32,6 +33,12 @@ function dispatchInterruptFailed(message = 'interrupt failed') {
     window.dispatchEvent(new CustomEvent(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, {
       detail: { message },
     }));
+  });
+}
+
+function dispatchQueueReset() {
+  act(() => {
+    window.dispatchEvent(new CustomEvent(MESSAGE_QUEUE_RESET_EVENT));
   });
 }
 
@@ -361,5 +368,107 @@ describe('useMessageQueue', () => {
 
     expect(onExecute).toHaveBeenCalledTimes(1);
     expect(result.current.queue.map(item => item.content)).toEqual(['second']);
+  });
+
+  it('resets the scheduler to idle on session switch while waiting for the interrupted turn end', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute, onInterrupt } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    // 会话切换：旧轮次的完成事件不会再到达（被切换守卫拦截），调度器直接回 idle。
+    dispatchQueueReset();
+
+    // 切换前旧轮次迟到的完成事件必须被忽略，不能补发目标消息。
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    // 新一轮 loading 下降即可正常自动消费队首（队列内容跨会话保留）。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+  });
+
+  it('cancels the pending execute closure when reset arrives during waiting-for-queued-turn-start', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    // 目标已出队、50ms execute 闭包挂起中，此时发生会话切换。
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+
+    dispatchQueueReset();
+    act(() => vi.advanceTimersByTime(50));
+
+    // 挂起的闭包因 generation 不匹配失效，目标消息不补发、不丢失（目标项内容不在本项范围）。
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+
+    // 旧会话迟到的 STREAM_START 不得再驱动调度器。
+    dispatchStreamStarted(2);
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('first', undefined);
+    expect(result.current.queue).toEqual([]);
+  });
+
+  it('resets the scheduler to idle on session switch while waiting for the queued turn end', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+
+    dispatchStreamStarted(2);
+    // 目标轮次已起流、等待其结束时发生会话切换。
+    dispatchQueueReset();
+
+    // 切换后旧轮次的完成事件必须被忽略，不能连发队首。
+    dispatchStreamCompleted('sequence:20', 2, 20);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+
+    rerender({ loading: true });
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(2);
+    expect(onExecute).toHaveBeenNthCalledWith(2, 'first', undefined);
+    expect(result.current.queue).toEqual([]);
+  });
+
+  it('clears the suppressed loading auto-consume flag on session reset', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    // 打断失败会先置 suppress 标记；随后发生的会话切换必须清掉它。
+    act(() => result.current.interruptAndSendNow(targetId));
+    dispatchInterruptFailed();
+    dispatchQueueReset();
+
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
   });
 });
