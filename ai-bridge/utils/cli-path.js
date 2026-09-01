@@ -224,6 +224,58 @@ function pathExists(candidate) {
   }
 }
 
+/**
+ * Shells allowed for login-env probing: `$SHELL` is attacker-influenced, so only
+ * standard system/Homebrew shell binaries may be invoked.
+ */
+const ALLOWED_LOGIN_SHELLS = new Set([
+  '/bin/zsh', '/bin/bash', '/bin/sh',
+  '/usr/bin/zsh', '/usr/bin/bash', '/usr/bin/sh',
+  '/usr/local/bin/zsh', '/usr/local/bin/bash',
+  '/opt/homebrew/bin/zsh', '/opt/homebrew/bin/bash',
+  '/usr/local/bin/fish', '/opt/homebrew/bin/fish',
+]);
+
+/**
+ * Resolve a binary through the user's login shell (non-Windows only). Returns
+ * an absolute path or null. The binary name is an internal constant; the result
+ * is validated against the filesystem before use.
+ *
+ * @param {string} binaryName
+ * @param {string} [shellOverride] - test hook; defaults to allowlisted $SHELL
+ * @returns {string|null}
+ */
+export function whichViaLoginShell(binaryName, shellOverride) {
+  if (process.platform === 'win32') return null;
+  if (!/^[a-z0-9._-]+$/i.test(String(binaryName || ''))) return null;
+  let shell = shellOverride || process.env.SHELL || '';
+  if (!ALLOWED_LOGIN_SHELLS.has(shell)) {
+    shell = ['/bin/zsh', '/bin/bash', '/bin/sh'].find((candidate) => pathExists(candidate)) || '';
+  }
+  if (!shell) return null;
+  const fish = shell.endsWith('fish');
+  // -l -i: nvm/fnm/mise only export PATH from interactive login rc files.
+  const args = fish
+    ? ['-c', `command -v ${binaryName}`]
+    : ['-l', '-i', '-c', `command -v ${binaryName}`];
+  try {
+    const output = execFileSync(shell, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: process.env,
+      timeout: 8000,
+    });
+    const first = String(output || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (first && first.startsWith('/') && pathExists(first)) return first;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function whichOnPath(binaryName) {
   try {
     if (process.platform === 'win32') {
@@ -295,11 +347,18 @@ export function resolveCliPath({ binaryName, envKeys = [], homeCandidates = [] }
     for (const exeName of exeNames) {
       const resolved = template
         .replace('{home}', home)
+        .replace('{localAppData}', process.env.LOCALAPPDATA || join(home, 'AppData', 'Local'))
         .replace('{bin}', exeName)
         .replace('{name}', binaryName);
       if (pathExists(resolved)) return resolveWindowsSpawnableBin(resolved);
     }
   }
+
+  // Last resort: the user's login shell. IDE/daemon processes can run with a
+  // minimal PATH, so CLIs installed via nvm/fnm/mise/asdf or custom prefixes
+  // only become visible once the login rc files are sourced.
+  const fromShell = whichViaLoginShell(binaryName);
+  if (fromShell) return resolveWindowsSpawnableBin(fromShell);
 
   return binaryName;
 }
@@ -352,7 +411,12 @@ export function commonCliBinDirs(home = homedir()) {
     join(home, '.grok', 'bin'),
     join(home, '.pi', 'bin'),
     join(home, '.omp', 'bin'),
+    join(home, '.bun', 'bin'),
     join(home, '.claude', 'bin'),
+    join(home, '.yarn', 'bin'),
+    // pnpm global installs (PNPM_HOME defaults per platform)
+    join(home, 'Library', 'pnpm'),
+    join(home, '.local', 'share', 'pnpm'),
     join(home, '.local', 'bin'),
     join(home, '.cargo', 'bin'),
   );
@@ -360,6 +424,9 @@ export function commonCliBinDirs(home = homedir()) {
     // npm global bin dir on Windows (e.g. C:\Users\<user>\AppData\Roaming\npm).
     const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming');
     dirs.push(join(appData, 'npm'));
+    // OMP Windows native installer (e.g. C:\Users\<user>\AppData\Local\omp).
+    const localAppData = process.env.LOCALAPPDATA || join(home, 'AppData', 'Local');
+    dirs.push(join(localAppData, 'omp'));
     const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
     dirs.push(join(programFiles, 'nodejs'));
     const programFilesX86 = process.env['ProgramFiles(x86)'];
@@ -412,6 +479,9 @@ export function resolveOmpCliPath() {
     envKeys: ['OMP_BIN', 'OMP_PATH', 'OMP_CLI_PATH'],
     homeCandidates: [
       '{home}/.omp/bin/{bin}',
+      '{home}/.bun/bin/{bin}',
+      // Windows native installer: %LOCALAPPDATA%\omp\omp.exe
+      '{localAppData}/omp/{bin}',
       '{home}/.local/bin/{bin}',
     ],
   });

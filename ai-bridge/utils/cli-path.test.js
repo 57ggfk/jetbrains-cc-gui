@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   decodeCliOutput,
   isWindowsCmdShim,
@@ -8,7 +11,9 @@ import {
   selectWindowsWhereMatch,
   resolveWindowsSpawnableBin,
   resolveOmpCliPath,
+  resolveCliPath,
   commonCliBinDirs,
+  whichViaLoginShell,
 } from './cli-path.js';
 
 test('isWindowsCmdShim detects .cmd/.bat only on win32-style paths', () => {
@@ -137,6 +142,34 @@ test('resolveOmpCliPath honors OMP_BIN env override', () => {
   }
 });
 
+test('resolveCliPath expands {localAppData} candidates (OMP Windows installer layout)', () => {
+  // Fake a Windows native-installer layout: %LOCALAPPDATA%\omp\<binary>.
+  // A never-on-PATH binary name keeps which/login-shell lookups from short-circuiting.
+  const root = mkdtempSync(join(tmpdir(), 'ccgui-localappdata-'));
+  const binDir = join(root, 'omp');
+  mkdirSync(binDir, { recursive: true });
+  const name = 'ccgui-test-cli-9f8e7d';
+  for (const ext of process.platform === 'win32' ? ['.cmd', '.bat', '.exe', ''] : ['']) {
+    writeFileSync(join(binDir, name + ext), '');
+  }
+  const saved = process.env.LOCALAPPDATA;
+  try {
+    process.env.LOCALAPPDATA = root;
+    const resolved = resolveCliPath({
+      binaryName: name,
+      envKeys: [],
+      homeCandidates: ['{localAppData}/omp/{bin}'],
+    });
+    assert.ok(resolved.startsWith(binDir), `expected hit under ${binDir}, got ${resolved}`);
+  } finally {
+    if (saved === undefined) {
+      delete process.env.LOCALAPPDATA;
+    } else {
+      process.env.LOCALAPPDATA = saved;
+    }
+  }
+});
+
 test('commonCliBinDirs includes the OMP bin dir after the PI entry', () => {
   const dirs = commonCliBinDirs('/home/tester');
   const piIndex = dirs.indexOf('/home/tester/.pi/bin');
@@ -237,4 +270,29 @@ test('resolveCliSpawn file-redirect quotes both the shim and the dest path', () 
   assert.match(invocation.args[3], />/);
   assert.match(invocation.args[3], /models\.txt/);
   assert.equal(invocation.args[3].includes('C:\\Program'), false);
+});
+
+test('whichViaLoginShell rejects unsafe binary names without spawning', () => {
+  assert.equal(whichViaLoginShell(''), null);
+  assert.equal(whichViaLoginShell('omp; rm -rf /'), null);
+  assert.equal(whichViaLoginShell('../omp'), null);
+  assert.equal(whichViaLoginShell('$(whoami)'), null);
+});
+
+test('whichViaLoginShell resolves a PATH binary via an allowlisted shell', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('login-shell fallback is POSIX-only');
+    return;
+  }
+  // /bin/sh is always on PATH; `command -v sh` prints its absolute path.
+  const resolved = whichViaLoginShell('sh', '/bin/sh');
+  assert.equal(resolved, '/bin/sh');
+});
+
+test('whichViaLoginShell returns null for a missing binary', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('login-shell fallback is POSIX-only');
+    return;
+  }
+  assert.equal(whichViaLoginShell('definitely-not-a-real-cli-9f8e7d', '/bin/sh'), null);
 });
