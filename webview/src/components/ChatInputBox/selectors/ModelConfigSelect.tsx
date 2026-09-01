@@ -60,6 +60,12 @@ const CONTEXT_SWITCH_STYLE: React.CSSProperties = {
  * rows on the way; without a grace period those rows steal the submenu.
  */
 export const SUBMENU_HOVER_DELAY_MS = 200;
+/**
+ * Delay before opening the first fly-out on hover. The function rows sit at
+ * the popover's bottom edge — right where the pointer enters from the
+ * trigger — so an instant open would fire on every pass-through.
+ */
+export const SUBMENU_TRIGGER_DELAY_MS = 500;
 
 type ActiveSubmenu = 'none' | 'effort' | 'speed' | 'preset';
 
@@ -92,10 +98,9 @@ function getReasoningLabel(
 
 /**
  * Model-settings selector: one summary trigger whose popover keeps the model
- * list flat at the bottom, right next to the trigger — model switching is
- * the most frequent action and must not cross the submenu rows. Effort / 1M
- * context / Codex speed / DSH preset rows sit above it, with fly-out
- * submenus where a choice is needed.
+ * list flat at the top; the function rows (1M context / Codex speed / DSH
+ * preset / effort) sit below it, next to the trigger. Rows that offer a
+ * choice open fly-out submenus beside them.
  */
 export const ModelConfigSelect = ({
   selectedModel,
@@ -143,17 +148,17 @@ export const ModelConfigSelect = ({
       clearHoverTimer();
       return;
     }
-    // First open can be immediate; only switching between fly-outs is delayed.
-    if (activeSubmenuRef.current === 'none') {
-      openSubmenu(submenu);
-      return;
-    }
     clearHoverTimer();
+    // Opening the first fly-out waits longer than switching between open
+    // fly-outs: the pointer may only be crossing a row on its way elsewhere.
+    const delay = activeSubmenuRef.current === 'none'
+      ? SUBMENU_TRIGGER_DELAY_MS
+      : SUBMENU_HOVER_DELAY_MS;
     hoverTimerRef.current = window.setTimeout(() => {
       hoverTimerRef.current = undefined;
       setActiveSubmenu(submenu);
-    }, SUBMENU_HOVER_DELAY_MS);
-  }, [clearHoverTimer, openSubmenu]);
+    }, delay);
+  }, [clearHoverTimer]);
 
   const triggerRefFor = (submenu: ActiveSubmenu) => {
     if (submenu === 'preset') return presetTriggerRef.current;
@@ -325,36 +330,29 @@ export const ModelConfigSelect = ({
           style={{ ...DROPDOWN_STYLE, ...mainPositionedStyle }}
           onMouseOverCapture={retainActiveSubmenu}
         >
-          {showEffortRow && (
-            <div
-              ref={effortTriggerRef}
-              className={`selector-option${activeSubmenu === 'effort' ? ' selected' : ''}`}
-              data-testid="model-config-option-effort"
-              onMouseEnter={() => scheduleSubmenu('effort')}
-              onClick={(event) => {
-                event.stopPropagation();
-                openSubmenu('effort');
-              }}
-              style={OPTION_RELATIVE_STYLE}
-            >
-              <span style={OPTION_LABEL_STYLE}>{t('modelConfig.effort', { defaultValue: 'Effort' })}</span>
-              <div style={OPTION_VALUE_STYLE}>
-                <span>{effortLabel}</span>
-                <span className="codicon codicon-chevron-right" style={ARROW_ICON_STYLE} />
-              </div>
-              {activeSubmenu === 'effort' && (
-                <ReasoningSelect
-                  value={reasoningEffort}
-                  onChange={handleReasoningChange}
-                  selectedModel={selectedModel}
-                  currentProvider={currentProvider}
-                  embedded
-                  triggerRef={effortTriggerRef}
-                  onClose={closeMenu}
-                />
-              )}
-            </div>
-          )}
+          {/* The flat list has no hover row of its own; entering it must
+              dismiss any open fly-out (effort / speed / preset). It sits at
+              the top so model switching — the most frequent action — never
+              crosses the submenu rows. */}
+          <div onMouseEnter={() => scheduleSubmenu('none')}>
+            <ModelSelect
+              value={selectedModel}
+              onChange={onModelSelect}
+              models={models}
+              currentProvider={currentProvider}
+              loading={loading}
+              error={error}
+              onRetry={onRetry}
+              onAddModel={onAddModel}
+              longContextEnabled={longContextEnabled}
+              onLongContextChange={onLongContextChange}
+              inline
+              hideLongContextToggle
+              onClose={closeMenu}
+            />
+          </div>
+
+          {(showEffortRow || hasTrailingRows) && <div className="selector-divider" />}
 
           {showContextRow && (
             <div
@@ -442,29 +440,36 @@ export const ModelConfigSelect = ({
             </div>
           )}
 
-          {(showEffortRow || hasTrailingRows) && <div className="selector-divider" />}
-
-          {/* The flat list has no hover row of its own; entering it must
-              dismiss any open fly-out (effort / speed / preset). It sits at
-              the bottom, next to the trigger, so model switching — the most
-              frequent action — never crosses the submenu rows. */}
-          <div onMouseEnter={() => scheduleSubmenu('none')}>
-            <ModelSelect
-              value={selectedModel}
-              onChange={onModelSelect}
-              models={models}
-              currentProvider={currentProvider}
-              loading={loading}
-              error={error}
-              onRetry={onRetry}
-              onAddModel={onAddModel}
-              longContextEnabled={longContextEnabled}
-              onLongContextChange={onLongContextChange}
-              inline
-              hideLongContextToggle
-              onClose={closeMenu}
-            />
-          </div>
+          {showEffortRow && (
+            <div
+              ref={effortTriggerRef}
+              className={`selector-option${activeSubmenu === 'effort' ? ' selected' : ''}`}
+              data-testid="model-config-option-effort"
+              onMouseEnter={() => scheduleSubmenu('effort')}
+              onClick={(event) => {
+                event.stopPropagation();
+                openSubmenu('effort');
+              }}
+              style={OPTION_RELATIVE_STYLE}
+            >
+              <span style={OPTION_LABEL_STYLE}>{t('modelConfig.effort', { defaultValue: 'Effort' })}</span>
+              <div style={OPTION_VALUE_STYLE}>
+                <span>{effortLabel}</span>
+                <span className="codicon codicon-chevron-right" style={ARROW_ICON_STYLE} />
+              </div>
+              {activeSubmenu === 'effort' && (
+                <ReasoningSelect
+                  value={reasoningEffort}
+                  onChange={handleReasoningChange}
+                  selectedModel={selectedModel}
+                  currentProvider={currentProvider}
+                  embedded
+                  triggerRef={effortTriggerRef}
+                  onClose={closeMenu}
+                />
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
