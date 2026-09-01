@@ -513,8 +513,8 @@ export const OMP_MODELS: ModelInfo[] = [
 
 /**
  * OMP model roles — `omp --model <role>` resolves role names natively.
- * These always appear in the omp model dropdown; the mode selector is a
- * shortcut that sets the model to the same role id.
+ * Shown in the mode selector (ModeSelect); selecting a role sets the model
+ * to the role id. They deliberately do NOT appear in the model dropdown.
  */
 export const OMP_ROLE_MODELS: ModelInfo[] = [
   {

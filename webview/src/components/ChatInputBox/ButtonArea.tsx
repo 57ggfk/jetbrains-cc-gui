@@ -148,14 +148,13 @@ export const ButtonArea = ({
       provider: currentProvider,
       cliModels,
       cliCatalogHasEntries,
-      cliRoles: ompRoles,
       claudeCustomModels: getCustomClaudeModels(),
       codexCustomModels: getCustomCodexModels(),
       claudeMapping,
     });
     // customModelsVersion intentionally forces re-read of localStorage customs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProvider, customModelsVersion, cliModels, cliCatalogHasEntries, ompRoles]);
+  }, [currentProvider, customModelsVersion, cliModels, cliCatalogHasEntries]);
 
   // When a dynamic model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
@@ -172,7 +171,12 @@ export const ButtonArea = ({
     if (!cliCatalogHasEntries) return;
     if (cliModelsLoading) return;
     if (!availableModels.length || !onModelSelect) return;
-    const exists = availableModels.some((model) => model.id === selectedModel);
+    // OMP roles are not in the model list (they live in ModeSelect), so an
+    // active role must count as a valid selection — otherwise picking
+    // 'smol' in the mode selector would be clobbered back to the default
+    // the moment a catalog arrives.
+    const exists = availableModels.some((model) => model.id === selectedModel)
+      || (currentProvider === 'omp' && ompRoles.some((role) => role.id === selectedModel));
     if (!exists) {
       onModelSelect(cliDefaultModel ?? availableModels[0].id);
     }
@@ -184,6 +188,7 @@ export const ButtonArea = ({
     cliDefaultModel,
     cliCatalogHasEntries,
     cliModelsLoading,
+    ompRoles,
   ]);
 
   /**
