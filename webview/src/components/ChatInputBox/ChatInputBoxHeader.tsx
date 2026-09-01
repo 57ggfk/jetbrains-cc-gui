@@ -32,16 +32,16 @@ export function ChatInputBoxHeader({
   onRewind,
   statusPanelExpanded,
   onToggleStatusPanel,
-   messageQueue,
-   onRemoveFromQueue,
-   onUpdateQueue,
-   onMoveUpQueue,
-   onMoveDownQueue,
-   onMoveToFrontQueue,
-   onMoveToBackQueue,
-   onInsertQueue,
-   onInterruptQueue,
-   showOpenSourceBanner,
+  messageQueue,
+  onRemoveFromQueue,
+  onUpdateQueue,
+  onMoveUpQueue,
+  onMoveDownQueue,
+  onMoveToFrontQueue,
+  onMoveToBackQueue,
+  onInsertQueue,
+  onInterruptQueue,
+  showOpenSourceBanner,
   onDismissOpenSourceBanner,
   autoOpenFileEnabled,
   onRequestEnableFileContext,
@@ -69,15 +69,15 @@ export function ChatInputBoxHeader({
   onRewind?: () => void;
   statusPanelExpanded: boolean;
   onToggleStatusPanel?: () => void;
-   messageQueue?: QueuedMessage[];
-   onRemoveFromQueue?: (id: string) => void;
-   onUpdateQueue?: (id: string, content: string) => void;
-   onMoveUpQueue?: (id: string) => void;
-   onMoveDownQueue?: (id: string) => void;
-   onMoveToFrontQueue?: (id: string) => void;
-   onMoveToBackQueue?: (id: string) => void;
-   onInsertQueue?: (id: string) => void;
-   onInterruptQueue?: (id: string) => void;
+  messageQueue?: QueuedMessage[];
+  onRemoveFromQueue?: (id: string) => void;
+  onUpdateQueue?: (id: string, content: string) => void;
+  onMoveUpQueue?: (id: string) => void;
+  onMoveDownQueue?: (id: string) => void;
+  onMoveToFrontQueue?: (id: string) => void;
+  onMoveToBackQueue?: (id: string) => void;
+  onInsertQueue?: (id: string) => void;
+  onInterruptQueue?: (id: string) => void;
   showOpenSourceBanner?: boolean;
   onDismissOpenSourceBanner?: () => void;
   autoOpenFileEnabled?: boolean;
@@ -168,16 +168,16 @@ export function ChatInputBoxHeader({
       {/* Message queue */}
       {messageQueue && messageQueue.length > 0 && (
         <MessageQueue
-           queue={messageQueue}
-           onRemove={onRemoveFromQueue ?? (() => {})}
-           onUpdate={onUpdateQueue}
-           onMoveUp={onMoveUpQueue}
-           onMoveDown={onMoveDownQueue}
-           onMoveToFront={onMoveToFrontQueue}
-           onMoveToBack={onMoveToBackQueue}
-           onInsert={onInsertQueue}
-           onInterrupt={onInterruptQueue}
-         />
+          queue={messageQueue}
+          onRemove={onRemoveFromQueue ?? (() => {})}
+          onUpdate={onUpdateQueue}
+          onMoveUp={onMoveUpQueue}
+          onMoveDown={onMoveDownQueue}
+          onMoveToFront={onMoveToFrontQueue}
+          onMoveToBack={onMoveToBackQueue}
+          onInsert={onInsertQueue}
+          onInterrupt={onInterruptQueue}
+        />
       )}
 
       {/* Attachment list */}
