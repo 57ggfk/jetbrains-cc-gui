@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useMessageQueue } from './useMessageQueue.js';
 import {
+  MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT,
   MESSAGE_QUEUE_STREAM_COMPLETED_EVENT,
   MESSAGE_QUEUE_STREAM_STARTED_EVENT,
 } from '../constants/messageQueueEvents.js';
@@ -22,6 +23,14 @@ function dispatchStreamCompleted(
   act(() => {
     window.dispatchEvent(new CustomEvent(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, {
       detail: { completionId, turnId, sequence },
+    }));
+  });
+}
+
+function dispatchInterruptFailed(message = 'interrupt failed') {
+  act(() => {
+    window.dispatchEvent(new CustomEvent(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, {
+      detail: { message },
     }));
   });
 }
@@ -244,6 +253,91 @@ describe('useMessageQueue', () => {
 
     expect(onExecute).toHaveBeenCalledTimes(1);
     expect(onExecute).toHaveBeenCalledWith('second', attachments);
+  });
+
+  it('unlocks the scheduler on interrupt failure without sending, then consumes the head on a later loading drop', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute, onInterrupt } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    dispatchInterruptFailed();
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    // 失败回调早于 loading 下降：这次下降不能把队首发出去。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    rerender({ loading: true });
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+  });
+
+  it('does not send on interrupt failure after loading already dropped, then consumes the head on a later drop', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute, onInterrupt } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+
+    // 常见时序：interruptSession() 先把 loading 降下来，随后 interrupt() reject。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    dispatchInterruptFailed();
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    rerender({ loading: true });
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+  });
+
+  it('consumes the remaining queue head only once when the target turn ends and loading drops', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second', 'third');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    dispatchStreamCompleted('sequence:60', 6, 60);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first', 'third']);
+
+    dispatchStreamStarted(7);
+    rerender({ loading: true });
+    dispatchStreamCompleted('sequence:70', 7, 70);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(2);
+    expect(onExecute).toHaveBeenNthCalledWith(2, 'first', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['third']);
+
+    // 路径 B 的 50ms timer 先结束时，loading 下降不能把下一条也发出去。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(2);
+    expect(result.current.queue.map(item => item.content)).toEqual(['third']);
   });
 
   it('keeps normal stop/completion scheduling on loading and ignores completion events while idle', () => {

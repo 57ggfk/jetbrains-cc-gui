@@ -798,6 +798,12 @@ interface Window {
   onStreamEnd?: (sequence?: string | number) => void;
 
   /**
+   * Interrupt failed callback - called when backend interrupt() rejects.
+   * This must not go through onStreamEnd, otherwise the queue would release the head.
+   */
+  onInterruptFailed?: (message?: string) => void;
+
+  /**
    * Streaming heartbeat callback - lightweight signal from backend during
    * tool execution phases to prevent the stall watchdog from falsely triggering.
    */

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Attachment } from '../components/ChatInputBox/types';
 import {
+  MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT,
   MESSAGE_QUEUE_STREAM_COMPLETED_EVENT,
   MESSAGE_QUEUE_STREAM_STARTED_EVENT,
   type MessageQueueStreamCompletedDetail,
@@ -90,6 +91,7 @@ export function useMessageQueue({
   const schedulerStateRef = useRef<QueueSchedulerState>({ phase: 'idle' });
   const schedulerGenerationRef = useRef(0);
   const executeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressLoadingAutoConsumeRef = useRef(false);
 
   const scheduleQueueItem = useCallback((nextMessage: QueuedMessage) => {
     if (isExecutingFromQueueRef.current) return;
@@ -256,11 +258,16 @@ export function useMessageQueue({
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = isLoading;
+    if (!wasLoading || isLoading) return;
+
+    // 打断失败解锁、或目标轮次已由路径 B 消费队首时，跳过这一次 loading 下降，避免连发。
+    if (suppressLoadingAutoConsumeRef.current) {
+      suppressLoadingAutoConsumeRef.current = false;
+      return;
+    }
 
     if (
-      wasLoading
-      && !isLoading
-      && schedulerStateRef.current.phase === 'idle'
+      schedulerStateRef.current.phase === 'idle'
       && !isExecutingFromQueueRef.current
     ) {
       const nextMessage = queueRef.current[0];
@@ -320,17 +327,36 @@ export function useMessageQueue({
         if (detail.turnId !== schedulerState.turnId) return;
 
         schedulerStateRef.current = { phase: 'idle' };
+        // 目标轮次结束会伴随 loading 下降；这次队首由路径 B 消费，路径 A 必须跳过。
         const nextMessage = queueRef.current[0];
-        if (nextMessage) scheduleQueueItem(nextMessage);
+        if (nextMessage) {
+          if (prevLoadingRef.current) {
+            suppressLoadingAutoConsumeRef.current = true;
+          }
+          scheduleQueueItem(nextMessage);
+        }
         return;
+      }
+    };
+
+    const handleInterruptFailed = () => {
+      const currentState = schedulerStateRef.current;
+      if (currentState.phase !== 'waiting-for-interrupted-turn-end') return;
+
+      schedulerStateRef.current = { phase: 'idle' };
+      // 失败回调可能早于 interruptSession() 触发的 loading 下降；跳过那一次自动消费。
+      if (prevLoadingRef.current) {
+        suppressLoadingAutoConsumeRef.current = true;
       }
     };
 
     window.addEventListener(MESSAGE_QUEUE_STREAM_STARTED_EVENT, handleStreamStarted);
     window.addEventListener(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, handleStreamCompleted);
+    window.addEventListener(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, handleInterruptFailed);
     return () => {
       window.removeEventListener(MESSAGE_QUEUE_STREAM_STARTED_EVENT, handleStreamStarted);
       window.removeEventListener(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, handleStreamCompleted);
+      window.removeEventListener(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, handleInterruptFailed);
       if (executeTimerRef.current != null) {
         clearTimeout(executeTimerRef.current);
         executeTimerRef.current = null;

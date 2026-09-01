@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 /**
  * Session management message handler.
@@ -403,14 +404,27 @@ public class SessionHandler extends BaseMessageHandler {
      * Interrupt the current session.
      */
     private void handleInterruptSession() {
-        context.getSession().interrupt().thenRun(() -> {
+        context.getSession().interrupt().whenComplete((ignored, error) -> {
             ApplicationManager.getApplication().invokeLater(() -> {
+                if (error != null) {
+                    Throwable cause = error instanceof CompletionException && error.getCause() != null
+                            ? error.getCause()
+                            : error;
+                    LOG.error("Failed to interrupt session", cause);
+                    String message = cause.getMessage();
+                    if (message == null || message.isEmpty()) {
+                        message = "Interrupt failed";
+                    }
+                    // 失败只通知前端解锁队列调度，不能走 onStreamEnd，否则会误放行队首。
+                    context.callJavaScript("onInterruptFailed", escapeJs(message));
+                    return;
+                }
                 // [FIX] Notify frontend that stream has ended and reset loading state
                 // This ensures streamActive flag is reset and loading=false takes effect
                 context.callJavaScript("onStreamEnd");
                 context.callJavaScript("showLoading", "false");
             });
-        });
+        }).exceptionally(ex -> null);
     }
 
     /**

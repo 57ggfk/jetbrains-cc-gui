@@ -14,7 +14,9 @@ import { registerStreamingCallbacks } from './streamingCallbacks';
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
 import type { ClaudeMessage } from '../../../types';
 import {
+  MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT,
   MESSAGE_QUEUE_STREAM_COMPLETED_EVENT,
+  type MessageQueueInterruptFailedDetail,
   type MessageQueueStreamCompletedDetail,
 } from '../../../constants/messageQueueEvents';
 
@@ -298,6 +300,30 @@ describe('onStreamEnd queue scheduling signal', () => {
       }]);
     } finally {
       window.removeEventListener(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, listener);
+    }
+  });
+
+  it('dispatches interrupt failed without completing the stream', () => {
+    const completed: MessageQueueStreamCompletedDetail[] = [];
+    const failed: MessageQueueInterruptFailedDetail[] = [];
+    const completedListener = (event: Event) => {
+      completed.push((event as CustomEvent<MessageQueueStreamCompletedDetail>).detail);
+    };
+    const failedListener = (event: Event) => {
+      failed.push((event as CustomEvent<MessageQueueInterruptFailedDetail>).detail);
+    };
+    window.addEventListener(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, completedListener);
+    window.addEventListener(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, failedListener);
+
+    try {
+      createHarness([{ type: 'user', content: 'question' }], 0);
+      window.onInterruptFailed!('interrupt failed');
+
+      expect(completed).toEqual([]);
+      expect(failed).toEqual([{ message: 'interrupt failed' }]);
+    } finally {
+      window.removeEventListener(MESSAGE_QUEUE_STREAM_COMPLETED_EVENT, completedListener);
+      window.removeEventListener(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, failedListener);
     }
   });
 });

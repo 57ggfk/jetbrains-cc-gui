@@ -2,7 +2,7 @@
  * streamingCallbacks.ts
  *
  * Registers window bridge callbacks for streaming:
- * onStreamStart, onContentDelta, onThinkingDelta, onStreamEnd, onPermissionDenied.
+ * onStreamStart, onContentDelta, onThinkingDelta, onStreamEnd, onInterruptFailed, onPermissionDenied.
  */
 
 import { startTransition } from 'react';
@@ -13,8 +13,10 @@ import { THROTTLE_INTERVAL } from '../../useStreamingMessages';
 import { parseSequence } from '../parseSequence';
 import { getStreamEndHandlingMode } from '../messageSync';
 import {
+  MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT,
   MESSAGE_QUEUE_STREAM_COMPLETED_EVENT,
   MESSAGE_QUEUE_STREAM_STARTED_EVENT,
+  type MessageQueueInterruptFailedDetail,
   type MessageQueueStreamCompletedDetail,
   type MessageQueueStreamStartedDetail,
 } from '../../../constants/messageQueueEvents';
@@ -849,6 +851,11 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     if (isStreamingRef.current && window.__lastStreamActivityAt !== undefined) {
       window.__lastStreamActivityAt = Date.now();
     }
+  };
+
+  window.onInterruptFailed = (message?: string) => {
+    const detail: MessageQueueInterruptFailedDetail = { message };
+    window.dispatchEvent(new CustomEvent(MESSAGE_QUEUE_INTERRUPT_FAILED_EVENT, { detail }));
   };
 
   // Permission denied callback — kept as a no-op for backward compatibility.
