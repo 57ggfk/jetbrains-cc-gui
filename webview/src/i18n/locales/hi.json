@@ -878,7 +878,11 @@
       "listTitle": "स्थानीय CLI टूल",
       "summary": "{{installed}} / {{total}} स्थापित",
       "moreComingSoon": "जल्द और समर्थन",
-      "copyPath": "पथ कॉपी करें"
+      "copyPath": "पथ कॉपी करें",
+      "visibility": {
+        "hide": "प्रदाता स्विचर में छिपाएँ",
+        "show": "प्रदाता स्विचर में दिखाएँ"
+      }
     }
   },
   "history": {

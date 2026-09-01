@@ -1025,7 +1025,11 @@
       "listTitle": "Ferramentas CLI locais",
       "summary": "{{installed}} / {{total}} instaladas",
       "moreComingSoon": "Em breve, mais suporte",
-      "copyPath": "Copiar caminho"
+      "copyPath": "Copiar caminho",
+      "visibility": {
+        "hide": "Ocultar no seletor de provedor",
+        "show": "Mostrar no seletor de provedor"
+      }
     }
   },
   "history": {

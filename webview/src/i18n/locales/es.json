@@ -878,7 +878,11 @@
       "listTitle": "Herramientas CLI locales",
       "summary": "{{installed}} / {{total}} instaladas",
       "moreComingSoon": "Pronto más compatibilidad",
-      "copyPath": "Copiar ruta"
+      "copyPath": "Copiar ruta",
+      "visibility": {
+        "hide": "Ocultar en el selector de proveedor",
+        "show": "Mostrar en el selector de proveedor"
+      }
     }
   },
   "history": {

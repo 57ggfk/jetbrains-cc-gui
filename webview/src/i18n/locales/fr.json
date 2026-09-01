@@ -878,7 +878,11 @@
       "listTitle": "Outils CLI locaux",
       "summary": "{{installed}} / {{total}} installés",
       "moreComingSoon": "D’autres à venir",
-      "copyPath": "Copier le chemin"
+      "copyPath": "Copier le chemin",
+      "visibility": {
+        "hide": "Masquer dans le sélecteur de fournisseur",
+        "show": "Afficher dans le sélecteur de fournisseur"
+      }
     }
   },
   "history": {

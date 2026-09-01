@@ -888,6 +888,10 @@
       "summary": "{{installed}} / {{total}} 已安裝",
       "moreComingSoon": "即將支援更多",
       "copyPath": "複製路徑",
+      "visibility": {
+        "hide": "在切換選單中隱藏",
+        "show": "在切換選單中顯示"
+      },
       "dsh": {
         "groupTitle": "DeepSeek Harness",
         "cliRowTitle": "CLI 安裝",
@@ -1738,7 +1742,8 @@
     },
     "dsh": {
       "label": "DeepSeek Harness"
-    }
+    },
+    "manageCli": "CLI 設定管理"
   },
   "promptEnhancer": {
     "title": "Prompt Enhancer",

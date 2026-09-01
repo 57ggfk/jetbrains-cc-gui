@@ -972,7 +972,11 @@
       "listTitle": "로컬 CLI 도구",
       "summary": "{{installed}} / {{total}} 설치됨",
       "moreComingSoon": "곧 더 많은 CLI 지원 예정",
-      "copyPath": "경로 복사"
+      "copyPath": "경로 복사",
+      "visibility": {
+        "hide": "제공자 전환 메뉴에서 숨기기",
+        "show": "제공자 전환 메뉴에 표시"
+      }
     }
   },
   "history": {

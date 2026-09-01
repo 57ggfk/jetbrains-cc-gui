@@ -851,6 +851,8 @@ export interface ChatInputBoxProps {
   onOpenPromptSettings?: () => void;
   /** Open model settings (navigate to provider management to add models) */
   onOpenModelSettings?: () => void;
+  /** Open CLI management settings (Settings → Providers → CLI) */
+  onOpenCliSettings?: () => void;
 
   /** Whether has messages (for rewind button display) */
   hasMessages?: boolean;
@@ -947,6 +949,8 @@ export interface ButtonAreaProps {
   onOpenAgentSettings?: () => void;
   /** Navigate to model management to add models */
   onAddModel?: () => void;
+  /** Open CLI management settings (Settings → Providers → CLI) */
+  onOpenCliSettings?: () => void;
   /** Whether long context (1M) is enabled */
   longContextEnabled?: boolean;
   /** Toggle long context callback */
