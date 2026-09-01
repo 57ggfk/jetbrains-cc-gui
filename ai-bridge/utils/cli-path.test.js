@@ -13,6 +13,7 @@ import {
   resolveOmpCliPath,
   resolveCliPath,
   commonCliBinDirs,
+  versionManagerBinDirs,
   whichViaLoginShell,
 } from './cli-path.js';
 
@@ -166,6 +167,51 @@ test('resolveCliPath expands {localAppData} candidates (OMP Windows installer la
       delete process.env.LOCALAPPDATA;
     } else {
       process.env.LOCALAPPDATA = saved;
+    }
+  }
+});
+
+test('versionManagerBinDirs scans nvm/fnm roots newest-first and lists static managers', () => {
+  if (process.platform === 'win32') return;
+  const home = mkdtempSync(join(tmpdir(), 'cc-gui-vm-home-'));
+  mkdirSync(join(home, '.nvm', 'versions', 'node', 'v22.22.3', 'bin'), { recursive: true });
+  mkdirSync(join(home, '.nvm', 'versions', 'node', 'v24.11.1', 'bin'), { recursive: true });
+  mkdirSync(join(home, '.nvm', 'versions', 'node', 'v9.11.2', 'bin'), { recursive: true });
+  mkdirSync(join(home, '.local', 'share', 'fnm', 'node-versions', 'v20.1.0', 'installation', 'bin'), { recursive: true });
+  const dirs = versionManagerBinDirs(home);
+  // Static single-node managers are always listed.
+  assert.ok(dirs.includes(join(home, '.volta', 'bin')), 'expected volta bin dir');
+  assert.ok(dirs.includes(join(home, '.nvmd', 'bin')), 'expected nvmd bin dir');
+  // Numeric (not lexicographic) descending order: v24 > v22 > v9.
+  const nvmDirs = dirs.filter((dir) => dir.includes(join('.nvm', 'versions', 'node')));
+  assert.deepEqual(nvmDirs, [
+    join(home, '.nvm', 'versions', 'node', 'v24.11.1', 'bin'),
+    join(home, '.nvm', 'versions', 'node', 'v22.22.3', 'bin'),
+    join(home, '.nvm', 'versions', 'node', 'v9.11.2', 'bin'),
+  ]);
+  assert.ok(
+    dirs.includes(join(home, '.local', 'share', 'fnm', 'node-versions', 'v20.1.0', 'installation', 'bin')),
+    'expected fnm installation bin dir',
+  );
+});
+
+test('resolveCliPath finds a CLI shim installed under an nvm version dir', () => {
+  if (process.platform === 'win32') return;
+  const fakeHome = mkdtempSync(join(tmpdir(), 'cc-gui-nvm-home-'));
+  const binDir = join(fakeHome, '.nvm', 'versions', 'node', 'v22.22.3', 'bin');
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(binDir, 'cc-gui-fake-cli'), '#!/bin/sh\necho 1.0.0\n', { mode: 0o755 });
+  // resolveCliPath reads os.homedir(), which honors $HOME on POSIX.
+  const savedHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+  try {
+    const resolved = resolveCliPath({ binaryName: 'cc-gui-fake-cli', envKeys: [], homeCandidates: [] });
+    assert.equal(resolved, join(binDir, 'cc-gui-fake-cli'));
+  } finally {
+    if (savedHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = savedHome;
     }
   }
 });

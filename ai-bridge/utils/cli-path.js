@@ -13,7 +13,7 @@
  * and launch `.cmd`/`.bat` via `cmd.exe /d /s /c` (see `resolveCliSpawn`).
  */
 
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join, isAbsolute, win32 as pathWin32 } from 'path';
 import { execFileSync, execSync } from 'child_process';
@@ -354,6 +354,16 @@ export function resolveCliPath({ binaryName, envKeys = [], homeCandidates = [] }
     }
   }
 
+  // Version managers (nvm/fnm/mise/asdf) and other well-known bin dirs. This
+  // must stay in sync with the spawn PATH enrichment in commonCliBinDirs so a
+  // resolved path can actually launch.
+  for (const dir of commonCliBinDirs(home)) {
+    for (const exeName of exeNames) {
+      const resolved = join(dir, exeName);
+      if (pathExists(resolved)) return resolveWindowsSpawnableBin(resolved);
+    }
+  }
+
   // Last resort: the user's login shell. IDE/daemon processes can run with a
   // minimal PATH, so CLIs installed via nvm/fnm/mise/asdf or custom prefixes
   // only become visible once the login rc files are sourced.
@@ -396,6 +406,70 @@ export function resolveGrokCliPath() {
 }
 
 /**
+ * Node version-manager global bin dirs. IDEs launched from Finder/launchd get
+ * a sparse PATH, so npm CLIs installed under nvm/fnm/mise/asdf version dirs are
+ * invisible unless the login shell is sourced — and the login-shell fallback is
+ * fragile (slow or stdin-blocking rc files). Scan the well-known roots directly.
+ *
+ * Each dir also contains its own `node`, so adding these to the spawn PATH lets
+ * `#!/usr/bin/env node` npm shims launch. Newest versions first.
+ *
+ * @param {string} [home]
+ * @returns {string[]}
+ */
+export function versionManagerBinDirs(home = homedir()) {
+  const dirs = [];
+  if (!home) return dirs;
+  if (process.platform === 'win32') return dirs;
+  // Static single-node managers (bin dir sits next to the managed node).
+  dirs.push(
+    join(home, '.hermes', 'node', 'bin'),
+    join(home, '.volta', 'bin'),
+    join(home, '.fnm', 'aliases', 'default', 'bin'),
+    join(home, '.nvmd', 'bin'),
+  );
+  // Per-version managers: one global bin dir per installed node version.
+  const versionedRoots = [
+    { root: join(home, '.nvm', 'versions', 'node'), binSub: ['bin'] },
+    { root: join(home, '.local', 'share', 'fnm', 'node-versions'), binSub: ['installation', 'bin'] },
+    { root: join(home, '.local', 'share', 'mise', 'installs', 'node'), binSub: ['bin'] },
+    { root: join(home, '.asdf', 'installs', 'nodejs'), binSub: ['bin'] },
+  ];
+  for (const { root, binSub } of versionedRoots) {
+    for (const version of listVersionDirsDesc(root)) {
+      dirs.push(join(root, version, ...binSub));
+    }
+  }
+  return dirs;
+}
+
+/** Directory names under `root` that look like versions, newest first. */
+function listVersionDirsDesc(root) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+    .map((entry) => entry.name)
+    .filter((name) => /\d/.test(name))
+    .sort(compareVersionNamesDesc);
+}
+
+/** Numeric-descending compare for names like `v22.22.3` / `24.11.1`. */
+function compareVersionNamesDesc(a, b) {
+  const pa = a.split(/\D+/).filter(Boolean).map(Number);
+  const pb = b.split(/\D+/).filter(Boolean).map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pb[i] || 0) - (pa[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return a < b ? 1 : a > b ? -1 : 0;
+}
+
+/**
  * Common user-level CLI install dirs (IDE PATH is often sparse / no login shell).
  * Used both for binary resolution and spawn PATH enrichment.
  */
@@ -420,6 +494,9 @@ export function commonCliBinDirs(home = homedir()) {
     join(home, '.local', 'bin'),
     join(home, '.cargo', 'bin'),
   );
+  // Version-manager dirs carry both the npm-installed CLI shims and the `node`
+  // those `#!/usr/bin/env node` shims need at spawn time.
+  dirs.push(...versionManagerBinDirs(home));
   if (process.platform === 'win32') {
     // npm global bin dir on Windows (e.g. C:\Users\<user>\AppData\Roaming\npm).
     const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming');

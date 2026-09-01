@@ -254,8 +254,73 @@ public final class CliStatusDetector {
             // pnpm: macOS default PNPM_HOME is ~/Library/pnpm, Linux ~/.local/share/pnpm
             dirs.add(join(home, "Library", "pnpm"));
             dirs.add(join(home, ".local", "share", "pnpm"));
+            // Version managers (nvm/fnm/mise/asdf/...): npm -g shims land next to
+            // the managed node, invisible without sourcing the login shell.
+            dirs.addAll(versionManagerBinDirs(home));
         }
         return dirs;
+    }
+
+    /**
+     * Node version-manager global bin dirs (non-Windows). GUI-launched IDEs get
+     * a sparse launchd PATH, so CLIs installed via {@code npm -g} under nvm /
+     * fnm / mise / asdf version dirs only appear after the login shell is
+     * sourced — and that fallback is fragile (slow or stdin-blocking rc files).
+     * Scan the well-known roots directly; newest versions first. Mirrors
+     * {@code versionManagerBinDirs} in {@code ai-bridge/utils/cli-path.js}.
+     */
+    static List<String> versionManagerBinDirs(String home) {
+        List<String> dirs = new ArrayList<>();
+        if (home == null || home.isBlank()) {
+            return dirs;
+        }
+        // Static single-node managers (bin dir sits next to the managed node).
+        dirs.add(join(home, ".hermes", "node", "bin"));
+        dirs.add(join(home, ".volta", "bin"));
+        dirs.add(join(home, ".fnm", "aliases", "default", "bin"));
+        dirs.add(join(home, ".nvmd", "bin"));
+        // Per-version managers: one global bin dir per installed node version.
+        collectVersionBinDirs(dirs, join(home, ".nvm", "versions", "node"), "bin");
+        collectVersionBinDirs(dirs, join(home, ".local", "share", "fnm", "node-versions"),
+                "installation" + File.separator + "bin");
+        collectVersionBinDirs(dirs, join(home, ".local", "share", "mise", "installs", "node"), "bin");
+        collectVersionBinDirs(dirs, join(home, ".asdf", "installs", "nodejs"), "bin");
+        return dirs;
+    }
+
+    /** Append {@code <root>/<version>/<binSub>} for every version-looking child, newest first. */
+    private static void collectVersionBinDirs(List<String> out, String root, String binSub) {
+        File[] children = new File(root).listFiles();
+        if (children == null) {
+            return;
+        }
+        List<File> versions = new ArrayList<>();
+        for (File child : children) {
+            if (child.isDirectory() && child.getName().matches(".*\\d.*")) {
+                versions.add(child);
+            }
+        }
+        versions.sort((a, b) -> compareVersionNamesDesc(a.getName(), b.getName()));
+        for (File version : versions) {
+            File bin = new File(version, binSub);
+            if (bin.isDirectory()) {
+                out.add(bin.getAbsolutePath());
+            }
+        }
+    }
+
+    /** Numeric-descending compare for names like {@code v22.22.3} / {@code 24.11.1}. */
+    static int compareVersionNamesDesc(String a, String b) {
+        String[] pa = a.split("\\D+");
+        String[] pb = b.split("\\D+");
+        for (int i = 0; i < Math.max(pa.length, pb.length); i++) {
+            long va = i < pa.length && !pa[i].isEmpty() ? Long.parseLong(pa[i]) : 0;
+            long vb = i < pb.length && !pb[i].isEmpty() ? Long.parseLong(pb[i]) : 0;
+            if (va != vb) {
+                return Long.compare(vb, va);
+            }
+        }
+        return b.compareTo(a);
     }
 
     private static String[] envKeysFor(CliToolId tool) {
@@ -270,9 +335,13 @@ public final class CliStatusDetector {
     }
 
     private static ProbeResult probe(String candidate) {
+        // npm -g shims use a `#!/usr/bin/env node` shebang; their sibling `node`
+        // (same version-manager bin dir) is not on the IDE's sparse PATH, so the
+        // probe would die with exit 127 ("env: node: No such file or directory").
+        String siblingBinDir = parentDirOf(candidate);
         // Prefer --version; fall back to -v for tools that only support short flag.
         for (String flag : new String[]{"--version", "-v"}) {
-            ProcessResult result = run(List.of(candidate, flag));
+            ProcessResult result = run(List.of(candidate, flag), siblingBinDir);
             if (result.exitCode == 0 && result.stdout != null && !result.stdout.isBlank()) {
                 String version = extractVersion(result.stdout);
                 String path = resolveWhichLike(candidate);
@@ -405,13 +474,17 @@ public final class CliStatusDetector {
     }
 
     private static ProcessResult run(List<String> command) {
+        return run(command, null);
+    }
+
+    private static ProcessResult run(List<String> command, String extraBinDir) {
         Process process = null;
         try {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
             Map<String, String> env = pb.environment();
             // Ensure common user bin dirs are on PATH for IDE-launched processes.
-            enrichPath(env);
+            enrichPath(env, extraBinDir);
             process = pb.start();
             // Bound the wait first so a hung child cannot block the probe:
             // expected output is a tiny version string that will not fill the
@@ -448,7 +521,20 @@ public final class CliStatusDetector {
         }
     }
 
-    private static void enrichPath(Map<String, String> env) {
+    /** Absolute parent dir of a candidate path, or null for bare binary names. */
+    private static String parentDirOf(String candidate) {
+        if (candidate == null || candidate.isBlank()) {
+            return null;
+        }
+        File file = new File(candidate);
+        if (!file.isAbsolute()) {
+            return null;
+        }
+        File parent = file.getParentFile();
+        return parent != null ? parent.getAbsolutePath() : null;
+    }
+
+    private static void enrichPath(Map<String, String> env, String extraBinDir) {
         String home = PlatformUtils.getHomeDirectory();
         if (home == null || home.isBlank()) {
             return;
@@ -456,7 +542,12 @@ public final class CliStatusDetector {
         String pathKey = PlatformUtils.isWindows() ? "Path" : "PATH";
         String current = env.getOrDefault(pathKey, env.getOrDefault("PATH", ""));
         String sep = PlatformUtils.isWindows() ? ";" : ":";
-        List<String> extras = new ArrayList<>(List.of(
+        List<String> extras = new ArrayList<>();
+        if (extraBinDir != null && !extraBinDir.isBlank()) {
+            extras.add(extraBinDir);
+        }
+        extras.addAll(versionManagerBinDirs(home));
+        extras.addAll(List.of(
                 join(home, ".kimi-code", "bin"),
                 join(home, ".kimi", "bin"),
                 join(home, ".opencode", "bin"),
