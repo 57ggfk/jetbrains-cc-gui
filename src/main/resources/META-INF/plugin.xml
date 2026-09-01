@@ -60,7 +60,7 @@
             <li>即时获得 AI 驱动的代码辅助和智能建议</li>
         </ul>
 
-        <p><em>Keywords: Claude, Claude Code, Codex, OpenAI Codex, OpenCode, Gemini, Kimi, Grok, PI CLI, OMP, DeepSeek, Code Generation, AI Coding, AI Coding Assistant</em></p>
+        <p><em>Keywords: CCGUI, CC-GUI, Claude, Claude Code, Codex, OpenAI Codex, OpenCode, Gemini, Kimi, Grok, PI CLI, OMP, DeepSeek, Code Generation, AI Coding, AI Coding Assistant</em></p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>

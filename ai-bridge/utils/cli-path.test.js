@@ -330,9 +330,14 @@ test('whichViaLoginShell resolves a PATH binary via an allowlisted shell', (t) =
     t.skip('login-shell fallback is POSIX-only');
     return;
   }
-  // /bin/sh is always on PATH; `command -v sh` prints its absolute path.
+  // `sh` is always on PATH; `command -v sh` prints its absolute path. On
+  // distros where /bin symlinks to /usr/bin (e.g. Ubuntu CI runners) the
+  // resolved path is /usr/bin/sh instead of /bin/sh.
   const resolved = whichViaLoginShell('sh', '/bin/sh');
-  assert.equal(resolved, '/bin/sh');
+  assert.ok(
+    resolved === '/bin/sh' || resolved === '/usr/bin/sh',
+    `expected /bin/sh or /usr/bin/sh, got ${resolved}`,
+  );
 });
 
 test('whichViaLoginShell returns null for a missing binary', (t) => {
