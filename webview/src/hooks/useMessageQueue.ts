@@ -219,15 +219,8 @@ export function useMessageQueue({
     });
   }, []);
 
-  // Insert is a semantic alias for becoming the next queued execution.
-  const insert = useCallback((id: string) => {
-    setQueue(prev => {
-      const index = prev.findIndex(item => item.id === id);
-      if (index <= 0) return prev;
-
-      return [prev[index], ...prev.slice(0, index), ...prev.slice(index + 1)];
-    });
-  }, []);
+  // insert currently points to moveToFront temporarily and will be refactored later.
+  const insert = moveToFront;
 
   const interruptAndSendNow = useCallback((id: string) => {
     const item = queueRef.current.find(message => message.id === id);

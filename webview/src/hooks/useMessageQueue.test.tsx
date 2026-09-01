@@ -101,6 +101,7 @@ describe('useMessageQueue', () => {
     act(() => result.current.moveToBack(third.id));
     expect(result.current.queue.map(item => item.content)).toEqual(['first', 'second', 'third']);
 
+    expect(result.current.insert).toBe(result.current.moveToFront);
     act(() => result.current.insert(second.id));
     expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first', 'third']);
 
