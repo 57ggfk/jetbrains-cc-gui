@@ -3,9 +3,7 @@ import type { Attachment, SelectedAgent, QueuedMessage } from './types.js';
 import { AttachmentList } from './AttachmentList.js';
 import { ContextBar } from './ContextBar.js';
 import { MessageQueue } from './MessageQueue.js';
-import { openBrowser } from '../../utils/bridge';
-
-const GITHUB_REPO_URL = 'https://github.com/zhukunpenglinyutong/jetbrains-cc-gui';
+import { openBrowser, GITHUB_REPO_URL } from '../../utils/bridge';
 
 export function ChatInputBoxHeader({
   sdkStatusLoading,
