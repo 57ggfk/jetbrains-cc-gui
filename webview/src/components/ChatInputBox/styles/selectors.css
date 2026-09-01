@@ -48,7 +48,17 @@
 }
 
 .model-config-dropdown {
-  min-width: 220px;
+  min-width: 280px;
+}
+/* Flat inline model list inside the model-config popover (no own chrome) */
+.model-selector-inline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.model-selector-list--inline {
+  max-height: 260px;
 }
 
 .runtime-provider-name {

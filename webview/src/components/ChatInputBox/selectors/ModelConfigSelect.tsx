@@ -55,13 +55,13 @@ const CONTEXT_SWITCH_STYLE: React.CSSProperties = {
 };
 
 /**
- * Delay before switching an already-open fly-out. The model list sits above
- * the parent rows, so the pointer has to cross "Preset" / "Effort" to reach
- * it; without a grace period those rows steal the submenu on the way.
+ * Delay before switching an already-open fly-out. The effort fly-out sits
+ * beside its row, so the pointer may cross the 1M context / speed / preset
+ * rows on the way; without a grace period those rows steal the submenu.
  */
 export const SUBMENU_HOVER_DELAY_MS = 200;
 
-type ActiveSubmenu = 'none' | 'model' | 'effort' | 'speed' | 'preset';
+type ActiveSubmenu = 'none' | 'effort' | 'speed' | 'preset';
 
 interface ModelConfigSelectProps {
   selectedModel: string;
@@ -91,8 +91,11 @@ function getReasoningLabel(
 }
 
 /**
- * Nested model-settings selector: one summary trigger, fly-out submenus for
- * model / effort / context / Codex speed / DSH preset.
+ * Model-settings selector: one summary trigger whose popover keeps the model
+ * list flat at the bottom, right next to the trigger — model switching is
+ * the most frequent action and must not cross the submenu rows. Effort / 1M
+ * context / Codex speed / DSH preset rows sit above it, with fly-out
+ * submenus where a choice is needed.
  */
 export const ModelConfigSelect = ({
   selectedModel,
@@ -120,11 +123,9 @@ export const ModelConfigSelect = ({
   const hoverTimerRef = useRef<number | undefined>(undefined);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const modelTriggerRef = useRef<HTMLDivElement>(null);
   const effortTriggerRef = useRef<HTMLDivElement>(null);
   const speedTriggerRef = useRef<HTMLDivElement>(null);
   const presetTriggerRef = useRef<HTMLDivElement>(null);
-
   const clearHoverTimer = useCallback(() => {
     if (hoverTimerRef.current !== undefined) {
       window.clearTimeout(hoverTimerRef.current);
@@ -155,7 +156,6 @@ export const ModelConfigSelect = ({
   }, [clearHoverTimer, openSubmenu]);
 
   const triggerRefFor = (submenu: ActiveSubmenu) => {
-    if (submenu === 'model') return modelTriggerRef.current;
     if (submenu === 'preset') return presetTriggerRef.current;
     if (submenu === 'effort') return effortTriggerRef.current;
     if (submenu === 'speed') return speedTriggerRef.current;
@@ -210,6 +210,7 @@ export const ModelConfigSelect = ({
   const showSpeed = currentProvider === 'codex' && !!onCodexFastModeChange;
   const showPreset = currentProvider === 'dsh' && !!onDshPresetChange;
   const contextSupported = modelSupports1MContext(selectedModel);
+  const hasTrailingRows = showContextRow || showSpeed || showPreset;
 
   const modelLabel = currentModel
     ? resolveModelDisplayLabel(currentModel, {
@@ -232,8 +233,6 @@ export const ModelConfigSelect = ({
   const speedLabel = t(`codexFastMode.${codexFastMode}.label`, {
     defaultValue: codexFastMode === 'fast' ? 'Fast' : 'Standard',
   });
-  const hasLeadingRows = showContextRow || showEffortRow || showSpeed || showPreset;
-
   const summaryParts = [
     modelLabel,
     show1MContext ? t('models.longContext.label', { defaultValue: '1M' }) : '',
@@ -289,7 +288,6 @@ export const ModelConfigSelect = ({
       mainRecalculate();
     }
   }, [isOpen, mainRecalculate, showEffortRow, showSpeed, showPreset, showContextRow]);
-
   useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
 
   return (
@@ -327,34 +325,6 @@ export const ModelConfigSelect = ({
           style={{ ...DROPDOWN_STYLE, ...mainPositionedStyle }}
           onMouseOverCapture={retainActiveSubmenu}
         >
-          {showContextRow && (
-            <div
-              className="selector-option"
-              data-testid="model-config-option-context"
-              onClick={(event) => {
-                event.stopPropagation();
-                if (!contextSupported) return;
-                onLongContextChange?.(!longContextEnabled);
-              }}
-              onMouseEnter={() => scheduleSubmenu('none')}
-              style={CONTEXT_SWITCH_STYLE}
-              title={contextSupported
-                ? t('models.longContext.tooltipEnabled')
-                : t('models.longContext.tooltipDisabled')}
-            >
-              <span style={OPTION_LABEL_STYLE}>{t('modelConfig.context', { defaultValue: '1M Context' })}</span>
-              <Switch
-                size="small"
-                checked={contextSupported ? longContextEnabled : false}
-                disabled={!contextSupported}
-                onClick={(checked, event) => {
-                  event.stopPropagation();
-                  onLongContextChange?.(checked);
-                }}
-              />
-            </div>
-          )}
-
           {showEffortRow && (
             <div
               ref={effortTriggerRef}
@@ -383,6 +353,34 @@ export const ModelConfigSelect = ({
                   onClose={closeMenu}
                 />
               )}
+            </div>
+          )}
+
+          {showContextRow && (
+            <div
+              className="selector-option"
+              data-testid="model-config-option-context"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!contextSupported) return;
+                onLongContextChange?.(!longContextEnabled);
+              }}
+              onMouseEnter={() => scheduleSubmenu('none')}
+              style={CONTEXT_SWITCH_STYLE}
+              title={contextSupported
+                ? t('models.longContext.tooltipEnabled')
+                : t('models.longContext.tooltipDisabled')}
+            >
+              <span style={OPTION_LABEL_STYLE}>{t('modelConfig.context', { defaultValue: '1M Context' })}</span>
+              <Switch
+                size="small"
+                checked={contextSupported ? longContextEnabled : false}
+                disabled={!contextSupported}
+                onClick={(checked, event) => {
+                  event.stopPropagation();
+                  onLongContextChange?.(checked);
+                }}
+              />
             </div>
           )}
 
@@ -444,42 +442,28 @@ export const ModelConfigSelect = ({
             </div>
           )}
 
-          {hasLeadingRows && <div className="selector-divider" />}
+          {(showEffortRow || hasTrailingRows) && <div className="selector-divider" />}
 
-          <div
-            ref={modelTriggerRef}
-            className={`selector-option${activeSubmenu === 'model' ? ' selected' : ''}`}
-            data-testid="model-config-option-model"
-            onMouseEnter={() => scheduleSubmenu('model')}
-            onClick={(event) => {
-              event.stopPropagation();
-              openSubmenu('model');
-            }}
-            style={OPTION_RELATIVE_STYLE}
-          >
-            <span style={OPTION_LABEL_STYLE}>{t('modelConfig.model', { defaultValue: 'Model' })}</span>
-            <div style={OPTION_VALUE_STYLE}>
-              <span className="model-config-option-value-text">{modelLabel}</span>
-              <span className="codicon codicon-chevron-right" style={ARROW_ICON_STYLE} />
-            </div>
-            {activeSubmenu === 'model' && (
-              <ModelSelect
-                value={selectedModel}
-                onChange={onModelSelect}
-                models={models}
-                currentProvider={currentProvider}
-                loading={loading}
-                error={error}
-                onRetry={onRetry}
-                onAddModel={onAddModel}
-                longContextEnabled={longContextEnabled}
-                onLongContextChange={onLongContextChange}
-                embedded
-                hideLongContextToggle
-                triggerRef={modelTriggerRef}
-                onClose={closeMenu}
-              />
-            )}
+          {/* The flat list has no hover row of its own; entering it must
+              dismiss any open fly-out (effort / speed / preset). It sits at
+              the bottom, next to the trigger, so model switching — the most
+              frequent action — never crosses the submenu rows. */}
+          <div onMouseEnter={() => scheduleSubmenu('none')}>
+            <ModelSelect
+              value={selectedModel}
+              onChange={onModelSelect}
+              models={models}
+              currentProvider={currentProvider}
+              loading={loading}
+              error={error}
+              onRetry={onRetry}
+              onAddModel={onAddModel}
+              longContextEnabled={longContextEnabled}
+              onLongContextChange={onLongContextChange}
+              inline
+              hideLongContextToggle
+              onClose={closeMenu}
+            />
           </div>
         </div>
       )}
