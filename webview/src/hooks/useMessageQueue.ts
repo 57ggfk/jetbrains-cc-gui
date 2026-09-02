@@ -156,15 +156,56 @@ export function useMessageQueue({
     setQueue(prev => [...prev, newItem]);
   }, [generateId]);
 
+  /**
+   * 取消调度器等待相位中引用的目标消息（dequeue/clearQueue 删除目标时调用）。
+   * 仅在目标仍可撤回的两个相位生效：
+   * - waiting-for-interrupted-turn-end：目标仍在队列中，打断信号已发出但目标尚未补发；
+   * - waiting-for-queued-turn-start：目标已出队，但 50ms execute 闭包可能仍挂起。
+   * waiting-for-queued-turn-end 的目标已发送，无法撤回，不在此处理。
+   */
+  const cancelScheduledItem = useCallback((id: string): void => {
+    const schedulerState = schedulerStateRef.current;
+    const isInterruptWaitTarget =
+      schedulerState.phase === 'waiting-for-interrupted-turn-end' && schedulerState.target.id === id;
+    const isQueuedStartTarget =
+      schedulerState.phase === 'waiting-for-queued-turn-start' && schedulerState.itemId === id;
+    if (!isInterruptWaitTarget && !isQueuedStartTarget) return;
+
+    schedulerStateRef.current = { phase: 'idle' };
+    // 递增 generation，使 releaseInterruptedTarget 挂起的 50ms execute 闭包失效。
+    schedulerGenerationRef.current += 1;
+    if (executeTimerRef.current != null) {
+      clearTimeout(executeTimerRef.current);
+      executeTimerRef.current = null;
+    }
+    // 打断等待相位下，interruptSession() 触发的 loading 下降可能尚未到达；
+    // 目标已被删除，这次下降不能再自动消费队首。
+    // waiting-for-queued-turn-start 相位不置该标记：若消息已真实发出，
+    // 其轮次结束时的 loading 下降仍需正常自动消费队首。
+    if (isInterruptWaitTarget && prevLoadingRef.current) {
+      suppressLoadingAutoConsumeRef.current = true;
+    }
+  }, []);
+
   // Remove message from queue
   const dequeue = useCallback((id: string) => {
+    // 删除的若是调度器等待中的目标消息，需同步取消其挂起的自动发送，
+    // 否则旧轮次结束或挂起的 50ms 闭包仍会补发这条已删除的消息。
+    cancelScheduledItem(id);
     setQueue(prev => prev.filter(item => item.id !== id));
-  }, []);
+  }, [cancelScheduledItem]);
 
   // Clear entire queue
   const clearQueue = useCallback(() => {
+    // 清空队列会连同等待相位引用的目标一起移除，需同步取消调度器。
+    const schedulerState = schedulerStateRef.current;
+    if (schedulerState.phase === 'waiting-for-interrupted-turn-end') {
+      cancelScheduledItem(schedulerState.target.id);
+    } else if (schedulerState.phase === 'waiting-for-queued-turn-start') {
+      cancelScheduledItem(schedulerState.itemId);
+    }
     setQueue([]);
-  }, []);
+  }, [cancelScheduledItem]);
 
   // Update a queued message while preserving its metadata and position.
   const update = useCallback((id: string, content: string) => {

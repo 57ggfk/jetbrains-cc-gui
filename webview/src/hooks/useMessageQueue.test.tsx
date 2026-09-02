@@ -471,4 +471,117 @@ describe('useMessageQueue', () => {
     expect(onExecute).toHaveBeenCalledWith('second', undefined);
     expect(result.current.queue.map(item => item.content)).toEqual(['first']);
   });
+
+  it('cancels the interrupted target on dequeue so the turn end no longer sends it', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute, onInterrupt } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    // 用户在打断等待期间删除目标消息：旧轮次结束后不得再补发它。
+    act(() => result.current.dequeue(targetId));
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+
+    // interruptSession() 触发的 loading 下降被跳过，不能把队首顶出去。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+
+    // 下一轮真实 loading 周期恢复自动消费。
+    rerender({ loading: true });
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('first', undefined);
+    expect(result.current.queue).toEqual([]);
+  });
+
+  it('cancels the pending execute closure when dequeue targets the released item', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    // 目标已出队、50ms execute 闭包挂起中，此时删除目标（队列中已不存在，仅取消调度）。
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+    act(() => result.current.dequeue(targetId));
+
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+
+    // 该相位不置 suppress 标记：loading 下降应正常自动消费队首。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('first', undefined);
+    expect(result.current.queue).toEqual([]);
+  });
+
+  it('keeps the scheduler intact when dequeue removes a non-target message', () => {
+    vi.useFakeTimers();
+    const { result, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    // 删除非目标消息不影响等待中的调度。
+    const firstId = result.current.queue.find(item => item.content === 'first')!.id;
+    act(() => result.current.dequeue(firstId));
+    expect(result.current.queue.map(item => item.content)).toEqual(['second']);
+
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue).toEqual([]);
+  });
+
+  it('cancels the scheduler on clearQueue while waiting for the interrupted turn end', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    // 清空队列连同目标一起移除，调度器必须取消，旧轮次结束不得补发。
+    act(() => result.current.clearQueue());
+    expect(result.current.queue).toEqual([]);
+
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+
+    // 打断引发的 loading 下降被跳过；队列已空，无副作用。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+  });
+
+  it('cancels the pending execute closure on clearQueue during waiting-for-queued-turn-start', () => {
+    vi.useFakeTimers();
+    const { result, onExecute } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    // 目标已出队、50ms execute 闭包挂起中，清空队列必须一并取消该闭包。
+    act(() => result.current.clearQueue());
+
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.queue).toEqual([]);
+  });
 });
