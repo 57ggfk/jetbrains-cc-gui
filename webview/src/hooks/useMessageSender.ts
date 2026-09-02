@@ -248,6 +248,7 @@ export function useMessageSender({
 
   /**
    * Send message to backend
+   * 返回值表示消息是否成功交付桥接层：false 说明桥不可用，调用方需自行恢复（如放回队列）。
    */
   const sendMessageToBackend = useCallback((
     text: string,
@@ -255,7 +256,7 @@ export function useMessageSender({
     agentInfo: { id: string; name: string; prompt?: string } | null,
     fileTagsInfo: { displayPath: string; absolutePath: string }[] | null,
     requestedPermissionMode: PermissionMode
-  ) => {
+  ): boolean => {
     const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
     const effectivePermissionMode: PermissionMode = currentProvider === 'codex' && requestedPermissionMode === 'plan'
       ? 'default'
@@ -286,7 +287,7 @@ export function useMessageSender({
           ...(currentProvider === 'dsh' ? { dshPreset: dshPreset || '' } : {}),
           codexFastMode,
         });
-        sendBridgeEvent('send_message_with_attachments', payload);
+        return sendBridgeEvent('send_message_with_attachments', payload);
       } catch (error) {
         console.error('[Frontend] Failed to serialize attachments payload', error);
         const fallbackPayload = JSON.stringify({
@@ -298,7 +299,7 @@ export function useMessageSender({
           ...(currentProvider === 'dsh' ? { dshPreset: dshPreset || '' } : {}),
           codexFastMode,
         });
-        sendBridgeEvent('send_message', fallbackPayload);
+        return sendBridgeEvent('send_message', fallbackPayload);
       }
     } else {
       const payload = JSON.stringify({
@@ -310,24 +311,26 @@ export function useMessageSender({
         ...(currentProvider === 'dsh' ? { dshPreset: dshPreset || '' } : {}),
         codexFastMode,
       });
-      sendBridgeEvent('send_message', payload);
+      return sendBridgeEvent('send_message', payload);
     }
   }, [codexFastMode, currentProvider, dshPreset, selectedModel, reasoningEffort]);
 
   /**
    * Execute message sending (from queue or directly)
+   * 返回值表示消息是否真实发出：提前返回（SDK 状态守卫、空内容等）或桥不可用时为 false，
+   * 队列调度器据此把消息放回队首，避免静默丢失。
    */
-  const executeMessage = useCallback((content: string, attachments?: Attachment[]) => {
+  const executeMessage = useCallback((content: string, attachments?: Attachment[]): boolean => {
     // Expand inline quote chips (tokens) into their full Markdown blockquotes.
     const text = expandQuoteTokens(content).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
     const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
 
-    if (!text && !hasAttachments) return;
+    if (!text && !hasAttachments) return false;
 
     // Check SDK status
     if (sdkStatusLoading) {
       addToast(t('chat.sdkStatusLoading'), 'info');
-      return;
+      return false;
     }
     if (!currentSdkInstalled) {
       addToast(
@@ -336,12 +339,12 @@ export function useMessageSender({
       );
       setSettingsInitialTab('dependencies');
       setCurrentView('settings');
-      return;
+      return false;
     }
 
     // Build user message content blocks
     const userContentBlocks = buildUserContentBlocks(text, attachments);
-    if (userContentBlocks.length === 0) return;
+    if (userContentBlocks.length === 0) return false;
 
     // Persist non-image attachment metadata
     const nonImageAttachments = Array.isArray(attachments)
@@ -402,7 +405,7 @@ export function useMessageSender({
     })) : null;
 
     // Send message to backend
-    sendMessageToBackend(text, attachments, agentInfo, fileTagsInfo, permissionMode);
+    return sendMessageToBackend(text, attachments, agentInfo, fileTagsInfo, permissionMode);
   }, [
     sdkStatusLoading,
     currentSdkInstalled,

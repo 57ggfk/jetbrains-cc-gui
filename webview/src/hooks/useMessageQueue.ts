@@ -19,8 +19,12 @@ export interface QueuedMessage {
 export interface UseMessageQueueOptions {
   /** Whether AI is currently processing */
   isLoading: boolean;
-  /** Callback to execute a message */
-  onExecute: (content: string, attachments?: Attachment[]) => void;
+  /**
+   * Callback to execute a message
+   * 返回 false 表示消息未真实发出（如 SDK 状态守卫拦截、桥不可用），
+   * 调度器会把消息放回队首等待下次消费，避免静默丢失。
+   */
+  onExecute: (content: string, attachments?: Attachment[]) => boolean;
   /** 打断当前任务的回调 */
   onInterrupt?: () => void;
 }
@@ -94,6 +98,14 @@ export function useMessageQueue({
   const executeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressLoadingAutoConsumeRef = useRef(false);
 
+  /**
+   * 执行失败（onExecute 返回 false）时把消息放回队首，等待下次 loading 下降再消费。
+   * 防御同一 id 已存在（如用户手动重发入队），避免重复项。
+   */
+  const restoreToQueueFront = useCallback((message: QueuedMessage) => {
+    setQueue(prev => prev.some(item => item.id === message.id) ? prev : [message, ...prev]);
+  }, []);
+
   const scheduleQueueItem = useCallback((nextMessage: QueuedMessage) => {
     if (isExecutingFromQueueRef.current) return;
 
@@ -103,10 +115,15 @@ export function useMessageQueue({
       : prev);
     executeTimerRef.current = setTimeout(() => {
       executeTimerRef.current = null;
-      onExecuteRef.current(nextMessage.content, nextMessage.attachments);
+      const succeeded = onExecuteRef.current(nextMessage.content, nextMessage.attachments);
       isExecutingFromQueueRef.current = false;
+      // 发送失败：消息已出队但从未发出，放回队首防止静默丢失。
+      // loading 未跳变，剩余队列的消费随之暂停，待用户处理（如安装 SDK）后的下一轮恢复。
+      if (succeeded === false) {
+        restoreToQueueFront(nextMessage);
+      }
     }, 50);
-  }, []);
+  }, [restoreToQueueFront]);
 
   const releaseInterruptedTarget = useCallback((
     nextMessage: QueuedMessage,
@@ -133,12 +150,18 @@ export function useMessageQueue({
       ) {
         return;
       }
-      onExecuteRef.current(nextMessage.content, nextMessage.attachments);
+      const succeeded = onExecuteRef.current(nextMessage.content, nextMessage.attachments);
+      // 发送失败：目标从未发出，不会有任何流事件到达，必须在此解除等待相位，
+      // 否则调度器永久卡在 waiting-for-queued-turn-start。
+      if (succeeded === false) {
+        schedulerStateRef.current = { phase: 'idle' };
+        restoreToQueueFront(nextMessage);
+      }
     };
 
     // 保留现有延迟，确保目标项先从队列移除，再发送消息。
     executeTimerRef.current = setTimeout(execute, 50);
-  }, []);
+  }, [restoreToQueueFront]);
 
   // Generate unique ID
   const generateId = useCallback(() => {

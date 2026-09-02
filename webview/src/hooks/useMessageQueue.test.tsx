@@ -43,7 +43,8 @@ function dispatchQueueReset() {
 }
 
 function createQueue(isLoading = true) {
-  const onExecute = vi.fn();
+  // onExecute 契约：返回 false 表示消息未真实发出，调度器会将其放回队首。
+  const onExecute = vi.fn(() => true);
   const onInterrupt = vi.fn();
   const hook = renderHook(({ loading }) => useMessageQueue({
     isLoading: loading,
@@ -583,5 +584,55 @@ describe('useMessageQueue', () => {
     act(() => vi.advanceTimersByTime(50));
     expect(onExecute).not.toHaveBeenCalled();
     expect(result.current.queue).toEqual([]);
+  });
+
+  it('restores the interrupted target to the queue head when execution fails', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute, onInterrupt } = createQueue();
+    enqueueMessages(result, 'first', 'second');
+    const targetId = result.current.queue[1].id;
+
+    act(() => result.current.interruptAndSendNow(targetId));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+
+    // SDK 状态守卫等提前返回场景：execute 返回 false，目标从未发出。
+    onExecute.mockReturnValue(false);
+    dispatchStreamCompleted('sequence:10', 1, 10);
+    act(() => vi.advanceTimersByTime(50));
+
+    // 目标放回队首不丢失，等待相位同步解除，不会卡在 waiting-for-queued-turn-start。
+    expect(onExecute).toHaveBeenCalledWith('second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['second', 'first']);
+
+    // 调度器已回 idle：下一轮 loading 下降正常消费队首。
+    onExecute.mockReturnValue(true);
+    rerender({ loading: true });
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenNthCalledWith(2, 'second', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first']);
+  });
+
+  it('restores the queue head when auto-consume execution fails', () => {
+    vi.useFakeTimers();
+    const { result, rerender, onExecute } = createQueue();
+    onExecute.mockReturnValue(false);
+    enqueueMessages(result, 'first', 'second');
+
+    // loading 下降触发路径 A 消费队首，但执行失败。
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+
+    // 队首选回：消息不丢失、顺序不变。
+    expect(onExecute).toHaveBeenCalledWith('first', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['first', 'second']);
+
+    // 执行恢复后，下一轮 loading 下降再次消费同一条队首。
+    onExecute.mockReturnValue(true);
+    rerender({ loading: true });
+    rerender({ loading: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(onExecute).toHaveBeenNthCalledWith(2, 'first', undefined);
+    expect(result.current.queue.map(item => item.content)).toEqual(['second']);
   });
 });
