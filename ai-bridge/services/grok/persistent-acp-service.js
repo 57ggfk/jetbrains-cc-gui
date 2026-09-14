@@ -21,6 +21,7 @@ import {
   initializeAndAuthenticate,
   ensureSession,
   applyPermissionModeToSession,
+  applyReasoningEffortToSession,
   buildPromptBlocks,
   isAutoApproveMode,
   resolveAcpPermissionDecision,
@@ -163,10 +164,6 @@ async function createRuntime(params, { log } = {}) {
     resolvedAuth.authMethod,
     false
   );
-  if (params.reasoningEffort) {
-    env.GROK_REASONING_EFFORT = String(params.reasoningEffort);
-    env.REASONING_EFFORT = String(params.reasoningEffort);
-  }
   env.GROK_NO_AUTO_UPDATE = '1';
   env.CI = env.CI || '1';
 
@@ -318,8 +315,6 @@ async function executeTurn(runtime, params, normalizer) {
   const emit = (type, payload) => normalizer.handleAcpEvent(type, payload);
 
   try {
-    normalizer.begin();
-
     // Ensure we have a live session id (in case previous was recreated)
     let sid = runtime.sessionId || params.sessionId || runtime.client?.activeSessionId || '';
     if (!sid || runtime.client.closed) {
@@ -333,6 +328,10 @@ async function executeTurn(runtime, params, normalizer) {
       runtime.sessionId = sid;
     }
 
+    // Inside the turn queue, before installing stream handlers: config updates
+    // must complete before inference and must not appear as assistant content.
+    await applyReasoningEffortToSession(runtime.client, sid, params.reasoningEffort);
+    normalizer.begin();
     emit('session_id', sid);
 
     const promptBlocks = buildPromptBlocks({
@@ -458,7 +457,9 @@ export async function sendMessagePersistent(params = {}) {
     error: (...a) => console.error(...a),
   });
 
-  runtime._turnQueue = runtime._turnQueue.then(async () => {
+  // A rejected option must fail that turn, but allow a corrected selection on
+  // the next turn to use this otherwise healthy runtime.
+  runtime._turnQueue = runtime._turnQueue.catch(() => {}).then(async () => {
     return executeTurn(runtime, params, normalizer);
   });
 
