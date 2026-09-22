@@ -284,6 +284,8 @@ export interface ModelInfo {
   id: string;
   label: string;
   description?: string;
+  /** True for user-defined models (Settings → custom models). */
+  isCustom?: boolean;
 }
 
 /**
@@ -345,21 +347,50 @@ export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-5';
  * saved retired model fails validation and silently resets to the fallback.
  * Retired ids must always map to a LIVE model - mapping one retired id to another
  * (sonnet-4-6 -> sonnet-4-7) kept restoring tabs pinned to a dead model (#1678).
+ * Only list ids that actually fail at the API: claude-opus-4-6 is still served
+ * (verified with `claude -p --model claude-opus-4-6[1m]`) and users add it as a
+ * custom model, so it must NOT be here or it gets rewritten to opus-5.
  */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
   'claude-sonnet-4-6': 'claude-sonnet-5',
   'claude-sonnet-4-7': 'claude-sonnet-5',
-  'claude-opus-4-6': 'claude-opus-5',
   'claude-opus-4-8': 'claude-opus-5',
 };
 
-export function normalizeClaudeModelId(modelId: string | undefined | null): string {
+/**
+ * Map a saved/restored Claude model id to the id that should be used now.
+ *
+ * Retired ids are migrated to their live replacement. Ids listed in
+ * `customModelIds` (the user's own custom models) are returned unchanged even
+ * when retired: the user typed that id on purpose, so the plugin must send it
+ * as-is and let the API report an error rather than silently substitute
+ * another model. Callers on restore paths pass the custom set; a caller that
+ * omits it gets the plain migration.
+ */
+export function normalizeClaudeModelId(
+  modelId: string | undefined | null,
+  customModelIds?: ReadonlySet<string>,
+): string {
   if (!modelId) {
     return DEFAULT_CLAUDE_MODEL_ID;
   }
   // First strip any [1m] suffix
   const stripped = strip1MContextSuffix(modelId);
+  if (customModelIds?.has(stripped)) {
+    return stripped;
+  }
   return LEGACY_CLAUDE_MODEL_ID_ALIASES[stripped] ?? stripped;
+}
+
+/**
+ * Whether the id is in the retired-model migration table, i.e. the API no
+ * longer serves it. Used to label custom models that point at a dead id.
+ */
+export function isRetiredClaudeModelId(modelId: string | undefined | null): boolean {
+  if (!modelId) {
+    return false;
+  }
+  return strip1MContextSuffix(modelId) in LEGACY_CLAUDE_MODEL_ID_ALIASES;
 }
 
 /**
