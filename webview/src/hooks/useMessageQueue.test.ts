@@ -177,4 +177,69 @@ describe('useMessageQueue', () => {
 
     expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['third', 'first', 'second']);
   });
+
+  it('skips steering items when auto-executing the next queued message', () => {
+    const { result, onExecute } = renderQueue(true);
+
+    act(() => {
+      result.current.queueApi.enqueue('steer me');
+      result.current.queueApi.enqueue('send after');
+    });
+    const [first] = result.current.queueApi.queue;
+    act(() => {
+      result.current.queueApi.markSteering(first.id);
+    });
+    expect(result.current.queueApi.queue[0].status).toBe('steering');
+
+    act(() => {
+      result.current.setLoading(false);
+    });
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('send after', undefined);
+    expect(result.current.queueApi.queue).toHaveLength(1);
+    expect(result.current.queueApi.queue[0].status).toBe('steering');
+  });
+
+  it('restore puts a rejected item back to queued in place', () => {
+    const { result } = renderQueue(true);
+
+    act(() => {
+      result.current.queueApi.enqueue('first');
+      result.current.queueApi.enqueue('second');
+    });
+    const [first] = result.current.queueApi.queue;
+    act(() => {
+      result.current.queueApi.markSteering(first.id);
+      result.current.queueApi.restore(first.id);
+    });
+
+    expect(result.current.queueApi.queue.map(m => m.status)).toEqual(['queued', 'queued']);
+    expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['first', 'second']);
+  });
+
+  it('requeueAtHead returns an undelivered item as the next queued send', () => {
+    const { result, onExecute } = renderQueue(true);
+
+    act(() => {
+      result.current.queueApi.enqueue('steer');
+      result.current.queueApi.enqueue('later');
+    });
+    const [first] = result.current.queueApi.queue;
+    act(() => {
+      result.current.queueApi.markSteering(first.id);
+    });
+    const steered = result.current.queueApi.steeringItemsRef.current.get(first.id);
+    expect(steered?.status).toBe('steering');
+    act(() => {
+      result.current.queueApi.requeueAtHead(steered!);
+    });
+    expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['steer', 'later']);
+    expect(result.current.queueApi.queue[0].status).toBe('queued');
+
+    act(() => {
+      result.current.setLoading(false);
+    });
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith('steer', undefined);
+  });
 });

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { QueuedMessage } from '../../hooks/useMessageQueue';
 import { createEdgeInsertResolver, useDragSort } from '../settings/hooks/useDragSort';
 import { useDragAutoScroll } from './hooks/useDragAutoScroll.js';
@@ -11,6 +12,10 @@ export interface MessageQueueProps {
   onRemove: (id: string) => void;
   /** Reorder callback (orderedIds[0] executes first); drag is disabled when absent */
   onReorder?: (orderedIds: string[]) => void;
+  /** Show the steer button when the live runtime can inject into the current turn */
+  canSteer?: boolean;
+  /** Steer a queued item into the live turn */
+  onSteer?: (id: string) => void;
 }
 
 /**
@@ -20,7 +25,8 @@ export interface MessageQueueProps {
  * Drag is initiated only from the gripper handle (pointer-based), so text in the
  * row stays selectable and other controls are unaffected.
  */
-export function MessageQueue({ queue, onRemove, onReorder }: MessageQueueProps) {
+export function MessageQueue({ queue, onRemove, onReorder, canSteer = false, onSteer }: MessageQueueProps) {
+  const { t } = useTranslation();
   /**
    * Sort callback fired when a drag completes.
    * useDragSort emits orderedIds in real queue order (not display order), so
@@ -83,12 +89,14 @@ export function MessageQueue({ queue, onRemove, onReorder }: MessageQueueProps) 
         // Placement is in queue order; the display is reversed, so 'after'
         // (higher index) draws the insert line above the row and 'before' below it.
         const isDragOver = dragOverId === item.id;
+        const isSteering = item.status === 'steering';
         const itemClassName = [
           'message-queue-item',
           draggedId === item.id && 'dragging',
           isDragOver && dragOverPlacement === 'on' && 'drag-over',
           isDragOver && dragOverPlacement === 'after' && 'insert-above',
           isDragOver && dragOverPlacement === 'before' && 'insert-below',
+          isSteering && 'steering',
         ].filter(Boolean).join(' ');
         return (
           <div key={item.id} className={itemClassName} data-drag-sort-id={item.id}>
@@ -110,10 +118,32 @@ export function MessageQueue({ queue, onRemove, onReorder }: MessageQueueProps) 
             <span className="message-queue-content" title={item.content}>
               {item.content}
             </span>
+            {isSteering && (
+              <span
+                className="message-queue-steering-spinner"
+                title={t('chat.queue.steering')}
+                aria-label={t('chat.queue.steering')}
+              >
+                <span className="codicon codicon-loading codicon-modifier-spin" />
+              </span>
+            )}
+            {canSteer && item.status === 'queued' && (
+              <button
+                className="message-queue-steer"
+                type="button"
+                onClick={() => onSteer?.(item.id)}
+                title={t('chat.queue.steerNow')}
+                aria-label={t('chat.queue.steerNow')}
+              >
+                <span className="codicon codicon-run-above" />
+              </button>
+            )}
             <button
               className="message-queue-remove"
+              type="button"
               onClick={() => onRemove(item.id)}
               title="Remove from queue"
+              disabled={isSteering}
             >
               <span className="codicon codicon-close" />
             </button>

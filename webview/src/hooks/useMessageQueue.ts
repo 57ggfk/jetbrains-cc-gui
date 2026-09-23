@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import type { MutableRefObject } from 'react';
 import type { Attachment } from '../components/ChatInputBox/types';
 
 export interface QueuedMessage {
@@ -6,6 +7,8 @@ export interface QueuedMessage {
   content: string;
   attachments?: Attachment[];
   queuedAt: number;
+  /** queued waits for idle send; steering is in-flight on the live turn */
+  status: 'queued' | 'steering';
 }
 
 export interface UseMessageQueueOptions {
@@ -26,6 +29,14 @@ export interface UseMessageQueueReturn {
   clearQueue: () => void;
   /** Reorder queue by an ordered list of ids (index 0 executes first) */
   reorder: (orderedIds: string[]) => void;
+  /** Mark an item as steering after the daemon accepted it */
+  markSteering: (id: string) => void;
+  /** Restore a rejected item in place */
+  restore: (id: string) => void;
+  /** Put an undelivered item back at the head as queued */
+  requeueAtHead: (item: QueuedMessage) => void;
+  /** Steering items retained for undelivered receipts */
+  steeringItemsRef: MutableRefObject<Map<string, QueuedMessage>>;
   /** Whether queue has items */
   hasQueuedMessages: boolean;
 }
@@ -39,6 +50,7 @@ export function useMessageQueue({
   onExecute,
 }: UseMessageQueueOptions): UseMessageQueueReturn {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  const steeringItemsRef = useRef<Map<string, QueuedMessage>>(new Map());
 
   // Generate unique ID
   const generateId = useCallback(() => {
@@ -52,17 +64,20 @@ export function useMessageQueue({
       content,
       attachments,
       queuedAt: Date.now(),
+      status: 'queued',
     };
     setQueue(prev => [...prev, newItem]);
   }, [generateId]);
 
   // Remove message from queue
   const dequeue = useCallback((id: string) => {
+    steeringItemsRef.current.delete(id);
     setQueue(prev => prev.filter(item => item.id !== id));
   }, []);
 
   // Clear entire queue
   const clearQueue = useCallback(() => {
+    steeringItemsRef.current.clear();
     setQueue([]);
   }, []);
 
@@ -89,18 +104,47 @@ export function useMessageQueue({
     });
   }, []);
 
+  const markSteering = useCallback((id: string) => {
+    setQueue(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const next: QueuedMessage = { ...item, status: 'steering' };
+      steeringItemsRef.current.set(id, next);
+      return next;
+    }));
+  }, []);
+
+  const restore = useCallback((id: string) => {
+    steeringItemsRef.current.delete(id);
+    setQueue(prev => prev.map(item => (
+      item.id === id ? { ...item, status: 'queued' } : item
+    )));
+  }, []);
+
+  const requeueAtHead = useCallback((item: QueuedMessage) => {
+    const restored: QueuedMessage = { ...item, status: 'queued' };
+    steeringItemsRef.current.delete(item.id);
+    setQueue(prev => {
+      const without = prev.filter(existing => existing.id !== item.id);
+      return [restored, ...without];
+    });
+  }, []);
+
   // Auto-execute next message whenever the chat is idle. Dequeue and execute
   // must stay atomic inside this effect: deferring the execution behind a
   // timer let the very next re-render (the dequeue's own state update) run
   // effect cleanup, cancel the timer, and silently drop the already-dequeued
   // message. Checking "idle && non-empty" instead of a loading transition also
   // covers messages enqueued while `isLoading` was already flipping to false.
+  // Steering items wait for a fold/undelivered receipt and are skipped.
   useEffect(() => {
     if (isLoading || queue.length === 0) {
       return;
     }
-    const nextMessage = queue[0];
-    setQueue(prev => prev.slice(1));
+    const nextMessage = queue.find(item => item.status === 'queued');
+    if (!nextMessage) {
+      return;
+    }
+    setQueue(prev => prev.filter(item => item.id !== nextMessage.id));
     onExecute(nextMessage.content, nextMessage.attachments);
   }, [isLoading, queue, onExecute]);
 
@@ -110,6 +154,10 @@ export function useMessageQueue({
     dequeue,
     clearQueue,
     reorder,
+    markSteering,
+    restore,
+    requeueAtHead,
+    steeringItemsRef,
     hasQueuedMessages: queue.length > 0,
   };
 }
