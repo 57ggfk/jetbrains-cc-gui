@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import type { MutableRefObject, RefObject } from 'react';
 import type { ClaudeMessage, ClaudeRawMessage, HistoryData, SubagentHistoryResponse, TaskEventMap } from '../types';
+import type { QueuedMessage } from './useMessageQueue';
+import type { ProviderCapabilities } from './useProviderCapabilities';
 import type {
   CodexFastMode,
   PermissionMode,
@@ -25,6 +27,15 @@ export interface ContextInfo {
   startLine?: number;
   endLine?: number;
   raw: string;
+}
+
+export interface MessageQueueSteerApi {
+  markSteering: (id: string) => void;
+  restore: (id: string) => void;
+  requeueAtHead: (item: QueuedMessage) => void;
+  dequeue: (id: string) => void;
+  steeringItemsRef: MutableRefObject<Map<string, QueuedMessage>>;
+  steerMessage: (item: QueuedMessage) => void;
 }
 
 export interface UseWindowCallbacksOptions {
@@ -132,6 +143,12 @@ export interface UseWindowCallbacksOptions {
    * message queue hook has been created.
    */
   clearQueuedMessages?: () => void;
+  /** Reset provider capabilities on session switch (via resetTransientUiState) */
+  resetCapabilities?: () => void;
+  /** Queue steer APIs, resolved after mount because registration happens once */
+  messageQueueSteerRef?: MutableRefObject<MessageQueueSteerApi | null>;
+  /** Apply [CAPABILITIES] from the live turn */
+  applyCapabilitiesRef?: MutableRefObject<(next: ProviderCapabilities) => void>;
 
   // AI title generation: update the displayed session title when backend generates one
   setCustomSessionTitle: React.Dispatch<React.SetStateAction<string | null>>;

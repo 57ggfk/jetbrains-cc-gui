@@ -2,6 +2,7 @@ import { useCallback, type RefObject } from 'react';
 import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
 import type { ClaudeContentBlock, ClaudeMessage } from '../types';
+import type { QueuedMessage } from './useMessageQueue';
 import {
   EFFORT_SUPPORTED_CLAUDE_MODELS,
   apply1MContextSuffix,
@@ -421,6 +422,65 @@ export function useMessageSender({
   ]);
 
   /**
+   * Inject a queued item into the live turn. Reuses send payload fields plus
+   * steerId. Does not set loading and does not reset streaming refs.
+   */
+  const steerMessage = useCallback((item: QueuedMessage) => {
+    const text = expandQuoteTokens(item.content).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    const attachments = item.attachments;
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+    if (!text && !hasAttachments) return;
+
+    const agentInfo = selectedAgent ? {
+      id: selectedAgent.id,
+      name: selectedAgent.name,
+      prompt: selectedAgent.prompt,
+    } : null;
+    const fileTags = chatInputRef.current?.getFileTags() ?? [];
+    const fileTagsInfo = fileTags.length > 0 ? fileTags.map(tag => ({
+      displayPath: tag.displayPath,
+      absolutePath: tag.absolutePath,
+    })) : null;
+
+    const effectivePermissionMode: PermissionMode = currentProvider === 'codex'
+      && (permissionMode === 'plan'
+        || (permissionMode === 'auto' && !codexNativeAutoReviewAvailable))
+      ? 'default'
+      : permissionMode;
+    const reasoningEffortPayload = shouldSendReasoningEffort(currentProvider, selectedModel)
+      ? { reasoningEffort }
+      : {};
+    const payload = JSON.stringify({
+      text,
+      ...(hasAttachments ? {
+        attachments: (attachments || []).map(a => ({
+          fileName: a.fileName,
+          mediaType: a.mediaType,
+          data: a.data,
+        })),
+      } : {}),
+      agent: agentInfo,
+      fileTags: fileTagsInfo,
+      permissionMode: effectivePermissionMode,
+      ...reasoningEffortPayload,
+      ...(currentProvider === 'dsh' ? { dshPreset: dshPreset || '' } : {}),
+      codexFastMode,
+      steerId: item.id,
+    });
+    sendBridgeEvent('steer_message', payload);
+  }, [
+    selectedAgent,
+    chatInputRef,
+    currentProvider,
+    permissionMode,
+    codexNativeAutoReviewAvailable,
+    selectedModel,
+    reasoningEffort,
+    dshPreset,
+    codexFastMode,
+  ]);
+
+  /**
    * Handle message submission (from ChatInputBox)
    */
   const handleSubmit = useCallback((content: string, attachments?: Attachment[]) => {
@@ -461,5 +521,6 @@ export function useMessageSender({
     handleSubmit,
     executeMessage,
     interruptSession,
+    steerMessage,
   };
 }

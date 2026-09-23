@@ -8,9 +8,30 @@
 
 import type { MutableRefObject } from 'react';
 import type { ClaudeContentOrResultBlock, ClaudeMessage, ClaudeRawMessage } from '../../types';
+import { isSteeredUserMessage } from '../../utils/turnScope';
 
 /** Time window (ms) for matching optimistic messages with backend messages. */
 export const OPTIMISTIC_MESSAGE_TIME_WINDOW = 5000;
+
+/**
+ * True when the last assistant in nextList is a post-fold segment 2 that
+ * should not inherit segment 1 identity or streamed content.
+ */
+function isSteerSegmentBoundary(
+  prevList: ClaudeMessage[],
+  nextList: ClaudeMessage[],
+  prevAssistantIdx: number,
+  nextAssistantIdx: number,
+): boolean {
+  const nextSteeredIdx = nextList.findIndex((message, index) => (
+    index < nextAssistantIdx && isSteeredUserMessage(message)
+  ));
+  if (nextSteeredIdx < 0) return false;
+  const prevSteeredIdx = prevList.findIndex((message, index) => (
+    index < prevAssistantIdx && isSteeredUserMessage(message)
+  ));
+  return prevSteeredIdx < 0 || prevSteeredIdx !== nextSteeredIdx;
+}
 
 export const getStreamEndHandlingMode = (
   provider: string,
@@ -285,6 +306,9 @@ export const preserveLastAssistantIdentity = (
   // Block when either side has __turnId and they differ
   if ((prevAssistant.__turnId !== undefined || nextAssistant.__turnId !== undefined) &&
       prevAssistant.__turnId !== nextAssistant.__turnId) {
+    return nextList;
+  }
+  if (isSteerSegmentBoundary(prevList, nextList, prevAssistantIdx, nextAssistantIdx)) {
     return nextList;
   }
   const stabilized = preserveMessageIdentity(prevAssistant, nextAssistant);
@@ -652,6 +676,9 @@ export const preserveStreamingAssistantContent = (
   // Block when either side has __turnId and they differ
   if ((prevAssistant.__turnId !== undefined || nextAssistant.__turnId !== undefined) &&
       prevAssistant.__turnId !== nextAssistant.__turnId) {
+    return nextList;
+  }
+  if (isSteerSegmentBoundary(prevList, nextList, prevAssistantIdx, nextAssistantIdx)) {
     return nextList;
   }
 

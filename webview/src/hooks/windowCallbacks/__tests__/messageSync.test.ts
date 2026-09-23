@@ -636,6 +636,23 @@ describe('preserveLastAssistantIdentity', () => {
     // Since timestamps match, preserveMessageIdentity returns next unchanged
     expect(result[0].timestamp).toBe(ts);
   });
+
+  it('does not copy segment 1 identity onto a post-fold segment 2', () => {
+    const prevTs = '2024-01-01T10:00:00.000Z';
+    const prev = [
+      makeUserMsg('refactor'),
+      makeAssistantMsg('segment 1', { timestamp: prevTs }),
+    ];
+    const next = [
+      makeUserMsg('refactor'),
+      makeAssistantMsg('segment 1', { timestamp: prevTs }),
+      makeUserMsg('do not touch B', { raw: { steered: true } }),
+      makeAssistantMsg('', { timestamp: '2024-01-01T10:00:02.000Z' }),
+    ];
+    const result = preserveLastAssistantIdentity(prev, next, findLastAssistantIndex);
+    expect(result).toBe(next);
+    expect(result[3].timestamp).not.toBe(prevTs);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -749,6 +766,26 @@ describe('preserveStreamingAssistantContent', () => {
       findLastAssistantIndex, patchAssistantForStreaming,
     );
     expect(result).toBe(next);
+  });
+
+  it('does not copy segment 1 content onto a post-fold segment 2', () => {
+    const longContent = 'long content from segment 1';
+    const prev = [
+      makeUserMsg('refactor'),
+      makeAssistantMsg(longContent),
+    ];
+    const next = [
+      makeUserMsg('refactor'),
+      makeAssistantMsg(longContent),
+      makeUserMsg('do not touch B', { raw: { steered: true } }),
+      makeAssistantMsg('short'),
+    ];
+    const result = preserveStreamingAssistantContent(
+      prev, next, ref(true), ref(longContent),
+      findLastAssistantIndex, patchAssistantForStreaming,
+    );
+    expect(result).toBe(next);
+    expect(result[3].content).toBe('short');
   });
 
   it('allows merge when both have same turn ID', () => {

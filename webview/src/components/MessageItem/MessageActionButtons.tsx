@@ -90,6 +90,7 @@ interface UserMessageHeaderProps {
   onQuote: () => void;
   onCopy: () => void;
   t: TFunction;
+  isSteered?: boolean;
 }
 
 /** Timestamp and copy button for user messages */
@@ -102,10 +103,16 @@ export const UserMessageHeader = memo(function UserMessageHeader({
   onQuote,
   onCopy,
   t,
+  isSteered = false,
 }: UserMessageHeaderProps) {
   if (messageType !== 'user' || !timestamp) return null;
   return (
     <div className="message-header-row">
+      {isSteered && (
+        <span className="message-steered-badge" title={t('chat.queue.steerNow')} aria-label={t('chat.queue.steerNow')}>
+          <span className="codicon codicon-run-above" />
+        </span>
+      )}
       <div className="message-timestamp-header">
         {formatTime(timestamp)}
       </div>

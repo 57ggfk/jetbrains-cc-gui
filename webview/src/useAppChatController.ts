@@ -9,6 +9,7 @@ import {
   useRewindHandlers,
   useHistoryLoader,
   useMessageQueue,
+  useProviderCapabilities,
   useMessageProcessing,
   useMessageSender,
   useChatComputations,
@@ -21,6 +22,7 @@ import {
   CONTEXT_COMMANDS,
 } from './hooks/useMessageSender';
 import type { Attachment, ChatInputBoxHandle, PermissionMode } from './components/ChatInputBox/types';
+import type { QueuedMessage } from './hooks/useMessageQueue';
 import type { ChatScreenProps } from './components/ChatScreen';
 import { useSubagentContextValues, useSetTaskEvents } from './contexts/SubagentContext';
 import { useMessages } from './contexts/MessagesContext';
@@ -177,6 +179,20 @@ export const useAppChatController = ({
     getOrCreateStreamingAssistantIndex, patchAssistantForStreaming,
   } = useStreamingMessages();
 
+  const { capabilities, applyCapabilities, resetCapabilities } = useProviderCapabilities();
+  const applyCapabilitiesRef = useRef(applyCapabilities);
+  applyCapabilitiesRef.current = applyCapabilities;
+  const resetCapabilitiesRef = useRef(resetCapabilities);
+  resetCapabilitiesRef.current = resetCapabilities;
+  const messageQueueSteerRef = useRef<{
+    markSteering: (id: string) => void;
+    restore: (id: string) => void;
+    requeueAtHead: (item: QueuedMessage) => void;
+    dequeue: (id: string) => void;
+    steeringItemsRef: { current: Map<string, QueuedMessage> };
+    steerMessage: (item: QueuedMessage) => void;
+  } | null>(null);
+
   // Ref indirection breaks a hook-ordering cycle: useSessionManagement wants the
   // message queue's clearQueue, but that hook sits further down the chain
   // (useMessageQueue needs executeMessage, which needs forceCreateNewSession
@@ -249,6 +265,9 @@ export const useAppChatController = ({
     setRestoredSessionTitle,
     setPermissionDialogTimeoutSeconds,
     clearQueuedMessages,
+    resetCapabilities: () => { resetCapabilitiesRef.current(); },
+    messageQueueSteerRef,
+    applyCapabilitiesRef,
   });
 
   // ── Message processing ──
@@ -269,6 +288,7 @@ export const useAppChatController = ({
     handleSubmit: hookHandleSubmit,
     executeMessage,
     interruptSession,
+    steerMessage,
   } = useMessageSender({
     t, addToast,
     currentProvider, selectedModel, permissionMode, reasoningEffort, selectedAgent, codexFastMode,
@@ -292,12 +312,26 @@ export const useAppChatController = ({
     dequeue: dequeueMessage,
     clearQueue,
     reorder: reorderMessageQueue,
+    markSteering,
+    restore,
+    requeueAtHead,
+    steeringItemsRef,
   } = useMessageQueue({ isLoading: loading, onExecute: executeMessage });
 
   // Point the session-transition indirection at the real clearQueue.
   useEffect(() => {
     clearMessageQueueRef.current = clearQueue;
   }, [clearQueue]);
+  useEffect(() => {
+    messageQueueSteerRef.current = {
+      markSteering,
+      restore,
+      requeueAtHead,
+      dequeue: dequeueMessage,
+      steeringItemsRef,
+      steerMessage,
+    };
+  }, [markSteering, restore, requeueAtHead, dequeueMessage, steeringItemsRef, steerMessage]);
 
   // handleSubmit with queue support (new session and local commands bypass loading check)
   const handleSubmit = useCallback((content: string, attachments?: Attachment[]) => {
@@ -336,6 +370,13 @@ export const useAppChatController = ({
     }
     hookHandleSubmit(content, attachments);
   }, [loading, enqueueMessage, hookHandleSubmit, forceCreateNewSession, currentProvider, handleModeSelect, setCurrentView, addToast, t]);
+
+  const canSteer = loading && capabilities.steer;
+  const handleSteerFromQueue = useCallback((id: string) => {
+    const item = messageQueue.find(entry => entry.id === id);
+    if (!item || item.status === 'steering') return;
+    steerMessage(item);
+  }, [messageQueue, steerMessage]);
 
   // ── Chat-view computations (stage 5 of TASK-P1-01) ──
   const {
@@ -388,6 +429,7 @@ export const useAppChatController = ({
     // Message actions
     handleUndoFile, onDiscardAll, handleKeepAll,
     handleSubmit, interruptSession, messageQueue, dequeueMessage, reorderMessageQueue,
+    canSteer, handleSteerFromQueue,
     handleOpenRewindSelectDialog, handleNavigateToProviderSettings, wrappedHandleProviderSelect,
     // Session management
     createNewSession, loadHistorySession, deleteHistorySession, deleteHistorySessions,

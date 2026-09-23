@@ -65,6 +65,13 @@ import {
 } from './stream-event-processor.js';
 import { generateSessionTitle } from '../session-title-service.js';
 import { getClaudeCliPathOverride } from '../../utils/claude-cli-path.js';
+import {
+  dumpPendingSteersAsUndelivered,
+  emitCapabilities,
+  handleSteerResultAndMaybeContinue,
+  recordClaudeCodeVersionFromInit,
+  tryEmitSteerFolded,
+} from './steer-service.js';
 
 const SUPPORTED_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -142,6 +149,10 @@ function buildQueryOptions(workingDirectory, sdkModelName, permissionMode, maxTh
     ...(reasoningEffort && { effort: reasoningEffort }),
     ...(maxThinkingTokens !== undefined && { maxThinkingTokens }),
     ...(streamingEnabled && { includePartialMessages: true }),
+    // Echo folded user rows on the live SDK stream so tryEmitSteerFolded can
+    // match them. Java inserts the transcript row from [STEER_FOLDED] and
+    // executeTurn consumes the replayed user message, so this does not duplicate.
+    extraArgs: { 'replay-user-messages': null },
     additionalDirectories: Array.from(
       new Set(
         [workingDirectory, process.env.IDEA_PROJECT_PATH, process.env.PROJECT_PATH].filter(Boolean)
@@ -164,7 +175,7 @@ function buildQueryOptions(workingDirectory, sdkModelName, permissionMode, maxTh
   };
 }
 
-async function buildUserMessage(params, withAttachments, requestedSessionId) {
+export async function buildUserMessage(params, withAttachments, requestedSessionId) {
   if (withAttachments) {
     const attachments = await loadAttachments({ attachments: params.attachments || [] });
     const contentBlocks = await buildContentBlocks(attachments, params.message || '');
@@ -291,6 +302,9 @@ _runtimeCleanupTimer.unref();
     // failures (e.g. "Runtime is closed" on a disposed runtime) as a graceful
     // "User interrupted" and silently swallow the user's message.
     runtime.abortRequested = false;
+    if (runtime.claudeCodeVersion) {
+      emitCapabilities(runtime);
+    }
 
     // Wait until the perpetual reader has drained the SDK pipe and parked with
     // no CLI run in flight BEFORE opening the sink or sending the user message.
@@ -338,6 +352,13 @@ _runtimeCleanupTimer.unref();
         turnState.streamStarted = true;
       }
 
+      // Fold detection must run before the parent_tool_use_id skip: a live
+      // steer arrives as a user message (not a JSONL attachment), and must not
+      // be dropped as if it belonged to a sidechain.
+      if (tryEmitSteerFolded(runtime, msg)) {
+        continue;
+      }
+
       // Subagent (sidechain) messages carry a non-null parent_tool_use_id pointing
       // at the main turn's Agent/Task tool_use. Their detailed thinking and tool
       // calls belong to the sidechain transcript, which the frontend loads
@@ -354,6 +375,10 @@ _runtimeCleanupTimer.unref();
       if (msg?.type === 'result' && msg.origin?.kind === 'task-notification') {
         console.log('[LIFECYCLE] Skipping task-notification result for active user turn');
         continue;
+      }
+
+      if (recordClaudeCodeVersionFromInit(runtime, msg)) {
+        emitCapabilities(runtime);
       }
 
       // In-turn task-notification: a background agent that finishes while the
@@ -417,6 +442,10 @@ _runtimeCleanupTimer.unref();
         }
         // A result belongs to the active user turn unless the SDK explicitly marks
         // it as a background task follow-up above. Result-only turns are valid.
+        const shouldBreak = await handleSteerResultAndMaybeContinue(runtime, msg);
+        if (!shouldBreak) {
+          continue;
+        }
         break;
       }
     }
@@ -761,6 +790,9 @@ export async function abortCurrentTurn() {
   const runtime = getActiveTurnRuntime();
   if (!runtime) return;
   console.log('[LIFECYCLE] abortCurrentTurn epoch=' + (runtime.runtimeSessionEpoch || '(none)'));
+
+  // Destroying the subprocess drops the CLI queue; emit undelivered before dispose.
+  dumpPendingSteersAsUndelivered(runtime);
 
   // Clear turnSink first to stop incoming messages, then fail it to unblock waiting take()
   const sinkToClose = runtime.turnSink;
