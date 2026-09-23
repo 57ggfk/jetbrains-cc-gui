@@ -7,13 +7,15 @@
  *
  * CLI:
  *   pi --print --mode json "<text>"
- *      [--model <pattern>] [--thinking <level>] [--continue]
+ *      [--model <pattern>] [--thinking <level>] [--session <id>]
  *
- * Session continuity: PI has no --session-id flag. When the Java side has
- * captured a session id from a previous turn, we pass --continue so PI
- * resumes the most recent session for the same cwd (sessions live under
- * ~/.pi/agent/sessions/<encoded-cwd>/). Without --continue, each --print
- * call creates a new session and the model loses prior context.
+ * Session continuity: resume the exact session the Java side captured from a
+ * previous turn via `--session <id>` (accepts an exact or partial session
+ * UUID; sessions live under ~/.pi/agent/sessions/<encoded-cwd>/). Older PI builds
+ * reject `--session-id` ('Unknown option'), while `--continue` would resume the
+ * cwd's *most recent* session — the wrong one whenever several conversations
+ * share a project. Without a session flag, each --print call creates a new
+ * session and the model loses prior context.
  *
  * Stream events (NDJSON):
  *   { "type":"session", "id":"..." }
@@ -100,16 +102,17 @@ function extractToolResultText(result) {
   }
 }
 
-function buildPiArgs({ message, sessionId, model, reasoningEffort }) {
+export function buildPiArgs({ message, sessionId, model, reasoningEffort }) {
   const args = ['--print', '--mode', 'json'];
   const modelFlag = resolveModelFlag(model);
   if (modelFlag) {
     args.push('--model', modelFlag);
   }
-  // Resume the most recent PI session for this cwd so multi-turn stays in
-  // context. PI has no --session-id flag; --continue is the supported way.
+  // Resume the exact session from the previous turn so multi-turn stays in
+  // context. `--continue` would bind to the cwd's most recent session, which
+  // may belong to a different conversation; `--session` pins the id.
   if (isNonEmptySessionId(sessionId)) {
-    args.push('--continue');
+    args.push('--session', sessionId.trim());
   }
   const thinkingFlag = resolveThinkingFlag(reasoningEffort);
   if (thinkingFlag) {
