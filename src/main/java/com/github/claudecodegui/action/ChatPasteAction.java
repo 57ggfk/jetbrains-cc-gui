@@ -89,11 +89,17 @@ public class ChatPasteAction extends ChatToolWindowAction {
      * into a renderable BufferedImage.
      */
     private static BufferedImage toBufferedImage(Image img) {
-        if (img == null) return null;
-        if (img instanceof BufferedImage) return (BufferedImage) img;
+        if (img == null) {
+            return null;
+        }
+        if (img instanceof BufferedImage) {
+            return (BufferedImage) img;
+        }
         int w = img.getWidth(null);
         int h = img.getHeight(null);
-        if (w <= 0 || h <= 0) return null;
+        if (w <= 0 || h <= 0) {
+            return null;
+        }
         BufferedImage buffered = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = buffered.createGraphics();
         g.drawImage(img, 0, 0, null);

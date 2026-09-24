@@ -48,15 +48,29 @@ public class PasteKeyInitializer implements ProjectActivity {
     }
 
     private static void installCefHook(Project project, int attempt) {
-        if (CEF_INSTALLED.get()) return;
-        if (attempt > 12) { LOG.warn("[paste-fix][CEF] giving up after 12 attempts"); return; }
+        if (CEF_INSTALLED.get()) {
+            return;
+        }
+        if (attempt > 12) {
+            LOG.warn("[paste-fix][CEF] giving up after 12 attempts");
+            return;
+        }
         try {
             ClaudeChatWindow window = ClaudeSDKToolWindow.getChatWindow(project);
-            if (window == null) { retry(project, attempt); return; }
+            if (window == null) {
+                retry(project, attempt);
+                return;
+            }
             JBCefBrowser browser = readBrowserField(window);
-            if (browser == null) { retry(project, attempt); return; }
+            if (browser == null) {
+                retry(project, attempt);
+                return;
+            }
             org.cef.CefClient client = browser.getCefBrowser().getClient();
-            if (client == null) { retry(project, attempt); return; }
+            if (client == null) {
+                retry(project, attempt);
+                return;
+            }
             if (CEF_INSTALLED.compareAndSet(false, true)) {
                 CefPasteHook.install(client, window);
                 LOG.info("[paste-fix][CEF] CefPasteHook installed (attempt=" + attempt + ")");
