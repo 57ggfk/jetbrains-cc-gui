@@ -34,7 +34,8 @@ export interface MessageQueueSteerApi {
   requeueAtHead: (item: QueuedMessage) => void;
   dequeue: (id: string) => void;
   steeringItemsRef: MutableRefObject<Map<string, QueuedMessage>>;
-  steerMessage: (item: QueuedMessage) => void;
+  /** Returns false when the item carried no sendable content. */
+  steerMessage: (item: QueuedMessage) => boolean;
 }
 
 export interface UseWindowCallbacksOptions {

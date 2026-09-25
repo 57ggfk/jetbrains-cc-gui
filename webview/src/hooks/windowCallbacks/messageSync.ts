@@ -902,6 +902,22 @@ export const preserveLatestMessagesOnShrink = (
 // ---------------------------------------------------------------------------
 
 /**
+ * Where a recovered assistant message belongs in the list.
+ *
+ * Normally that is the tail. A steered user row is the exception: it is
+ * inserted optimistically while segment 1 is still streaming, so it always sits
+ * after the assistant it belongs to and must never be jumped over — otherwise
+ * the recovered segment lands below its own steered message.
+ */
+const findAssistantRecoveryIndex = (list: ClaudeMessage[]): number => {
+  let index = list.length;
+  while (index > 0 && isSteeredUserMessage(list[index - 1])) {
+    index -= 1;
+  }
+  return index;
+};
+
+/**
  * Ensure a streaming assistant message is not lost when updateMessages replaces
  * the entire message list.  Returns the (possibly amended) result list and the
  * index of the streaming assistant inside it.
@@ -950,8 +966,13 @@ export const ensureStreamingAssistantInList = (
     }
 
     if (streamingAssistant) {
-      const result = [...resultList, streamingAssistant];
-      return { list: result, streamingIndex: result.length - 1 };
+      const insertIndex = findAssistantRecoveryIndex(resultList);
+      const result = [
+        ...resultList.slice(0, insertIndex),
+        streamingAssistant,
+        ...resultList.slice(insertIndex),
+      ];
+      return { list: result, streamingIndex: insertIndex };
     }
 
     return { list: resultList, streamingIndex: -1 };
@@ -978,8 +999,13 @@ export const ensureStreamingAssistantInList = (
         i < resultList.length && resultList.slice(i).some((m) => m.type === 'assistant');
 
       if (!alreadyPresent && !assistantAlreadyAtOrAfterPosition) {
-        const result = [...resultList, msg];
-        return { list: result, streamingIndex: result.length - 1 };
+        const insertIndex = findAssistantRecoveryIndex(resultList);
+        const result = [
+          ...resultList.slice(0, insertIndex),
+          msg,
+          ...resultList.slice(insertIndex),
+        ];
+        return { list: result, streamingIndex: insertIndex };
       }
       // Already in resultList — no recovery needed
       break;

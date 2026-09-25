@@ -258,6 +258,7 @@ export const MessageItem = memo(function MessageItem({
             || (typeof message.raw === 'object' && message.raw?.steered === true)
           )
         }
+        isSteerPending={message.type === 'user' && message.steerPending === true}
       />
 
       <AssistantMessageActions
