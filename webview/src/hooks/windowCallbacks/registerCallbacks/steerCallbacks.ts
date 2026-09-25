@@ -6,6 +6,11 @@ import type { MutableRefObject } from 'react';
 import type { TFunction } from 'i18next';
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
 import type { ClaudeMessage, ClaudeRawMessage } from '../../../types';
+import {
+  clearSteerPending,
+  getSteerIdOf,
+  removeSteeredMessage,
+} from '../../../utils/steerMessages';
 
 interface SteerResultPayload {
   steerId?: string;
@@ -43,6 +48,8 @@ function toSteeredUserMessage(payload: SteerFoldedPayload): ClaudeMessage {
     type: 'user',
     content: typeof source?.content === 'string' ? source.content : '',
     timestamp,
+    steered: true,
+    steerId: payload.steerId,
     raw,
   };
 }
@@ -68,6 +75,9 @@ export function registerSteerCallbacks(
         return;
       }
       if (payload.status === 'rejected') {
+        // The bubble was inserted optimistically on click and the CLI never
+        // took the steer: retract it and put the row back in the queue.
+        options.setMessages((prev) => removeSteeredMessage(prev, steerId));
         api.restore(steerId);
         const reason = payload.reason || 'no_active_turn';
         const message = tRef.current(`chat.steerRejected.${reason}`, { defaultValue: reason });
@@ -76,6 +86,7 @@ export function registerSteerCallbacks(
       }
       if (payload.status === 'undelivered') {
         const item = api.steeringItemsRef.current.get(steerId);
+        options.setMessages((prev) => removeSteeredMessage(prev, steerId));
         if (item) {
           api.requeueAtHead(item);
         }
@@ -100,10 +111,7 @@ export function registerSteerCallbacks(
       options.streamingThinkingRef.current = '';
       options.setMessages((prev) => {
         const alreadyPresent = !!steerId && prev.some((message) => (
-          message.type === 'user'
-          && typeof message.raw === 'object'
-          && message.raw !== null
-          && message.raw.steerId === steerId
+          message.type === 'user' && getSteerIdOf(message) === steerId
         ));
         // Segment 1 is complete at the fold; later deltas belong to the placeholder.
         const settled = prev.map((message) => (
@@ -111,6 +119,11 @@ export function registerSteerCallbacks(
             ? { ...message, isStreaming: false }
             : message
         ));
+        // The optimistic bubble was already on screen: only clear its pending
+        // marker, otherwise insert the row we never showed.
+        const withDeliveredRow = alreadyPresent
+          ? clearSteerPending(settled, steerId as string)
+          : settled;
         const steeredUser = alreadyPresent ? null : toSteeredUserMessage(payload);
         const placeholder: ClaudeMessage = {
           type: 'assistant',
@@ -120,8 +133,8 @@ export function registerSteerCallbacks(
           timestamp: new Date().toISOString(),
         };
         const next = alreadyPresent
-          ? [...settled, placeholder]
-          : [...settled, steeredUser as ClaudeMessage, placeholder];
+          ? [...withDeliveredRow, placeholder]
+          : [...withDeliveredRow, steeredUser as ClaudeMessage, placeholder];
         options.streamingMessageIndexRef.current = next.length - 1;
         return next;
       });

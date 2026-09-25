@@ -190,7 +190,7 @@ export const useAppChatController = ({
     requeueAtHead: (item: QueuedMessage) => void;
     dequeue: (id: string) => void;
     steeringItemsRef: { current: Map<string, QueuedMessage> };
-    steerMessage: (item: QueuedMessage) => void;
+    steerMessage: (item: QueuedMessage) => boolean;
   } | null>(null);
 
   // Ref indirection breaks a hook-ordering cycle: useSessionManagement wants the
@@ -375,8 +375,13 @@ export const useAppChatController = ({
   const handleSteerFromQueue = useCallback((id: string) => {
     const item = messageQueue.find(entry => entry.id === id);
     if (!item || item.status === 'steering') return;
-    steerMessage(item);
-  }, [messageQueue, steerMessage]);
+    // The steered bubble now lives in the transcript, so the queue row is
+    // hidden (it stays in the queue state, and in steeringItemsRef, so a
+    // rejected/undelivered receipt can put it back where it was).
+    if (steerMessage(item)) {
+      markSteering(id);
+    }
+  }, [messageQueue, steerMessage, markSteering]);
 
   // ── Chat-view computations (stage 5 of TASK-P1-01) ──
   const {

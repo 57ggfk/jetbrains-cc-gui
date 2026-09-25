@@ -20,6 +20,7 @@ This plan is the single source of truth for the feature. Implement only what is 
 | 5 | Attachments are supported on steer. One event covers both: `steer_message`. |
 | 6 | Provider-agnostic protocol (`<provider>.steer`, `[CAPABILITIES]`, steer receipts). Claude is the first `STEER_HANDLERS` / `SteerCapableBridge` implementation. |
 | 7 | After a successful fold, split the assistant transcript at the fold boundary so live view matches history. |
+| 7b | **Superseded 2026-09-24**: the steered user bubble is inserted optimistically the moment steer is clicked, not at the fold. The queue row disappears at the same time (it stays in queue state and `steeringItemsRef` so `rejected`/`undelivered` can restore it). Until the fold receipt, the bubble carries a `steerPending` marker (run-above badge + spinner) so the UI never claims the model has read a message it has not seen yet. |
 | 8 | Unsupported providers: hide the button. Queue keeps today's "send after this turn" behavior. No interrupt+resend fallback. |
 
 ---
@@ -55,22 +56,26 @@ Unsupported (other providers, Claude CLI too old, no live turn):
 ```
 
 - Icon: `codicon-run-above` (play triangle + "above", matches "inject into the turn above").
-- While `status === 'steering'`: spinner `codicon-loading codicon-modifier-spin`, disable steer and delete.
 - Tooltip: `chat.queue.steerNow` — EN "Send now (steer the current turn)" / ZH "立即发送（插入当前回合）".
-- Folded user bubble in the transcript uses the same small `codicon-run-above` badge so the button and the inserted message match.
+- Steered user bubble in the transcript uses the same small `codicon-run-above` badge so the button and the inserted message match.
 
-### Transcript after fold
+### Transcript
+
+Clicking steer puts the bubble in the transcript immediately (decision 7b), so there is no waiting for the fold to see it.
 
 ```text
 User: refactor this module
 Assistant (segment 1): thinking / tools / partial answer for the original prompt
-User (steered, badge): do not touch file B
-Assistant (segment 2): continues with the steer applied
+Assistant (segment 1 continues streaming above the bubble)
+User (steered, badge + spinner): do not touch file B
+Assistant (segment 2, after the fold): continues with the steer applied
 ```
 
-The split point is the CLI fold point (after a tool batch, before the next model call), the same place JSONL records `queued_command` parented to the tool_result.
+The row leaves the queue at the same moment. Until the fold receipt, the bubble keeps a `steerPending` marker (spinner inside the badge, tooltip `chat.queue.steering`), because the CLI only picks the command up after a tool batch and the message must not look delivered before then.
 
-Until fold, the item stays in the queue with a spinner. It must not enter the transcript early, or the model appears to have seen text it has not seen yet.
+The split point is still the CLI fold point (after a tool batch, before the next model call), the same place JSONL records `queued_command` parented to the tool_result: on `[STEER_FOLDED]` segment 1 is settled and segment 2 gets a fresh streaming placeholder.
+
+If the CLI never folds, nothing is left stranded in the transcript: `rejected` retracts the bubble and returns the row in place, `undelivered` retracts it and requeues the item at the head.
 
 Steered user messages are not rewind targets (CLI does not persist a uuid-stamped user row for a fold). Hide rewind on those bubbles.
 
@@ -78,10 +83,10 @@ Steered user messages are not rewind targets (CLI does not persist a uuid-stampe
 
 | Status | When | Frontend |
 |---|---|---|
-| `accepted` | Daemon found a live turn and enqueued with `priority: 'next'` | Keep item in queue as `steering` |
-| `folded` | CLI folded the command into the running turn | Remove from queue, insert user message at list tail, start assistant segment 2 |
-| `rejected` | No live turn / version too old / session mismatch / unsupported provider / timeout | Restore item in place, toast by reason |
-| `undelivered` | Turn ended before fold, or abort destroyed the runtime, and `cancelAsyncMessage` succeeded | Requeue at head; existing idle effect sends as `send_message` |
+| `accepted` | Daemon found a live turn and enqueued with `priority: 'next'` | No-op: the row was already hidden and the bubble already shows `steering` |
+| `folded` | CLI folded the command into the running turn | Dequeue the row, clear `steerPending` on the existing bubble, start assistant segment 2 |
+| `rejected` | No live turn / version too old / session mismatch / unsupported provider / timeout | Retract the bubble, restore item in place, toast by reason |
+| `undelivered` | Turn ended before fold, or abort destroyed the runtime, and `cancelAsyncMessage` succeeded | Retract the bubble, requeue at head; existing idle effect sends as `send_message` |
 
 ### Unsupported providers
 
@@ -188,15 +193,17 @@ Audit Java history readers (`HistoryLoadService`, `SessionConversionService`, `H
 
 - `QueuedMessage` adds `status: 'queued' | 'steering'`.
 - `useMessageQueue`: `markSteering(id)`, `restore(id)`, `requeueAtHead(item)`. Auto-execute only takes the first `status === 'queued'` item.
-- `useMessageSender.steerMessage(item)`: reuse payload construction from `sendMessageToBackend` (agent, fileTags, reasoningEffort, attachments). Do not `setLoading`. Do not reset streaming refs. Send `steer_message` with `steerId`.
+- `useMessageSender.steerMessage(item)`: reuse payload construction from `sendMessageToBackend` (agent, fileTags, reasoningEffort, attachments). Inserts the optimistic bubble via `utils/steerMessages.buildSteeredUserMessage` and returns whether it dispatched. Do not `setLoading`. Do not reset streaming refs. Send `steer_message` with `steerId`.
+- `useAppChatController.handleSteerFromQueue`: `markSteering(id)` only after `steerMessage` reports it dispatched, so the queue row and the bubble change together.
 - New `useProviderCapabilities`: listen to `onProviderCapabilities`; reset in `beginSessionTransition`.
 - `canSteer = loading && capabilities.steer`.
-- `MessageQueue`: `canSteer` + `onSteer(id)`. Button only when `canSteer && item.status === 'queued'`.
+- `MessageQueue`: `canSteer` + `onSteer(id)`. Button only when `canSteer && item.status === 'queued'`. `status === 'steering'` rows are filtered out of the rendered list (and out of drag/keyboard reorder), since the message now lives in the transcript.
 - Callbacks:
-  - `accepted` → `markSteering`.
-  - `folded` → dequeue; append user(steer); append empty assistant placeholder; point `streamingMessageIndexRef` at the placeholder; clear `streamingContentRef` / `streamingThinkingRef`; bump `__turnId`.
-  - `rejected` → `restore(id)` + toast.
-  - `undelivered` → `requeueAtHead` from `steeringItemsRef`.
+  - `accepted` → no-op (the row is already hidden).
+  - `folded` → dequeue; `clearSteerPending` on the bubble that is already there (insert it only when a snapshot dropped it); append empty assistant placeholder; point `streamingMessageIndexRef` at the placeholder; clear `streamingContentRef` / `streamingThinkingRef`; bump `__turnId`.
+  - `rejected` → `removeSteeredMessage` + `restore(id)` + toast.
+  - `undelivered` → `removeSteeredMessage` + `requeueAtHead` from `steeringItemsRef`.
+- `utils/steerMessages.ts` holds the pure helpers (`buildSteeredUserMessage`, `getSteerIdOf`, `isSteerPending`, `removeSteeredMessage`, `clearSteerPending`); `ClaudeMessage` gains `steered` / `steerId` / `steerPending`. The bubble is built with `isOptimistic: true` so the existing snapshot guards (`appendOptimisticMessageIfMissing`) keep it alive while the backend has no copy of it yet.
 - Guard `messageSync.ts` `preserveLastAssistantIdentity` / streaming patch: when prev last-assistant is segment 1 and next last-assistant is segment 2, do not copy segment 1 identity/content onto segment 2 (`__turnId` or `steerId` boundary).
 - Insert the empty assistant placeholder in the same `setMessages` transaction as the steered user message so `findLastAssistantIndex` cannot briefly target segment 1.
 - Local slash commands (`/new`, `/plan`, `/context`, …) never steer.
@@ -221,9 +228,9 @@ Update `webview/src/version/changelog.ts` and `CHANGELOG.md`.
 
 ## Flows
 
-1. **Happy path**: click run-above → `steering` → daemon `accepted` → CLI folds at next tool boundary → `[STEER_FOLDED]` → user row + assistant split → turn `result`.
+1. **Happy path**: click run-above → bubble appears in the transcript as pending, queue row hidden → daemon `accepted` → CLI folds at next tool boundary → `[STEER_FOLDED]` → pending badge cleared + assistant split → turn `result`.
 2. **Turn ends before fold**: `result` → `cancelAsyncMessage` true → `[STEER_UNDELIVERED]` → requeue at head → loading false → normal `send_message`.
-3. **Immediate reject**: no live turn / old CLI / wrong session → `rejected` → restore in place + toast. No transcript row.
+3. **Immediate reject**: no live turn / old CLI / wrong session → `rejected` → bubble retracted, row restored in place + toast.
 4. **User interrupt**: abort emits `[STEER_UNDELIVERED]` for pending-not-folded items, then same as flow 2.
 5. **Attachments**: same as happy path; `buildUserMessage(params, true)`.
 6. **`cancelAsyncMessage` false**: keep reading the extra turn on the current request (protocol race, not a fallback invention).
@@ -361,7 +368,8 @@ Do not modify Codex/Grok/ZCode send paths except to reject `steer` if a shared d
 
 - Claude + CLI >= 2.1.220: queue row shows `codicon-run-above` left of delete while loading.
 - Claude + older CLI, or any other provider: queue row unchanged, no steer button.
-- Clicking steer injects at the next tool boundary without stopping the in-flight tool.
+- Clicking steer shows the message in the conversation immediately, with a pending badge, and leaves the queue row gone.
+- The pending badge clears when the CLI folds the steer at the next tool boundary; the injection does not stop the in-flight tool.
 - After fold, chat shows two assistant segments split by the steered user message, live and after history reload.
 - If the model finishes before fold, the item returns to the head of the queue and sends as a normal follow-up turn.
 - Attachments survive steer.

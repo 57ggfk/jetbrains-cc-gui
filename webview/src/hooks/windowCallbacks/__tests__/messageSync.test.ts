@@ -1061,6 +1061,27 @@ describe('ensureStreamingAssistantInList', () => {
     expect(streamingIndex).toBe(1);
   });
 
+  it('recovers before a trailing steered bubble instead of jumping over it', () => {
+    // Layout while a steer is pending: segment 1 streams below the user's turn
+    // opener and the steered bubble was inserted optimistically after it. The
+    // snapshot arrives without segment 1 but with the steered bubble
+    // (appendOptimisticMessageIfMissing re-appended it), so recovery must slot
+    // the segment back above its own steered message instead of below it.
+    const streamingMsg = makeAssistantMsg('segment 1', { __turnId: 1, isStreaming: true });
+    const steeredBubble = makeUserMsg('steer me', {
+      steered: true, steerId: 'steer-1', steerPending: true,
+    });
+    const prev = [makeUserMsg('q'), streamingMsg, steeredBubble];
+    const result = [makeUserMsg('q'), steeredBubble];
+
+    const { list, streamingIndex } = ensureStreamingAssistantInList(prev, result, true, 1);
+
+    expect(list.map((m) => m.type)).toEqual(['user', 'assistant', 'user']);
+    expect(list[1]).toBe(streamingMsg);
+    expect(list[2]).toBe(steeredBubble);
+    expect(streamingIndex).toBe(1);
+  });
+
   // ---- Fallback path (refs cleared — race condition) ----
 
   it('recovers streaming assistant from prevList when refs are already cleared', () => {

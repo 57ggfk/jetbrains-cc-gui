@@ -27,6 +27,16 @@ export interface MessageQueueProps {
  */
 export function MessageQueue({ queue, onRemove, onReorder, canSteer = false, onSteer }: MessageQueueProps) {
   const { t } = useTranslation();
+
+  // A steering item has already been shown in the transcript as an optimistic
+  // steered bubble, so it is hidden here to keep one message in one place. It
+  // stays in the parent queue state (and in steeringItemsRef) so a rejected or
+  // undelivered receipt can restore it to its original slot.
+  const visibleQueue = useMemo(
+    () => queue.filter(item => item.status !== 'steering'),
+    [queue],
+  );
+
   /**
    * Sort callback fired when a drag completes.
    * useDragSort emits orderedIds in real queue order (not display order), so
@@ -44,13 +54,13 @@ export function MessageQueue({ queue, onRemove, onReorder, canSteer = false, onS
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
     e.stopPropagation();
-    const index = queue.findIndex(item => item.id === id);
+    const index = visibleQueue.findIndex(item => item.id === id);
     const swapIndex = e.key === 'ArrowUp' ? index + 1 : index - 1;
-    if (index === -1 || swapIndex < 0 || swapIndex >= queue.length) return;
-    const next = [...queue];
+    if (index === -1 || swapIndex < 0 || swapIndex >= visibleQueue.length) return;
+    const next = [...visibleQueue];
     [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
     onReorder?.(next.map(item => item.id));
-  }, [queue, onReorder]);
+  }, [visibleQueue, onReorder]);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -65,7 +75,7 @@ export function MessageQueue({ queue, onRemove, onReorder, canSteer = false, onS
   // Only the pointer-based path is used; `queue` (parent state) is the single
   // source of truth for rendering because reorder applies synchronously.
   const { draggedId, dragOverId, dragOverPlacement, handlePointerDown } = useDragSort({
-    items: queue,
+    items: visibleQueue,
     onSort: handleSort,
     resolveDropTarget,
   });
@@ -74,29 +84,27 @@ export function MessageQueue({ queue, onRemove, onReorder, canSteer = false, onS
   // near its edges so rows outside the viewport can be reached.
   useDragAutoScroll(containerRef, draggedId !== null);
 
-  if (queue.length === 0) {
+  if (visibleQueue.length === 0) {
     return null;
   }
 
-  const canReorder = typeof onReorder === 'function' && queue.length > 1;
+  const canReorder = typeof onReorder === 'function' && visibleQueue.length > 1;
 
   return (
     <div className="message-queue" ref={containerRef}>
       {/* Render in reverse order so newest is at bottom (closest to input) */}
-      {[...queue].reverse().map((item, reversedIndex) => {
+      {[...visibleQueue].reverse().map((item, reversedIndex) => {
         // Calculate actual queue position (1-based, from bottom)
-        const queuePosition = queue.length - reversedIndex;
+        const queuePosition = visibleQueue.length - reversedIndex;
         // Placement is in queue order; the display is reversed, so 'after'
         // (higher index) draws the insert line above the row and 'before' below it.
         const isDragOver = dragOverId === item.id;
-        const isSteering = item.status === 'steering';
         const itemClassName = [
           'message-queue-item',
           draggedId === item.id && 'dragging',
           isDragOver && dragOverPlacement === 'on' && 'drag-over',
           isDragOver && dragOverPlacement === 'after' && 'insert-above',
           isDragOver && dragOverPlacement === 'before' && 'insert-below',
-          isSteering && 'steering',
         ].filter(Boolean).join(' ');
         return (
           <div key={item.id} className={itemClassName} data-drag-sort-id={item.id}>
@@ -118,16 +126,7 @@ export function MessageQueue({ queue, onRemove, onReorder, canSteer = false, onS
             <span className="message-queue-content" title={item.content}>
               {item.content}
             </span>
-            {isSteering && (
-              <span
-                className="message-queue-steering-spinner"
-                title={t('chat.queue.steering')}
-                aria-label={t('chat.queue.steering')}
-              >
-                <span className="codicon codicon-loading codicon-modifier-spin" />
-              </span>
-            )}
-            {canSteer && item.status === 'queued' && (
+            {canSteer && (
               <button
                 className="message-queue-steer"
                 type="button"
@@ -143,7 +142,6 @@ export function MessageQueue({ queue, onRemove, onReorder, canSteer = false, onS
               type="button"
               onClick={() => onRemove(item.id)}
               title="Remove from queue"
-              disabled={isSteering}
             >
               <span className="codicon codicon-close" />
             </button>
