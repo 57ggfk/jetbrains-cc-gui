@@ -6,6 +6,7 @@
  * Folded rows are inserted by Java from [STEER_FOLDED], not from CLI replay.
  */
 
+import { randomUUID } from 'node:crypto';
 import { getActiveTurnRuntime } from './runtime-registry.js';
 
 /** Minimum Claude Code CLI version that supports async-message steer. */
@@ -381,7 +382,7 @@ export async function steerMessagePersistent(params = {}, deps = {}) {
     ? params.sessionId.trim()
     : (runtime.sessionId || '');
   const userMessage = await buildUserMessage(params, hasAttachments, requestedSessionId);
-  const uuid = crypto.randomUUID();
+  const uuid = randomUUID();
   userMessage.priority = 'next';
   userMessage.uuid = uuid;
 
