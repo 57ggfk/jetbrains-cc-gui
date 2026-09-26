@@ -199,6 +199,41 @@ test('live SDK user message matching pending prompt emits STEER_FOLDED', async (
   assert.equal(parseTags(text, '[STEER_FOLDED]')[0].uuid, 'uuid-assigned');
 });
 
+test('already-folded steer replays are consumed without a second STEER_FOLDED', async () => {
+  const runtime = capableRuntime();
+  runtime.foldedSteers.set('uuid-live', { steerId: 'steer-live', prompt: '你好' });
+  const { text } = await captureStdout(() => {
+    const consumed = tryEmitSteerFolded(runtime, {
+      type: 'user',
+      uuid: 'uuid-live',
+      isReplay: true,
+      message: { role: 'user', content: '你好' },
+    });
+    assert.equal(consumed, true);
+    const again = tryEmitSteerFolded(runtime, {
+      type: 'user',
+      uuid: 'cli-rewrote',
+      isReplay: true,
+      message: { role: 'user', content: '你好' },
+    });
+    assert.equal(again, true);
+  });
+  assert.equal(parseTags(text, '[STEER_FOLDED]').length, 0);
+});
+
+test('stale prompt queued_command after fold is consumed without STEER_FOLDED', async () => {
+  const runtime = capableRuntime();
+  runtime.foldedSteers.set('uuid-1', { steerId: 'steer-1', prompt: '你好' });
+  const { text } = await captureStdout(() => {
+    const consumed = tryEmitSteerFolded(runtime, {
+      type: 'attachment',
+      attachment: { type: 'queued_command', commandMode: 'prompt', prompt: '你好' },
+    });
+    assert.equal(consumed, true);
+  });
+  assert.equal(parseTags(text, '[STEER_FOLDED]').length, 0);
+});
+
 test('tool_result user messages are not treated as a steer fold', () => {
   const runtime = capableRuntime();
   runtime.pendingSteers.set('uuid-1', { steerId: 'steer-1', prompt: '你好' });

@@ -231,12 +231,15 @@ function foldOldestPendingSteer(runtime, prompt) {
  */
 export function tryEmitSteerFolded(runtime, msg) {
   ensureSteerMaps(runtime);
-  if (runtime.pendingSteers.size === 0) {
-    return false;
-  }
 
+  // --replay-user-messages re-echoes fold carriers (queued_command attachment
+  // and/or the user row). Consume every fold-shaped carrier so a post-fold
+  // replay cannot leak a second row into [MESSAGE].
   const attachment = getQueuedCommandAttachment(msg);
   if (attachment && FOLD_COMMAND_MODES.has(attachment.commandMode)) {
+    if (runtime.pendingSteers.size === 0) {
+      return true;
+    }
     return foldOldestPendingSteer(runtime, attachment.prompt);
   }
 
@@ -256,6 +259,11 @@ export function tryEmitSteerFolded(runtime, msg) {
     return foldSteerRecord(runtime, uuid, record, prompt || record.prompt);
   }
 
+  // Already folded: this is a replay of a steer we already emitted.
+  if (uuid && runtime.foldedSteers.has(uuid)) {
+    return true;
+  }
+
   // Prompt match is only for the main thread: sidechain user rows can repeat text.
   if (msg.parent_tool_use_id) {
     return false;
@@ -266,6 +274,11 @@ export function tryEmitSteerFolded(runtime, msg) {
   for (const [pendingUuid, record] of runtime.pendingSteers.entries()) {
     if (normalizePromptText(record.prompt) === promptText) {
       return foldSteerRecord(runtime, pendingUuid, record, prompt);
+    }
+  }
+  for (const record of runtime.foldedSteers.values()) {
+    if (normalizePromptText(record.prompt) === promptText) {
+      return true;
     }
   }
   return false;

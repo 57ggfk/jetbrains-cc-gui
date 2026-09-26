@@ -411,13 +411,14 @@ public class SessionHandler extends BaseMessageHandler {
      * @param content JSON payload with text, agent, fileTags, attachments, steerId
      */
     private void handleSteerMessage(String content) {
+        String steerId = "";
         try {
             Gson gson = new Gson();
             JsonObject payload = gson.fromJson(content, JsonObject.class);
             String text = payload != null && payload.has("text") && !payload.get("text").isJsonNull()
                     ? payload.get("text").getAsString()
                     : "";
-            String steerId = payload != null && payload.has("steerId") && !payload.get("steerId").isJsonNull()
+            steerId = payload != null && payload.has("steerId") && !payload.get("steerId").isJsonNull()
                     ? payload.get("steerId").getAsString()
                     : "";
 
@@ -479,7 +480,50 @@ public class SessionHandler extends BaseMessageHandler {
             });
         } catch (Exception e) {
             LOG.error("[SessionHandler] Failed to parse steer_message: " + e.getMessage(), e);
+            // The optimistic bubble is already in the transcript and the queue row
+            // is hidden; without a rejected receipt both stay stranded.
+            if (steerId == null || steerId.isEmpty()) {
+                steerId = extractSteerId(content);
+            }
+            notifySteerRejected(steerId);
         }
+    }
+
+    /**
+     * Best-effort steerId extraction when the main parse failed mid-payload.
+     *
+     * @param content raw steer_message JSON
+     * @return steerId, or empty when unavailable
+     */
+    private static String extractSteerId(String content) {
+        if (content == null) {
+            return "";
+        }
+        try {
+            JsonObject payload = new Gson().fromJson(content, JsonObject.class);
+            if (payload != null && payload.has("steerId") && !payload.get("steerId").isJsonNull()) {
+                return payload.get("steerId").getAsString();
+            }
+        } catch (Exception ignored) {
+            // Fall through to the regex path for partially malformed JSON.
+        }
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("\"steerId\"\\s*:\\s*\"([^\"]+)\"").matcher(content);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    /**
+     * Reject a steer that never reached the provider so the frontend can retract
+     * the optimistic bubble and restore the queue row.
+     *
+     * @param steerId frontend correlation id (may be empty)
+     */
+    private void notifySteerRejected(String steerId) {
+        JsonObject receipt = new JsonObject();
+        receipt.addProperty("steerId", steerId != null ? steerId : "");
+        receipt.addProperty("status", "rejected");
+        receipt.addProperty("reason", "runtime_closed");
+        callJavaScript("onSteerResult", escapeJs(receipt.toString()));
     }
 
     /**
