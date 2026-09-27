@@ -91,6 +91,9 @@ function extractAtFilePath(
  * Protocol layer text sent to the AI is unchanged — this transformation is
  * display-only.
  *
+ * An `@` glued to a preceding word character belongs to an address rather than
+ * a file reference (`git@host:repo.git`, `user@example.com`) and is left as-is.
+ *
  * @visibleForTesting
  */
 export function convertAtFileRefsToLinks(text: string): string {
@@ -112,6 +115,15 @@ export function convertAtFileRefsToLinks(text: string): string {
     if (i + 1 < text.length && text[i + 1] === '@') {
       result += '@@';
       i += 2;
+      continue;
+    }
+
+    // An @ glued to a preceding word character is an address separator, not a
+    // file reference: `git@host:repo.git` and `user@example.com` must survive
+    // display untouched instead of collapsing to their last path segment.
+    if (i > 0 && /[A-Za-z0-9_]/.test(text[i - 1])) {
+      result += escapeHtml(text[i]);
+      i++;
       continue;
     }
 
