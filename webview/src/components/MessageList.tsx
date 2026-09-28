@@ -299,6 +299,10 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
     () => (shouldCollapse ? messages.slice(collapsedCount) : messages),
     [messages, shouldCollapse, collapsedCount]
   );
+  const toolSignatureCache = useMemo(
+    () => new WeakMap<ClaudeMessage, { messageIndex: number; signature: string }>(),
+    [getContentBlocks, findToolResult, currentSessionId],
+  );
   return (
     <div ref={containerRef} onContextMenu={handleMessageContextMenu}>
       {ctxMenu.visible && (
@@ -344,7 +348,15 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
       {visibleMessages.map((message, visibleIndex) => {
         const messageIndex = shouldCollapse ? visibleIndex + collapsedCount : visibleIndex;
         const messageKey = messageKeys[messageIndex];
-        const toolResultSignature = getMessageToolResultSignature(message, messageIndex, getContentBlocks, findToolResult);
+        let cachedSignature = toolSignatureCache.get(message);
+        if (!cachedSignature || cachedSignature.messageIndex !== messageIndex) {
+          cachedSignature = {
+            messageIndex,
+            signature: getMessageToolResultSignature(message, messageIndex, getContentBlocks, findToolResult),
+          };
+          toolSignatureCache.set(message, cachedSignature);
+        }
+        const toolResultSignature = cachedSignature.signature;
 
         return (
           <MessageItem
