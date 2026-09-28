@@ -43,6 +43,7 @@ import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
 import 'katex/dist/katex.css';
 import { markedHighlight } from 'marked-highlight';
+import { copyToClipboard } from '../utils/copyUtils';
 
 const SAFE_HREF_PROTOCOL_REGEX = /^(?:https?|mailto):/i;
 const FILE_URI_SCHEME_REGEX = /^file:/i;
@@ -227,20 +228,11 @@ function makeStreamSafe(content: string): string {
 
   // Handle code blocks: detect unclosed fenced code blocks (```)
   // Track code block state using a state machine approach
-  const lines = result.split('\n');
-  let inCodeBlock = false;
-
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    // Detect code block opening or closing
-    if (trimmedLine.startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-    }
-  }
+  const fence = getFenceState(result);
 
   // If still inside a code block, append a closing fence
-  if (inCodeBlock) {
-    result = result + '\n```';
+  if (fence.open) {
+    result = result + '\n' + fence.marker;
   }
 
   // Handle inline code: detect unclosed inline code (`)
@@ -288,7 +280,7 @@ function splitMarkdownBlocks(content: string): string[] {
 
     if (inFence) {
       current.push(line);
-      if (trimmed.startsWith(fenceMarker)) {
+      if (!nextFenceMarker(line, fenceMarker)) {
         inFence = false;
       }
       continue;
@@ -302,9 +294,10 @@ function splitMarkdownBlocks(content: string): string[] {
       continue;
     }
 
-    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+    const openingFence = nextFenceMarker(line, '');
+    if (openingFence) {
       inFence = true;
-      fenceMarker = trimmed.slice(0, 3);
+      fenceMarker = openingFence;
       current.push(line);
       continue;
     }
@@ -359,7 +352,26 @@ function escapeXmlTags(text: string): string {
  * (outside fenced code blocks and inline code). Preserves code content as-is
  * so marked can handle XML tags inside code naturally (auto-escape).
  */
-const CODE_FENCE_RE = /(```[\s\S]*?```)/g;
+function splitCodeFences(content: string): string[] {
+  const parts: string[] = [];
+  let marker = '';
+  let start = 0;
+  let offset = 0;
+  for (const line of content.split('\n')) {
+    const nextMarker = nextFenceMarker(line, marker);
+    if (!marker && nextMarker) {
+      parts.push(content.slice(start, offset));
+      start = offset;
+    } else if (marker && !nextMarker) {
+      parts.push(content.slice(start, offset + line.length));
+      start = offset + line.length;
+    }
+    marker = nextMarker;
+    offset += line.length + 1;
+  }
+  parts.push(content.slice(start));
+  return parts;
+}
 const INLINE_CODE_RE = /(`[^`\n]+`)/g;
 const DISPLAY_MATH_DELIMITER_LINE_RE = /^([ \t]*)\$\$\s*$/;
 const BRACKET_MATH_DELIMITER_RE = /(?<!\\)(\\\[|\\\]|\\\(|\\\))/g;
@@ -377,8 +389,7 @@ const BRACKET_MATH_DELIMITER_MAP: Record<string, string> = {
  * fenced code blocks and inline code keep their literal backslash delimiters.
  */
 function normalizeBracketMathDelimiters(content: string): string {
-  return content
-    .split(CODE_FENCE_RE)
+  return splitCodeFences(content)
     .map((fencePart, fenceIdx) => {
       if (fenceIdx % 2 === 1) return fencePart;
 
@@ -397,8 +408,7 @@ function normalizeBracketMathDelimiters(content: string): string {
 }
 
 function normalizeIndentedDisplayMath(content: string): string {
-  return content
-    .split(CODE_FENCE_RE)
+  return splitCodeFences(content)
     .map((part, partIndex) => {
       if (partIndex % 2 === 1) return part;
 
@@ -432,7 +442,7 @@ function normalizeIndentedDisplayMath(content: string): string {
 
 function stripAndEscapeOutsideCodeBlocks(content: string): string {
   // First split by fenced code blocks
-  const fenceParts = content.split(CODE_FENCE_RE);
+  const fenceParts = splitCodeFences(content);
 
   return fenceParts
     .map((fencePart, fenceIdx) => {
@@ -625,6 +635,54 @@ interface BlockSectionProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
+function nextFenceMarker(line: string, marker: string): string {
+  const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!fence) return marker;
+  if (!marker) return fence[1][0] !== '`' || !fence[2].includes('`') ? fence[1] : '';
+  return fence[1][0] === marker[0] && fence[1].length >= marker.length && !fence[2].trim() ? '' : marker;
+}
+
+function getFenceState(source: string) {
+  let marker = '';
+  let closed = 0;
+  for (const line of source.split('\n')) {
+    const nextMarker = nextFenceMarker(line, marker);
+    if (marker && !nextMarker) closed++;
+    marker = nextMarker;
+  }
+  return { open: marker !== '', marker, closed };
+}
+
+function useStreamingHighlightSource(source: string, isStreamingTail: boolean) {
+  const [snapshot, setSnapshot] = useState(source);
+  const committedSource = useRef(source);
+  const highlightedAt = useRef(Date.now());
+  const fence = useMemo(() => getFenceState(source), [source]);
+  const snapshotFence = useMemo(() => getFenceState(snapshot), [snapshot]);
+  const shouldWait = isStreamingTail && fence.open && source.startsWith(snapshot)
+    && fence.closed === snapshotFence.closed;
+  const renderedSource = shouldWait ? snapshot : source;
+
+  useLayoutEffect(() => {
+    if (committedSource.current !== renderedSource) {
+      committedSource.current = renderedSource;
+      highlightedAt.current = Date.now();
+    }
+    if (!shouldWait && snapshot !== source) setSnapshot(source);
+  }, [renderedSource, shouldWait, snapshot, source]);
+
+  useEffect(() => {
+    if (!shouldWait || snapshot === source) return;
+    const timer = window.setTimeout(
+      () => setSnapshot(source),
+      Math.max(0, 150 - (Date.now() - highlightedAt.current)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [shouldWait, snapshot, source]);
+
+  return renderedSource;
+}
+
 /**
  * One top-level markdown block, memoized by source text. During streaming only
  * the tail block's source changes; every earlier block skips re-parsing, and
@@ -638,6 +696,11 @@ const BlockSection = memo(function BlockSection({
   copyCodeTitle,
   containerRef,
 }: BlockSectionProps) {
+  const renderedSource = useStreamingHighlightSource(source, isStreamingTail);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+  }, []);
   const html = useMemo(
     () =>
       renderFullMarkdownHtml(
@@ -645,12 +708,12 @@ const BlockSection = memo(function BlockSection({
         // still arriving — temporarily close the structure so marked can parse
         // it. Once the real closing token arrives the source itself contains
         // it, makeStreamSafe becomes a no-op, and the HTML string is unchanged.
-        isStreamingTail ? makeStreamSafe(source) : source,
+        isStreamingTail ? makeStreamSafe(renderedSource) : renderedSource,
         linkifyCapabilities,
         copySuccessText,
         copyCodeTitle,
       ),
-    [source, isStreamingTail, linkifyCapabilities, copySuccessText, copyCodeTitle],
+    [renderedSource, isStreamingTail, linkifyCapabilities, copySuccessText, copyCodeTitle],
   );
 
   // Streaming selection preservation: when this block's HTML changes, its
@@ -681,7 +744,26 @@ const BlockSection = memo(function BlockSection({
     }
   }, [html, containerRef, rescued]);
 
-  return <div className="md-block" dangerouslySetInnerHTML={{ __html: html }} />;
+  const copyLatestCode = async (event: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>) => {
+    if (source === renderedSource) return;
+    if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target as HTMLElement;
+    const button = target.closest?.('button.copy-code-btn');
+    if (!button) return;
+    const code = button.closest('.code-block-wrapper')?.querySelector('pre code');
+    const index = Array.from(event.currentTarget.querySelectorAll('pre code')).indexOf(code as HTMLElement);
+    const token = marked.lexer(source).filter(token => token.type === 'code')[index];
+    if (!token || token.type !== 'code') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (await copyToClipboard(`${token.text}\n`) && button.isConnected) {
+      button.classList.add('copied');
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => button.classList.remove('copied'), 1500);
+    }
+  };
+
+  return <div className="md-block" onClick={copyLatestCode} onKeyDown={copyLatestCode} dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
 // Copy icon SVG (hoisted to module scope to avoid recreation on each render)
