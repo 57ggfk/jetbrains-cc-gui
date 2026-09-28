@@ -30,10 +30,7 @@ public class StreamMessageCoalescer {
     private static final long SLOW_PAYLOAD_BUILD_MS = 25L;
     private static final int LARGE_PAYLOAD_THRESHOLD = 100_000;
     private static final int MEDIUM_INTERVAL_MS = 500;
-    private static final int LARGE_INTERVAL_MS = 2_000;
     private static final int XLARGE_INTERVAL_MS = 5_000;
-    private static final int LONG_CONVERSATION_THRESHOLD = 300;
-    private static final int LONG_CONVERSATION_TAIL_SIZE = 64;
     private static final int STREAMING_MIN_INTERVAL_MS = 150;
     private static final int HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -418,10 +415,13 @@ public class StreamMessageCoalescer {
         }
         int chars = lastPayloadChars;
         int interval;
-        if (chars > 500_000) {
+        // Payloads above 200k chars used to ship every 2s and were observed to
+        // stall the JCEF renderer long enough for the watchdog to reload the
+        // page. With divergence-based tail transport these huge full snapshots
+        // are rare (initial load, rebase), so coalesce them hard when they do
+        // occur — the streaming delta channel keeps text flowing meanwhile.
+        if (chars > 200_000) {
             interval = XLARGE_INTERVAL_MS;
-        } else if (chars > 200_000) {
-            interval = LARGE_INTERVAL_MS;
         } else if (chars > LARGE_PAYLOAD_THRESHOLD) {
             interval = MEDIUM_INTERVAL_MS;
         } else {
@@ -752,33 +752,54 @@ public class StreamMessageCoalescer {
         }
     }
 
+    /**
+     * Choose what to transport for one snapshot delivery.
+     *
+     * <p>Streaming changes concentrate at the tail of the transcript (new blocks,
+     * new messages, text appended to the last message), so instead of gating
+     * incremental delivery on conversation length this finds the first index
+     * where the new snapshot diverges from the delivered one and ships only the
+     * suffix from that point. A 50-message conversation with a 300k-char
+     * transcript then pushes a few KB per update instead of the full transcript,
+     * which is what kept the JCEF renderer busy enough to trip the webview
+     * watchdog. Any change ahead of the tail — an edited or compacted middle
+     * message — is detected by the same walk and simply widens the suffix; only
+     * a divergence at index 0 (or a shrunk/unknown baseline) falls back to a
+     * full snapshot.</p>
+     *
+     * <p>The prefix walk runs on the snapshot executor thread. {@code String.equals}
+     * bails on length and the identity shortcut covers shared entries, so the
+     * comparison is far cheaper than the serialization it replaces.</p>
+     */
     static MessageTransport selectMessageTransport(List<ClaudeSession.Message> messages,
                                                     List<ClaudeSession.Message> previousMessages) {
-        boolean longConversation = messages.size() > LONG_CONVERSATION_THRESHOLD;
-        int candidateBaseIndex = longConversation
-                ? Math.max(0, messages.size() - LONG_CONVERSATION_TAIL_SIZE) : 0;
-        boolean stablePrefix = previousMessages != null
-                && messages.size() >= previousMessages.size()
-                && hasSamePrefix(previousMessages, messages, candidateBaseIndex);
-        boolean tailUpdate = longConversation && stablePrefix;
-        int baseIndex = tailUpdate ? candidateBaseIndex : 0;
-        List<ClaudeSession.Message> transportMessages = tailUpdate
-                ? List.copyOf(messages.subList(baseIndex, messages.size())) : messages;
-        return new MessageTransport(transportMessages, baseIndex, tailUpdate);
+        if (previousMessages == null || messages.size() < previousMessages.size()) {
+            return new MessageTransport(messages, 0, false);
+        }
+        int divergence = firstDivergenceIndex(previousMessages, messages);
+        if (divergence <= 0 || divergence >= messages.size()) {
+            // No stable prefix to build on, or nothing changed at all.
+            return new MessageTransport(messages, 0, false);
+        }
+        List<ClaudeSession.Message> transportMessages =
+                List.copyOf(messages.subList(divergence, messages.size()));
+        return new MessageTransport(transportMessages, divergence, true);
     }
 
-    private static boolean hasSamePrefix(List<ClaudeSession.Message> previousMessages,
-                                         List<ClaudeSession.Message> messages,
-                                         int prefixLength) {
-        if (previousMessages.size() < prefixLength) {
-            return false;
-        }
+    /**
+     * Return the first index where {@code messages} differs from
+     * {@code previousMessages}, or the shared prefix length when one list is a
+     * strict prefix of the other.
+     */
+    private static int firstDivergenceIndex(List<ClaudeSession.Message> previousMessages,
+                                            List<ClaudeSession.Message> messages) {
+        int prefixLength = Math.min(previousMessages.size(), messages.size());
         for (int i = 0; i < prefixLength; i++) {
             if (!sameStableMessage(previousMessages.get(i), messages.get(i))) {
-                return false;
+                return i;
             }
         }
-        return true;
+        return prefixLength;
     }
 
     private static boolean sameStableMessage(ClaudeSession.Message previous,

@@ -125,8 +125,70 @@ public class StreamMessageCoalescerStreamEndHookTest {
                 StreamMessageCoalescer.selectMessageTransport(growing, previous);
 
         assertTrue(transport.tailUpdate());
-        assertEquals(386, transport.baseIndex());
-        assertEquals(64, transport.messages().size());
+        // Divergence-based transport ships only the appended suffix, not a fixed tail.
+        assertEquals(400, transport.baseIndex());
+        assertEquals(50, transport.messages().size());
+    }
+
+    @Test
+    public void shortConversationGrowthAlsoUsesTail() {
+        // The reported freeze: ~50 messages with a huge transcript re-pushed in
+        // full every 2s. Incremental delivery must not be gated on length.
+        List<ClaudeSession.Message> previous = messages(50);
+        List<ClaudeSession.Message> growing = new ArrayList<>(previous);
+        growing.add(new ClaudeSession.Message(ClaudeSession.Message.Type.USER, "message-50"));
+        growing.add(new ClaudeSession.Message(ClaudeSession.Message.Type.ASSISTANT, "message-51"));
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(growing, previous);
+
+        assertTrue(transport.tailUpdate());
+        assertEquals(50, transport.baseIndex());
+        assertEquals(2, transport.messages().size());
+    }
+
+    @Test
+    public void contentChangeInLastMessageTailsOnlyThatMessage() {
+        // Streaming appends text to the last message; only it should ship.
+        List<ClaudeSession.Message> previous = messages(50);
+        List<ClaudeSession.Message> streaming = new ArrayList<>(previous);
+        ClaudeSession.Message last = previous.get(49);
+        ClaudeSession.Message longer = new ClaudeSession.Message(last.type, last.content + "…delta");
+        longer.timestamp = last.timestamp;
+        streaming.set(49, longer);
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(streaming, previous);
+
+        assertTrue(transport.tailUpdate());
+        assertEquals(49, transport.baseIndex());
+        assertEquals(1, transport.messages().size());
+        assertEquals(last.content + "…delta", transport.messages().get(0).content);
+    }
+
+    @Test
+    public void identicalSnapshotsFallBackToFull() {
+        List<ClaudeSession.Message> previous = messages(20);
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(previous, previous);
+
+        assertFalse(transport.tailUpdate());
+        assertEquals(0, transport.baseIndex());
+    }
+
+    @Test
+    public void divergenceAtFirstMessageForcesAFullRebase() {
+        List<ClaudeSession.Message> previous = messages(20);
+        List<ClaudeSession.Message> rebuilt = new ArrayList<>(previous);
+        rebuilt.set(0, new ClaudeSession.Message(ClaudeSession.Message.Type.SYSTEM, "rewritten"));
+
+        StreamMessageCoalescer.MessageTransport transport =
+                StreamMessageCoalescer.selectMessageTransport(rebuilt, previous);
+
+        assertFalse(transport.tailUpdate());
+        assertEquals(0, transport.baseIndex());
+        assertEquals(rebuilt, transport.messages());
     }
 
     @Test
@@ -143,7 +205,9 @@ public class StreamMessageCoalescerStreamEndHookTest {
     }
 
     @Test
-    public void replacedPrefixForcesAFullRebase() {
+    public void replacedMiddleMessageTailsFromTheDivergence() {
+        // An edited/compacted middle message widens the suffix but does not
+        // force a full re-push: everything from the divergence point ships.
         List<ClaudeSession.Message> previous = messages(400);
         List<ClaudeSession.Message> rebuilt = new ArrayList<>(previous);
         rebuilt.set(10, new ClaudeSession.Message(ClaudeSession.Message.Type.SYSTEM, "summary"));
@@ -151,9 +215,10 @@ public class StreamMessageCoalescerStreamEndHookTest {
         StreamMessageCoalescer.MessageTransport transport =
                 StreamMessageCoalescer.selectMessageTransport(rebuilt, previous);
 
-        assertFalse(transport.tailUpdate());
-        assertEquals(0, transport.baseIndex());
-        assertEquals(rebuilt, transport.messages());
+        assertTrue(transport.tailUpdate());
+        assertEquals(10, transport.baseIndex());
+        assertEquals(390, transport.messages().size());
+        assertEquals("summary", transport.messages().get(0).content);
     }
 
     @Test
