@@ -211,6 +211,21 @@ public class CodexHistoryReader {
         });
     }
 
+    public Path resolveSessionFile(String sessionId) throws IOException {
+        Path file = sessionService.findSessionFile(sessionId);
+        if (file == null) {
+            throw new IOException("Codex session file not found: " + sessionId);
+        }
+        return file.toRealPath();
+    }
+
+    public int forEachSessionMessage(Path file, long offset, long end,
+                                     java.util.function.BooleanSupplier active,
+                                     Consumer<JsonObject> consumer) throws IOException {
+        return sessionService.forEachSessionMessage(file, offset, end, active,
+                message -> consumer.accept(gson.toJsonTree(message).getAsJsonObject()));
+    }
+
     /**
      * Codex session history lives under ~/.codex/sessions and does not require
      * permission to read ~/.codex/config.toml or auth.json.
