@@ -116,6 +116,14 @@ public class SessionState {
     // snapshot never traverses a list or raw tree while another thread is changing it.
     private final Object messageStateLock = new Object();
     private final List<ClaudeSession.Message> messages = new ArrayList<>();
+    private Runnable messageMaterializer = () -> { };
+
+    void setMessageMaterializer(Runnable materializer) {
+        synchronized (messageStateLock) {
+            messageMaterializer.run();
+            messageMaterializer = materializer;
+        }
+    }
 
     // Session metadata — cwd is written in handler thread before send(), read inside send();
     // the happens-before from CompletableFuture.runAsync guarantees visibility, so volatile is not required.
@@ -176,6 +184,7 @@ public class SessionState {
      */
     public List<ClaudeSession.Message> getMessages() {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
             return new ArrayList<>(messages);
         }
     }
@@ -187,6 +196,7 @@ public class SessionState {
      */
     List<ClaudeSession.Message> getMessagesSnapshot() {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
             return StreamMessageCoalescer.copyMessagesForTransport(messages);
         }
     }
@@ -495,6 +505,8 @@ public class SessionState {
      */
     public void replaceMessages(List<ClaudeSession.Message> replacementMessages) {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
+            messageMaterializer = () -> { };
             messages.clear();
             messages.addAll(replacementMessages);
         }
@@ -507,6 +519,7 @@ public class SessionState {
      */
     public void prependMessages(List<ClaudeSession.Message> earlierMessages) {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
             messages.addAll(0, earlierMessages);
         }
     }
@@ -516,6 +529,8 @@ public class SessionState {
      */
     public void clearMessages() {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
+            messageMaterializer = () -> { };
             messages.clear();
         }
     }

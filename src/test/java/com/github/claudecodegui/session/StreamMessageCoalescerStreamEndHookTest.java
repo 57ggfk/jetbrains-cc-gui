@@ -11,6 +11,7 @@ import java.util.List;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -25,6 +26,139 @@ import static org.junit.Assert.assertTrue;
  * accepted by the ordered webview queue.
  */
 public class StreamMessageCoalescerStreamEndHookTest {
+
+    @Test
+    public void stableHistoryIsCapturedOnceAcrossThirtyToolResults() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(200);
+            for (ClaudeSession.Message message : live) {
+                message.raw = new JsonObject();
+                message.raw.addProperty("text", message.content);
+            }
+            coalescer.enqueue(live);
+            List<ClaudeSession.Message> previous = capturedMessages(coalescer);
+            int copies = previous.size();
+            for (int index = 0; index < 30; index++) {
+                JsonObject result = new JsonObject();
+                result.addProperty("type", "tool_result");
+                result.addProperty("tool_use_id", "tool-" + index);
+                result.addProperty("content", "synthetic result");
+                live.add(new ClaudeSession.Message(ClaudeSession.Message.Type.USER, "[tool_result]", result));
+                coalescer.enqueue(live);
+                List<ClaudeSession.Message> next = capturedMessages(coalescer);
+                for (int messageIndex = 0; messageIndex < next.size(); messageIndex++) {
+                    if (messageIndex >= previous.size() || next.get(messageIndex) != previous.get(messageIndex)) {
+                        copies++;
+                    }
+                }
+                previous = next;
+            }
+            assertEquals("200 history captures + 30 newly added results, not 6665 captures", 230, copies);
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @Test
+    public void cachedSnapshotsInvalidateNestedChangesAndReset() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(2);
+            JsonObject block = new JsonObject();
+            block.addProperty("type", "tool_use");
+            JsonObject input = new JsonObject();
+            input.addProperty("command", "before");
+            block.add("input", input);
+            live.get(1).raw = new JsonObject();
+            JsonArray blocks = new JsonArray();
+            blocks.add(block);
+            live.get(1).raw.add("content", blocks);
+            coalescer.enqueue(live);
+            List<ClaudeSession.Message> first = capturedMessages(coalescer);
+            input.addProperty("command", "after");
+            live.get(1).content = "changed";
+            coalescer.enqueue(live);
+            List<ClaudeSession.Message> second = capturedMessages(coalescer);
+            assertSame(first.get(0), second.get(0));
+            assertNotSame(first.get(1), second.get(1));
+            assertEquals("before", first.get(1).raw.getAsJsonArray("content").get(0)
+                    .getAsJsonObject().getAsJsonObject("input").get("command").getAsString());
+            assertEquals("after", second.get(1).raw.getAsJsonArray("content").get(0)
+                    .getAsJsonObject().getAsJsonObject("input").get("command").getAsString());
+            coalescer.resetStreamState();
+            coalescer.enqueue(live);
+            assertNotSame(second.get(0), capturedMessages(coalescer).get(0));
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<ClaudeSession.Message> capturedMessages(StreamMessageCoalescer coalescer) throws Exception {
+        java.lang.reflect.Field field = StreamMessageCoalescer.class.getDeclaredField("latestSourceMessages");
+        field.setAccessible(true);
+        return (List<ClaudeSession.Message>) field.get(coalescer);
+    }
+
+    @Test
+    public void inPlaceToolMutationInvalidatesStructuralSignature() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(1);
+            JsonObject block = new JsonObject();
+            block.addProperty("type", "tool_use");
+            block.addProperty("id", "tool");
+            JsonObject input = new JsonObject();
+            input.addProperty("command", "before");
+            block.add("input", input);
+            JsonArray blocks = new JsonArray();
+            blocks.add(block);
+            live.get(0).raw = new JsonObject();
+            live.get(0).raw.add("content", blocks);
+            coalescer.enqueue(live);
+            java.lang.reflect.Field field = StreamMessageCoalescer.class.getDeclaredField("latestStructuralSignature");
+            field.setAccessible(true);
+            Object before = field.get(coalescer);
+            input.addProperty("command", "after");
+            coalescer.enqueue(live);
+            assertFalse("Mutable raw identity is not a version", before.equals(field.get(coalescer)));
+        } finally {
+            coalescer.dispose();
+        }
+    }
+
+    @Test
+    public void textThinkingAndToolChangesInvalidateOnlyTheChangedMessage() throws Exception {
+        StreamMessageCoalescer coalescer = new StreamMessageCoalescer(new CountingTarget());
+        try {
+            List<ClaudeSession.Message> live = messages(2);
+            live.get(1).raw = new JsonObject();
+            coalescer.enqueue(live);
+            for (String field : List.of("text", "thinking", "tool_result")) {
+                List<ClaudeSession.Message> previous = capturedMessages(coalescer);
+                String previousRaw = previous.get(1).raw.toString();
+                live.get(1).raw.addProperty(field, "new value");
+                coalescer.enqueue(live);
+                List<ClaudeSession.Message> current = capturedMessages(coalescer);
+                assertSame(previous.get(0), current.get(0));
+                assertNotSame(previous.get(1), current.get(1));
+                assertEquals(previousRaw, previous.get(1).raw.toString());
+                assertEquals("new value", current.get(1).raw.get(field).getAsString());
+                coalescer.flush(live, null);
+                assertSame(current.get(1), capturedMessages(coalescer).get(1));
+            }
+            List<ClaudeSession.Message> beforeReplay = capturedMessages(coalescer);
+            coalescer.replayLatestSnapshot(StreamMessageCoalescer.copyMessagesForTransport(live));
+            coalescer.enqueue(live);
+            assertNotSame(beforeReplay.get(0), capturedMessages(coalescer).get(0));
+        } finally {
+            coalescer.dispose();
+        }
+        java.lang.reflect.Field field = StreamMessageCoalescer.class.getDeclaredField("transportSnapshotCache");
+        field.setAccessible(true);
+        assertTrue(((java.util.Map<?, ?>) field.get(coalescer)).isEmpty());
+    }
 
     /** Minimal JsCallbackTarget that records nothing; lifecycle only. */
     private static final class CountingTarget implements StreamMessageCoalescer.JsCallbackTarget {

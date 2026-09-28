@@ -57,6 +57,7 @@ public class StreamMessageCoalescer {
     // Gson keys use deep equality and mutable hashes. Cache by raw identity and
     // retain only the current list so old stream fragments cannot accumulate.
     private Map<JsonObject, String> structuralSignatureCache = new IdentityHashMap<>();
+    private Map<ClaudeSession.Message, ClaudeSession.Message> transportSnapshotCache = new IdentityHashMap<>();
     private boolean snapshotBuildRunning;
     private List<ClaudeSession.Message> requestedSnapshot;
     private long requestedSequence;
@@ -129,7 +130,6 @@ public class StreamMessageCoalescer {
         // in either is a genuine bug rather than a race to retry around. Neither is
         // swallowed: a silently dropped snapshot leaves the UI stale with no signal at
         // all, which is strictly harder to diagnose than a thrown exception.
-        String structuralSignature = getStructuralSignature(messages);
         // Read outside the lock: this calls into HandlerContext, and a stale
         // read only schedules (or skips) one push that the stream-end flush
         // reconciles. Keep foreign calls out of the critical section.
@@ -140,6 +140,7 @@ public class StreamMessageCoalescer {
             if (disposed) {
                 return;
             }
+            String structuralSignature = getStructuralSignature(messages);
             latestLiveMessages = List.copyOf(messages);
             boolean structuralChanged = !Objects.equals(latestStructuralSignature, structuralSignature);
             latestStructuralSignature = structuralSignature;
@@ -148,7 +149,7 @@ public class StreamMessageCoalescer {
             shouldSchedule = !active || !deltaChannelAvailable || structuralChanged;
             if (shouldSchedule) {
                 // This copy is deliberately made before the provider can mutate raw again.
-                latestSourceMessages = copyMessagesForTransport(messages);
+                latestSourceMessages = captureReusableMessages(messages);
             }
         }
         if (active) {
@@ -235,6 +236,8 @@ public class StreamMessageCoalescer {
             if (disposed) {
                 return;
             }
+            transportSnapshotCache.clear();
+            structuralSignatureCache.clear();
             latestLiveMessages = messages;
             latestSourceMessages = messages;
             latestStructuralSignature = null;
@@ -279,6 +282,8 @@ public class StreamMessageCoalescer {
             lastDeliveredSnapshot = null;
             latestStructuralSignature = null;
             requestedSnapshot = null;
+            transportSnapshotCache.clear();
+            structuralSignatureCache.clear();
             requestedAfterFlush = null;
             requestedForceFull = false;
             lastUpdateAtMs = 0L;
@@ -342,6 +347,7 @@ public class StreamMessageCoalescer {
         final List<ClaudeSession.Message> sourceMessages;
         final boolean sourceIsTransportCopy;
         final List<ClaudeSession.Message> previousSnapshot;
+        final List<ClaudeSession.Message> snapshot;
         final long sequence;
         synchronized (lock) {
             updateAlarm.cancelAllRequests();
@@ -362,19 +368,17 @@ public class StreamMessageCoalescer {
             }
             previousSnapshot = lastSnapshot;
             sequence = ++updateSequence;
-        }
-
-        final List<ClaudeSession.Message> snapshot;
-        if (sourceMessages == null) {
-            snapshot = previousSnapshot;
-        } else if (sourceIsTransportCopy) {
-            snapshot = sourceMessages;
-        } else {
-            // A transport copy is already detached; only a live source is copied here,
-            // and the caller holds the message lock that makes it safe. A failure is a
-            // genuine bug, so it propagates rather than being swallowed — the caller
-            // owns the recovery, and the stream-end fallback alarm is the backstop.
-            snapshot = copyMessagesForTransport(sourceMessages);
+            if (sourceMessages == null) {
+                snapshot = previousSnapshot;
+            } else if (sourceIsTransportCopy) {
+                snapshot = sourceMessages;
+            } else {
+                snapshot = captureReusableMessages(sourceMessages);
+            }
+            if (snapshot != null) {
+                latestSourceMessages = snapshot;
+                snapshotPending = true;
+            }
         }
 
         if (snapshot == null) {
@@ -382,10 +386,6 @@ public class StreamMessageCoalescer {
             return;
         }
 
-        synchronized (lock) {
-            latestSourceMessages = snapshot;
-            snapshotPending = true;
-        }
         requestSnapshotBuild(snapshot, sequence, afterFlush, true);
     }
 
@@ -394,6 +394,7 @@ public class StreamMessageCoalescer {
      */
     public void dispose() {
         disposed = true;
+        resetStreamState();
         try {
             updateAlarm.cancelAllRequests();
             updateAlarm.dispose();
@@ -841,18 +842,43 @@ public class StreamMessageCoalescer {
         return List.copyOf(copies);
     }
 
-    private synchronized String getStructuralSignature(List<ClaudeSession.Message> messages) {
+    private List<ClaudeSession.Message> captureReusableMessages(List<ClaudeSession.Message> messages) {
+        synchronized (lock) {
+            Map<ClaudeSession.Message, ClaudeSession.Message> currentCache = new IdentityHashMap<>();
+            List<ClaudeSession.Message> copies = new ArrayList<>(messages.size());
+            for (ClaudeSession.Message message : messages) {
+                ClaudeSession.Message copy = transportSnapshotCache.get(message);
+                if (copy == null || copy.type != message.type || copy.timestamp != message.timestamp
+                        || !Objects.equals(copy.content, message.content) || !Objects.equals(copy.raw, message.raw)) {
+                    copy = new ClaudeSession.Message(message.type, message.content);
+                    copy.timestamp = message.timestamp;
+                    copy.raw = message.raw == null ? null : message.raw.deepCopy();
+                }
+                currentCache.put(message, copy);
+                copies.add(copy);
+            }
+            if (!disposed) {
+                transportSnapshotCache = currentCache;
+            }
+            return List.copyOf(copies);
+        }
+    }
+
+    private String getStructuralSignature(List<ClaudeSession.Message> messages) {
         Map<JsonObject, String> currentCache = new IdentityHashMap<>();
         StringBuilder signature = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
             ClaudeSession.Message message = messages.get(i);
             JsonObject raw = message.raw;
-            String blockSignature = raw == null ? "" : structuralSignatureCache.get(raw);
+            ClaudeSession.Message cachedMessage = transportSnapshotCache.get(message);
+            JsonObject cachedRaw = cachedMessage != null && Objects.equals(raw, cachedMessage.raw)
+                    ? cachedMessage.raw : null;
+            String blockSignature = raw == null ? "" : structuralSignatureCache.get(cachedRaw);
             if (blockSignature == null) {
                 blockSignature = computeMessageStructuralSignature(raw);
             }
-            if (raw != null) {
-                currentCache.put(raw, blockSignature);
+            if (cachedRaw != null) {
+                currentCache.put(cachedRaw, blockSignature);
             }
             signature.append(i)
                     .append(':')
