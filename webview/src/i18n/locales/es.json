@@ -39,6 +39,8 @@
       "unsupported_provider": "Este proveedor no admite insertar en el turno actual",
       "timeout": "La insercion en el turno actual agoto el tiempo de espera"
     },
+    "steerUndelivered": "Un mensaje insertado no se entregó y se devolvió al principio de la cola",
+    "steerUndeliveredLost": "Un mensaje insertado no se entregó y no se pudo restaurar en la cola",
     "createNewSession": "Crear nueva sesión",
     "confirmNewSession": "La sesión actual tiene mensajes, ¿estás seguro de que quieres crear una nueva sesión?",
     "confirmInterrupt": "Hay una conversación en curso, crear una nueva sesión la interrumpirá, ¿continuar?",

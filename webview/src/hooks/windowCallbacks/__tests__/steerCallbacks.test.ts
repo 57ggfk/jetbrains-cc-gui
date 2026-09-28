@@ -23,9 +23,11 @@ const STEER_ID = 'queue-1';
 function createHarness(initialMessages: ClaudeMessage[]) {
   let messages = [...initialMessages];
   const steeringItems = new Map<string, QueuedMessage>();
+  /** What the controller's findSteeredBubble would return; settable per test. */
+  let findSteeredBubbleResult: QueuedMessage | null = null;
   const calls = {
     markSteering: [] as string[],
-    restore: [] as string[],
+    restore: [] as Array<[string, QueuedMessage | undefined]>,
     requeueAtHead: [] as QueuedMessage[],
     dequeue: [] as string[],
     toasts: [] as string[],
@@ -47,16 +49,23 @@ function createHarness(initialMessages: ClaudeMessage[]) {
     addToast: (message: string) => { calls.toasts.push(message); },
     messageQueueSteerRef: ref({
       markSteering: (id: string) => { calls.markSteering.push(id); },
-      restore: (id: string) => { calls.restore.push(id); },
+      restore: (id: string, fallback?: QueuedMessage) => { calls.restore.push([id, fallback]); },
       requeueAtHead: (item: QueuedMessage) => { calls.requeueAtHead.push(item); },
       dequeue: (id: string) => { calls.dequeue.push(id); },
       steeringItemsRef: ref(steeringItems),
+      findSteeredBubble: () => findSteeredBubbleResult,
       steerMessage: () => true,
     }),
   } as unknown as UseWindowCallbacksOptions;
 
   registerSteerCallbacks(options, ref(((key: string) => key) as unknown as TFunction));
-  return { calls, refs, getMessages: () => messages, steeringItems };
+  return {
+    calls,
+    refs,
+    getMessages: () => messages,
+    steeringItems,
+    setFindSteeredBubbleResult: (item: QueuedMessage | null) => { findSteeredBubbleResult = item; },
+  };
 }
 
 /** The optimistic bubble exactly as useMessageSender builds it. */
@@ -81,7 +90,18 @@ describe('steerCallbacks', () => {
 
     expect(getMessages()).toHaveLength(1);
     expect(getMessages()[0].type).toBe('assistant');
-    expect(calls.restore).toEqual([STEER_ID]);
+    expect(calls.restore).toEqual([[STEER_ID, undefined]]);
+    expect(calls.toasts).toHaveLength(1);
+  });
+
+  it('rejected passes the bubble fallback to restore when the map lost the row', () => {
+    const { calls, setFindSteeredBubbleResult } = createHarness([streamingAssistant, optimisticBubble()]);
+    const rebuilt: QueuedMessage = { id: STEER_ID, content: 'do not touch file B', queuedAt: 1, status: 'queued' };
+    setFindSteeredBubbleResult(rebuilt);
+
+    window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'rejected', reason: 'session_mismatch' }));
+
+    expect(calls.restore).toEqual([[STEER_ID, rebuilt]]);
     expect(calls.toasts).toHaveLength(1);
   });
 
@@ -96,6 +116,38 @@ describe('steerCallbacks', () => {
 
     expect(getMessages()).toHaveLength(1);
     expect(calls.requeueAtHead).toEqual([item]);
+    // TC-07 expects visible feedback even when the recovery succeeds.
+    expect(calls.toasts).toEqual(['chat.steerUndelivered']);
+  });
+
+  it('undelivered rebuilds the queue item from the bubble when the map misses it', () => {
+    // Steer plan F1/B1: a receipt that outlives the steering map (e.g. a
+    // session transition cleared it) must still requeue — from the bubble.
+    const { calls, getMessages, setFindSteeredBubbleResult } = createHarness([
+      streamingAssistant,
+      optimisticBubble(),
+    ]);
+    const rebuilt: QueuedMessage = { id: STEER_ID, content: 'do not touch file B', queuedAt: 1, status: 'queued' };
+    setFindSteeredBubbleResult(rebuilt);
+
+    window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'undelivered' }));
+
+    expect(getMessages()).toHaveLength(1);
+    expect(calls.requeueAtHead).toEqual([rebuilt]);
+    expect(calls.toasts).toEqual(['chat.steerUndelivered']);
+  });
+
+  it('undelivered warns instead of silently dropping an unrecoverable message', () => {
+    const { calls, getMessages, setFindSteeredBubbleResult } = createHarness([streamingAssistant]);
+    setFindSteeredBubbleResult(null);
+
+    window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'undelivered' }));
+
+    expect(calls.requeueAtHead).toHaveLength(0);
+    expect(calls.toasts).toHaveLength(1);
+    expect(calls.toasts[0]).toBe('chat.steerUndeliveredLost');
+    // No bubble was present to begin with, so the message list is untouched.
+    expect(getMessages()).toHaveLength(1);
   });
 
   it('fold clears the pending marker instead of inserting a second user row', () => {

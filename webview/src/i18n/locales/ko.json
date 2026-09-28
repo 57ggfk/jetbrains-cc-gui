@@ -39,6 +39,8 @@
       "unsupported_provider": "이 프로바이더는 현재 턴 삽입을 지원하지 않습니다",
       "timeout": "현재 턴 삽입이 시간 초과되었습니다"
     },
+    "steerUndelivered": "스테어한 메시지가 전달되지 않아 대기열 맨 앞으로 되돌렸습니다",
+    "steerUndeliveredLost": "스테어한 메시지가 전달되지 않았으며 대기열에 복원할 수 없습니다",
     "createNewSession": "새 세션 만들기",
     "confirmNewSession": "현재 세션에 메시지가 있습니다. 새 세션을 만드시겠습니까?",
     "confirmInterrupt": "대화가 진행 중입니다. 새 세션을 만들면 중단됩니다. 계속하시겠습니까?",

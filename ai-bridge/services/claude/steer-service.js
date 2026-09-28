@@ -287,6 +287,12 @@ export function tryEmitSteerFolded(runtime, msg) {
 function emitUndelivered(runtime, uuid, record) {
   runtime.pendingSteers.delete(uuid);
   emitTurnTag('[STEER_UNDELIVERED]', { steerId: record.steerId });
+  // Steer plan F4: the tag rides the (possibly already aborted) request
+  // stream; this stderr line makes daemon-side emission visible in the host
+  // log regardless of whether the request routing survives the abort.
+  const writeStderr = process.stderr._originalStderrWrite
+    || process.stderr.write.bind(process.stderr);
+  writeStderr(`[STEER] undelivered steerId=${record.steerId} uuid=${uuid}\n`, 'utf8');
 }
 
 /**

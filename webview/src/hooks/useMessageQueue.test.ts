@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { useState } from 'react';
 import { useMessageQueue } from './useMessageQueue';
+import type { QueuedMessage } from './useMessageQueue';
 import type { Attachment } from '../components/ChatInputBox/types';
 
 describe('useMessageQueue', () => {
@@ -215,6 +216,36 @@ describe('useMessageQueue', () => {
 
     expect(result.current.queueApi.queue.map(m => m.status)).toEqual(['queued', 'queued']);
     expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['first', 'second']);
+  });
+
+  it('restore requeues the fallback when the queue row is already gone', () => {
+    // Steer plan F1: a receipt must never silently drop its message when a
+    // session transition cleared the queue before the receipt landed.
+    const { result } = renderQueue(true);
+    const fallback: QueuedMessage = { id: 'gone', content: 'rebuilt', queuedAt: 1, status: 'steering' };
+
+    act(() => {
+      result.current.queueApi.restore('gone', fallback);
+    });
+
+    expect(result.current.queueApi.queue).toHaveLength(1);
+    expect(result.current.queueApi.queue[0]).toMatchObject({ id: 'gone', content: 'rebuilt', status: 'queued' });
+  });
+
+  it('restore does not duplicate the fallback when the row still exists', () => {
+    const { result } = renderQueue(true);
+
+    act(() => {
+      result.current.queueApi.enqueue('first');
+    });
+    const [first] = result.current.queueApi.queue;
+    act(() => {
+      result.current.queueApi.markSteering(first.id);
+      result.current.queueApi.restore(first.id, { ...first, status: 'steering' });
+    });
+
+    expect(result.current.queueApi.queue).toHaveLength(1);
+    expect(result.current.queueApi.queue[0].status).toBe('queued');
   });
 
   it('requeueAtHead returns an undelivered item as the next queued send', () => {

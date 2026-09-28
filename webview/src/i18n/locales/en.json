@@ -56,6 +56,8 @@
       "unsupported_provider": "This provider does not support steering",
       "timeout": "Steer timed out"
     },
+    "steerUndelivered": "A steered message was not delivered and has been moved back to the head of the queue.",
+    "steerUndeliveredLost": "A steered message was not delivered and could not be restored to the queue.",
     "createNewSession": "Create New Session",
     "confirmNewSession": "Current session has messages. Are you sure you want to create a new session?",
     "confirmInterrupt": "A conversation is in progress. Creating a new session will interrupt it. Continue?",

@@ -31,8 +31,12 @@ export interface UseMessageQueueReturn {
   reorder: (orderedIds: string[]) => void;
   /** Mark an item as steering after the daemon accepted it */
   markSteering: (id: string) => void;
-  /** Restore a rejected item in place */
-  restore: (id: string) => void;
+  /**
+   * Restore a rejected item in place. When the queue row is already gone
+   * (the receipt outlived it, e.g. a session transition cleared the queue),
+   * `fallback` is requeued at the head instead of the receipt being dropped.
+   */
+  restore: (id: string, fallback?: QueuedMessage) => void;
   /** Put an undelivered item back at the head as queued */
   requeueAtHead: (item: QueuedMessage) => void;
   /** Steering items retained for undelivered receipts */
@@ -113,11 +117,21 @@ export function useMessageQueue({
     }));
   }, []);
 
-  const restore = useCallback((id: string) => {
+  const restore = useCallback((id: string, fallback?: QueuedMessage) => {
     steeringItemsRef.current.delete(id);
-    setQueue(prev => prev.map(item => (
-      item.id === id ? { ...item, status: 'queued' } : item
-    )));
+    setQueue(prev => {
+      if (prev.some(item => item.id === id)) {
+        return prev.map(item => (
+          item.id === id ? { ...item, status: 'queued' } : item
+        ));
+      }
+      // Steer plan F1: a receipt must never silently drop its message. When
+      // the row is gone, rebuild it from the optimistic-bubble fallback.
+      if (fallback && !prev.some(item => item.id === fallback.id)) {
+        return [{ ...fallback, status: 'queued' }, ...prev];
+      }
+      return prev;
+    });
   }, []);
 
   const requeueAtHead = useCallback((item: QueuedMessage) => {

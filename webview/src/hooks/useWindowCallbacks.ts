@@ -31,10 +31,16 @@ export interface ContextInfo {
 
 export interface MessageQueueSteerApi {
   markSteering: (id: string) => void;
-  restore: (id: string) => void;
+  restore: (id: string, fallback?: QueuedMessage) => void;
   requeueAtHead: (item: QueuedMessage) => void;
   dequeue: (id: string) => void;
   steeringItemsRef: MutableRefObject<Map<string, QueuedMessage>>;
+  /**
+   * Rebuild a QueuedMessage from the optimistic steer bubble still in the
+   * transcript (steer plan F1): the recovery source when the steering map
+   * no longer holds the item. Returns null when nothing is recoverable.
+   */
+  findSteeredBubble: (steerId: string) => QueuedMessage | null;
   /** Returns false when the item carried no sendable content. */
   steerMessage: (item: QueuedMessage) => boolean;
 }

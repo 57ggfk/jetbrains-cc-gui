@@ -444,7 +444,9 @@ export function useMessageSender({
     const userContentBlocks = buildUserContentBlocks(text, attachments);
     if (userContentBlocks.length === 0) return false;
 
-    setMessages((prev) => [...prev, buildSteeredUserMessage(text, userContentBlocks, item.id)]);
+    // The original attachments ride on the bubble so an undelivered/rejected
+    // receipt can rebuild the queue row even if the steering map lost it.
+    setMessages((prev) => [...prev, buildSteeredUserMessage(text, userContentBlocks, item.id, attachments)]);
 
     // The bubble lands at the tail; follow it the same way a normal send does.
     userPausedRef.current = false;

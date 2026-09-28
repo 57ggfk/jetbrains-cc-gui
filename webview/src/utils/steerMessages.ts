@@ -10,6 +10,7 @@
  */
 
 import type { ClaudeContentBlock, ClaudeMessage, ClaudeRawMessage } from '../types';
+import type { QueuedMessage } from '../hooks/useMessageQueue';
 
 /**
  * Read the frontend correlation id of a steer bubble.
@@ -39,9 +40,15 @@ export function isSteerPending(message: ClaudeMessage): boolean {
  * Build the optimistic steered user bubble. Mirrors the payload shape of a
  * normally sent user message so the fold/history copies dedup against it.
  *
+ * `attachments` (when present) is stored verbatim on the bubble so an
+ * undelivered/rejected receipt can rebuild the queue row after the steering
+ * map lost it (steer plan F1) — attachment content blocks carry only the
+ * file name, not the data.
+ *
  * @param text               display text
  * @param contentBlocks      text/image/attachment blocks
  * @param steerId            frontend correlation id
+ * @param attachments        original queued attachments, if any
  * @param timestamp          ISO timestamp, defaults to now
  * @returns the optimistic steered user message
  */
@@ -49,12 +56,14 @@ export function buildSteeredUserMessage(
   text: string,
   contentBlocks: ClaudeContentBlock[],
   steerId: string,
+  attachments?: QueuedMessage['attachments'],
   timestamp?: string,
 ): ClaudeMessage {
   const raw: ClaudeRawMessage = {
     steerId,
     steered: true,
     message: { content: contentBlocks },
+    ...(attachments && attachments.length > 0 ? { steerAttachments: attachments } : {}),
   };
   return {
     type: 'user',

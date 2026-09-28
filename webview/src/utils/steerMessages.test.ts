@@ -13,6 +13,7 @@ const build = () => buildSteeredUserMessage(
   'steer text',
   [{ type: 'text', text: 'steer text' }],
   'steer-1',
+  undefined,
   '2026-09-24T00:00:00.000Z',
 );
 
@@ -45,6 +46,23 @@ describe('steerMessages', () => {
     expect(clearSteerPending(list, 'other')).toBe(list);
     expect(getSteerIdOf(list[0])).toBeUndefined();
     expect(isSteerPending(list[0])).toBe(false);
+  });
+
+  it('carries the original attachments on the bubble for receipt recovery', () => {
+    // Steer plan F1: attachment content blocks carry only the file name, so
+    // the queued attachments must ride verbatim on the raw for an
+    // undelivered/rejected receipt to rebuild the queue row.
+    const attachments = [{ id: 'att-1', fileName: 'notes.txt', mediaType: 'text/plain', data: 'aGk=' }];
+    const message = buildSteeredUserMessage(
+      'steer text',
+      [{ type: 'text', text: 'steer text' }],
+      'steer-1',
+      attachments,
+    );
+
+    expect(message.raw).toMatchObject({ steerAttachments: attachments });
+    // No attachments → the recovery field stays off the raw entirely.
+    expect(buildSteeredUserMessage('t', [{ type: 'text', text: 't' }], 'steer-2').raw).not.toHaveProperty('steerAttachments');
   });
 
   it('removes the pending bubble by steer id', () => {

@@ -625,6 +625,10 @@ public class ClaudeMessageHandler implements MessageCallback {
                 LOG.warn("Failed to parse [STEER_UNDELIVERED]: " + e.getMessage());
             }
         }
+        // Steer plan F4: receipt arrival is the last hop of the
+        // daemon → Java → webview chain; log it so a lost requeue can be
+        // attributed to either this side or the webview.
+        LOG.info("[Steer] undelivered receipt received steerId=" + steerId);
         callbackHandler.notifySteerResult(steerId, "undelivered", null);
     }
 

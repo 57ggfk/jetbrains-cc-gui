@@ -77,18 +77,45 @@ export function registerSteerCallbacks(
       if (payload.status === 'rejected') {
         // The bubble was inserted optimistically on click and the CLI never
         // took the steer: retract it and put the row back in the queue.
+        // restore() only flips a row still in queue state; when the receipt
+        // outlived it (e.g. a session transition cleared the queue), the
+        // fallback rebuilt from the bubble takes its place (steer plan F1).
+        const fallback = api.findSteeredBubble(steerId) ?? undefined;
         options.setMessages((prev) => removeSteeredMessage(prev, steerId));
-        api.restore(steerId);
+        api.restore(steerId, fallback);
         const reason = payload.reason || 'no_active_turn';
         const message = tRef.current(`chat.steerRejected.${reason}`, { defaultValue: reason });
         options.addToast(message, 'warning');
         return;
       }
       if (payload.status === 'undelivered') {
+        // Steer plan F4 instrumentation: settles whether the receipt chain
+        // (daemon → Java → webview) arrives and whether the steering map
+        // still holds the item at receipt time.
         const item = api.steeringItemsRef.current.get(steerId);
+        console.log(`[Steer] undelivered receipt steerId=${steerId} requeuedFromMap=${!!item}`);
+        const fallback = item ?? api.findSteeredBubble(steerId);
         options.setMessages((prev) => removeSteeredMessage(prev, steerId));
-        if (item) {
-          api.requeueAtHead(item);
+        if (fallback) {
+          api.requeueAtHead(fallback);
+          // The turn ended before the CLI took the steer; say so instead of
+          // silently swallowing the message (TC-07 expects visible feedback).
+          options.addToast(
+            tRef.current('chat.steerUndelivered', {
+              defaultValue: 'A steered message was not delivered and has been moved back to the head of the queue.',
+            }),
+            'warning',
+          );
+        } else {
+          // Never silent (steer plan F1): neither the steering map nor the
+          // transcript bubble could recover the message.
+          console.error(`[Steer] undelivered receipt could not recover steerId=${steerId}`);
+          options.addToast(
+            tRef.current('chat.steerUndeliveredLost', {
+              defaultValue: 'A steered message was not delivered and could not be restored to the queue.',
+            }),
+            'warning',
+          );
         }
       }
     } catch {
