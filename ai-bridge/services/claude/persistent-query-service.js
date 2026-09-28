@@ -285,6 +285,18 @@ _runtimeCleanupTimer.unref();
     throw err;
   }
 
+  // Plan B2/F3: a second send must never touch an in-flight turn. Re-entering
+  // would overwrite runtime.turnSink (the live turn's message source) and push
+  // a plain user message onto the still-running CLI input stream, where it is
+  // never read — leaving a ghost user row in the transcript. Must throw before
+  // the try/finally below: the rejection path itself must not clear the live
+  // turn's sink or active-runtime pointer.
+  if (runtime.turnSink) {
+    const err = new Error('A turn is already in flight for this session; the message was not delivered');
+    err.code = 'turn_in_progress';
+    throw err;
+  }
+
   setActiveTurnRuntime(runtime);
   console.log('[LIFECYCLE] executeTurn sessionId=' + (requestContext.requestedSessionId || runtime.sessionId || '(new)')
     + ' epoch=' + (requestContext.runtimeSessionEpoch || runtime.runtimeSessionEpoch || '(none)'));

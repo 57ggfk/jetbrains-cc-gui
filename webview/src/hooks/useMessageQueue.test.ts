@@ -5,18 +5,23 @@ import type { QueuedMessage } from './useMessageQueue';
 import type { Attachment } from '../components/ChatInputBox/types';
 
 describe('useMessageQueue', () => {
-  const renderQueue = (initialLoading: boolean) => {
+  const renderQueue = (initialLoading: boolean, options?: { asyncLoading?: boolean }) => {
     const onExecute = vi.fn();
     const hook = renderHook(() => {
       // Drive `isLoading` through real component state so the auto-execute
       // path sees the same setState semantics as production, where
       // executeMessage flips loading back on via setLoading(true).
+      // asyncLoading skips that flip: the send's loading transition happens
+      // asynchronously in production (Java callback), which is exactly the
+      // window the single-flight latch must guard.
       const [loading, setLoading] = useState(initialLoading);
       const queueApi = useMessageQueue({
         isLoading: loading,
         onExecute: (content: string, attachments?: Attachment[]) => {
           onExecute(content, attachments);
-          setLoading(true);
+          if (!options?.asyncLoading) {
+            setLoading(true);
+          }
         },
       });
       return { queueApi, setLoading };
@@ -179,26 +184,97 @@ describe('useMessageQueue', () => {
     expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['third', 'first', 'second']);
   });
 
-  it('skips steering items when auto-executing the next queued message', () => {
-    const { result, onExecute } = renderQueue(true);
+  it('defers the next queued row while a steer receipt is outstanding, then dispatches via backstop', () => {
+    vi.useFakeTimers();
+    try {
+      const { result, onExecute } = renderQueue(true);
+
+      act(() => {
+        result.current.queueApi.enqueue('steer me');
+        result.current.queueApi.enqueue('send after');
+      });
+      const [first] = result.current.queueApi.queue;
+      act(() => {
+        result.current.queueApi.markSteering(first.id);
+      });
+      act(() => {
+        result.current.setLoading(false);
+      });
+      // The undelivered receipt has not landed yet: nothing may dispatch,
+      // so the receipt can requeue the steered row at the head first.
+      expect(onExecute).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      // Backstop: dispatch the next queued row (steering rows stay hidden).
+      expect(onExecute).toHaveBeenCalledTimes(1);
+      expect(onExecute).toHaveBeenCalledWith('send after', undefined);
+      expect(result.current.queueApi.queue).toHaveLength(1);
+      expect(result.current.queueApi.queue[0].status).toBe('steering');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dispatches the requeued undelivered row before older queued rows', () => {
+    vi.useFakeTimers();
+    try {
+      const { result, onExecute } = renderQueue(true);
+
+      act(() => {
+        result.current.queueApi.enqueue('steer me');
+        result.current.queueApi.enqueue('older queued');
+      });
+      const [first] = result.current.queueApi.queue;
+      act(() => {
+        result.current.queueApi.markSteering(first.id);
+      });
+      act(() => {
+        result.current.setLoading(false);
+      });
+      expect(onExecute).not.toHaveBeenCalled();
+
+      // The undelivered receipt puts the steered row back at the head…
+      const steered = result.current.queueApi.steeringItemsRef.current.get(first.id);
+      act(() => {
+        result.current.queueApi.requeueAtHead(steered!);
+      });
+      // …and the pending dispatch must pick it (not 'older queued') without
+      // waiting for the backstop timer.
+      expect(onExecute).toHaveBeenCalledTimes(1);
+      expect(onExecute).toHaveBeenCalledWith('steer me', undefined);
+      expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['older queued']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dispatches exactly one row per idle window when loading flips asynchronously', () => {
+    // Plan B2/F2 regression: the window between handing a row to onExecute
+    // and the async send flipping isLoading back to true used to re-run the
+    // dispatch effect for every remaining row and flush the whole queue into
+    // one turn.
+    const { result, onExecute } = renderQueue(false, { asyncLoading: true });
 
     act(() => {
-      result.current.queueApi.enqueue('steer me');
-      result.current.queueApi.enqueue('send after');
+      result.current.queueApi.enqueue('first');
+      result.current.queueApi.enqueue('second');
+      result.current.queueApi.enqueue('third');
     });
-    const [first] = result.current.queueApi.queue;
-    act(() => {
-      result.current.queueApi.markSteering(first.id);
-    });
-    expect(result.current.queueApi.queue[0].status).toBe('steering');
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenNthCalledWith(1, 'first', undefined);
+    expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['second', 'third']);
 
+    // The turn starts and ends: only then may the next row dispatch.
+    act(() => {
+      result.current.setLoading(true);
+    });
     act(() => {
       result.current.setLoading(false);
     });
-    expect(onExecute).toHaveBeenCalledTimes(1);
-    expect(onExecute).toHaveBeenCalledWith('send after', undefined);
-    expect(result.current.queueApi.queue).toHaveLength(1);
-    expect(result.current.queueApi.queue[0].status).toBe('steering');
+    expect(onExecute).toHaveBeenCalledTimes(2);
+    expect(onExecute).toHaveBeenNthCalledWith(2, 'second', undefined);
   });
 
   it('restore puts a rejected item back to queued in place', () => {

@@ -18,6 +18,12 @@ export interface UseMessageQueueOptions {
   onExecute: (content: string, attachments?: Attachment[]) => void;
 }
 
+/**
+ * Grace period that lets an outstanding steer receipt requeue its row at the
+ * head before the next queued message dispatches (plan B2/F2).
+ */
+const STEER_RECEIPT_DISPATCH_DELAY_MS = 2000;
+
 export interface UseMessageQueueReturn {
   /** Current queue */
   queue: QueuedMessage[];
@@ -143,24 +149,79 @@ export function useMessageQueue({
     });
   }, []);
 
-  // Auto-execute next message whenever the chat is idle. Dequeue and execute
-  // must stay atomic inside this effect: deferring the execution behind a
-  // timer let the very next re-render (the dequeue's own state update) run
-  // effect cleanup, cancel the timer, and silently drop the already-dequeued
-  // message. Checking "idle && non-empty" instead of a loading transition also
-  // covers messages enqueued while `isLoading` was already flipping to false.
-  // Steering items wait for a fold/undelivered receipt and are skipped.
-  useEffect(() => {
-    if (isLoading || queue.length === 0) {
+  // Auto-execute the next message whenever the chat is idle. Dequeue and
+  // execute must stay atomic (see 80027de2: deferring the execution behind a
+  // timer let the dequeue's own re-render cancel it and silently drop the
+  // already-dequeued message), so the dispatcher below removes the row and
+  // calls onExecute synchronously.
+  //
+  // Plan B2/F2: only ONE row leaves the queue per idle window. The window
+  // between handing a row to onExecute and the async send flipping isLoading
+  // back to true re-ran this effect for every remaining row and flushed the
+  // whole queue into a single turn — the second send then hit the daemon's
+  // live turn and its message was never read (ghost transcript row). The
+  // dispatchedRef latch closes that window; it resets when the next turn
+  // flips isLoading to true.
+  //
+  // While a steer receipt is still outstanding (steeringItemsRef non-empty)
+  // the dispatch waits briefly so the receipt can requeue the steered row at
+  // the head first — TC-07/TC-08 expect the undelivered row to auto-send
+  // before older rows. The row stays queued during the wait and the receipt
+  // path re-runs this effect, so cancelling the backstop never strands a
+  // message.
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const onExecuteRef = useRef(onExecute);
+  onExecuteRef.current = onExecute;
+  const dispatchedRef = useRef(false);
+  const steerDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearSteerDelay = useCallback(() => {
+    if (steerDelayRef.current != null) {
+      clearTimeout(steerDelayRef.current);
+      steerDelayRef.current = null;
+    }
+  }, []);
+
+  const dispatchNextQueued = useCallback(() => {
+    clearSteerDelay();
+    if (dispatchedRef.current) {
       return;
     }
-    const nextMessage = queue.find(item => item.status === 'queued');
+    const nextMessage = queueRef.current.find(item => item.status === 'queued');
     if (!nextMessage) {
       return;
     }
+    dispatchedRef.current = true;
     setQueue(prev => prev.filter(item => item.id !== nextMessage.id));
-    onExecute(nextMessage.content, nextMessage.attachments);
-  }, [isLoading, queue, onExecute]);
+    onExecuteRef.current(nextMessage.content, nextMessage.attachments);
+  }, [clearSteerDelay]);
+
+  useEffect(() => {
+    if (isLoading) {
+      dispatchedRef.current = false;
+      clearSteerDelay();
+      return undefined;
+    }
+    if (dispatchedRef.current) {
+      return undefined;
+    }
+    if (steeringItemsRef.current.size > 0) {
+      // Outstanding steer receipt: hold the dispatch inside the backstop
+      // window and let the receipt's requeue re-run this effect.
+      if (steerDelayRef.current == null) {
+        steerDelayRef.current = setTimeout(() => {
+          steerDelayRef.current = null;
+          dispatchNextQueued();
+        }, STEER_RECEIPT_DISPATCH_DELAY_MS);
+      }
+    } else {
+      dispatchNextQueued();
+    }
+    return () => {
+      clearSteerDelay();
+    };
+  }, [isLoading, queue, dispatchNextQueued, clearSteerDelay]);
 
   return {
     queue,
