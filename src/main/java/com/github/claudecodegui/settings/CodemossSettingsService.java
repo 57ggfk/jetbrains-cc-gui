@@ -551,13 +551,15 @@ public class CodemossSettingsService {
         File configFile = new File(configPath);
 
         if (!configFile.exists()) {
-            LOG.info("[CodemossSettings] Config file not found, creating default: " + configPath);
+            // Called many times per second from settings getters, so keep the read path quiet:
+            // at INFO this and the line below produced ~250 lines per 3 minutes.
+            LOG.debug("[CodemossSettings] Config file not found, creating default: " + configPath);
             return createDefaultConfig();
         }
 
         try (FileReader reader = new FileReader(configFile, StandardCharsets.UTF_8)) {
             JsonObject config = JsonParser.parseReader(reader).getAsJsonObject();
-            LOG.info("[CodemossSettings] Successfully read config from: " + configPath);
+            LOG.debug("[CodemossSettings] Successfully read config from: " + configPath);
             return config;
         } catch (Exception e) {
             LOG.warn("[CodemossSettings] Failed to read config: " + e.getMessage());
