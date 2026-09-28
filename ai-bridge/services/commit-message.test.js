@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveClaudeCommitPath, buildCommitAskRequest, askClaudeNonStreaming } from './commit-message.js';
+import { resolveClaudeCommitPath, buildCommitAskRequest, askClaudeNonStreaming, buildClaudeAgentCommitOptions } from './commit-message.js';
 
 // ---------- resolveClaudeCommitPath (#1655) ----------
 
@@ -77,4 +77,43 @@ test('askClaudeNonStreaming retries once on empty text then gives up', async () 
   const text = await askClaudeNonStreaming(client, 'deepseek-reasoner', 'prompt');
   assert.equal(text, '');
   assert.equal(calls, 2);
+});
+
+// ---------- buildClaudeAgentCommitOptions (MCP bootstrap cost) ----------
+
+function buildAgentOptions(overrides = {}) {
+  return buildClaudeAgentCommitOptions({
+    model: 'claude-sonnet-5',
+    sdkModelName: 'claude-sonnet-5',
+    workingDirectory: '/tmp',
+    claudeCliOverride: null,
+    ...overrides,
+  });
+}
+
+test('buildClaudeAgentCommitOptions suppresses MCP servers', () => {
+  const options = buildAgentOptions();
+  // Booting the user's configured MCP servers happens before the first token
+  // and cost ~12s in practice, versus ~0.5s with them suppressed. Commit
+  // generation is a plain text-to-text call, so no MCP server may be loaded.
+  assert.equal(options.strictMcpConfig, true);
+  assert.equal('mcpServers' in options, false);
+});
+
+test('buildClaudeAgentCommitOptions keeps the deny-all tool posture', async () => {
+  const options = buildAgentOptions();
+  // Mirror of the existing security contract: the commit prompt is built from
+  // third-party-controlled text (git diffs), so a prompt-injected tool call must
+  // stay denied and project/local settings must not be loaded.
+  assert.deepEqual(options.settingSources, ['user']);
+  const decision = await options.canUseTool();
+  assert.equal(decision.behavior, 'deny');
+});
+
+test('buildClaudeAgentCommitOptions forwards the CLI path override only when set', () => {
+  assert.equal('pathToClaudeCodeExecutable' in buildAgentOptions(), false);
+  assert.equal(
+    buildAgentOptions({ claudeCliOverride: '/opt/claude' }).pathToClaudeCodeExecutable,
+    '/opt/claude',
+  );
 });

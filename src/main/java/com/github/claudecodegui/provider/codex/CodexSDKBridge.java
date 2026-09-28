@@ -55,9 +55,13 @@ public class CodexSDKBridge extends BaseSDKBridge {
     private static final String ENV_CODEX_CI = "CODEX_CI";
     private static final String ENV_CODEX_SANDBOX_NETWORK_DISABLED = "CODEX_SANDBOX_NETWORK_DISABLED";
     private static final long MCP_TOOLS_TIMEOUT_MS = 65_000;
-    /** Abort a stuck Codex request while allowing long tool executions. */
+    /**
+     * Abort a stuck Codex request while allowing long tool executions.
+     * Only a silent stall counts as a hang: there is deliberately no total-duration cap, because a
+     * request that keeps streaming output (long refactors, full test suites, long agent chains) may
+     * legitimately run for many hours, and killing it would truncate real work.
+     */
     static final long CODEX_NO_OUTPUT_TIMEOUT_MS = 10 * 60 * 1000L;
-    static final long CODEX_TOTAL_TIMEOUT_MS = 2 * 60 * 60 * 1000L;
     private static final int MAX_ENV_VAR_VALUE_LENGTH = 16 * 1024;
     private static final String IMAGE_STORAGE_DIR_NAME = "codex-images";
     private final CodexHistoryReader historyReader;
@@ -563,13 +567,10 @@ public class CodexSDKBridge extends BaseSDKBridge {
                     processManager.registerProcess(channelId, process);
 
                     final Process watchedProcess = process;
-                    final long startedAt = System.currentTimeMillis();
                     watchdog = new Thread(() -> {
                         while (!finished.get() && watchedProcess.isAlive()) {
                             long now = System.currentTimeMillis();
-                            if (now - startedAt >= CODEX_TOTAL_TIMEOUT_MS) {
-                                timeoutReason.compareAndSet(null, "Codex request exceeded the 2-hour total timeout");
-                            } else if (now - lastOutputAt.get() >= CODEX_NO_OUTPUT_TIMEOUT_MS) {
+                            if (now - lastOutputAt.get() >= CODEX_NO_OUTPUT_TIMEOUT_MS) {
                                 timeoutReason.compareAndSet(null, "Codex produced no output for 10 minutes");
                             }
                             if (timeoutReason.get() != null) {

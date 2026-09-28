@@ -326,6 +326,114 @@ public class SessionMessageOrchestratorTest {
     }
 
     @Test
+    public void loadFromServerAdmitsTheLatestPageWhenLiveHoldsMoreTurnsThanOnePage() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("session-long");
+        state.setCwd("/workspace");
+
+        // Live transcript: the 30-turn page opened earlier plus the turn appended since.
+        for (int turn = 1; turn <= 31; turn++) {
+            state.addMessage(liveMessage(ClaudeSession.Message.Type.USER, "prompt " + turn, turn));
+            state.addMessage(liveMessage(ClaudeSession.Message.Type.ASSISTANT, "answer " + turn, turn));
+        }
+
+        // The transcript now carries one more turn; the paginated reload only ever
+        // returns the latest 30 turns, so the newest turn arrives without the
+        // oldest one the live list still holds.
+        List<JsonObject> latestPage = new ArrayList<>();
+        for (int turn = 3; turn <= 32; turn++) {
+            latestPage.add(createProviderMessage("user", "prompt " + turn, "uuid-" + turn + "-user"));
+            latestPage.add(createProviderMessage("assistant", "answer " + turn, "uuid-" + turn + "-assistant"));
+        }
+        RecordingHistoryAccess historyAccess = new RecordingHistoryAccess();
+        historyAccess.messagesPage = createHistoryPage(latestPage, 2, 32, 32, true, false);
+
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade callbackFacade = new SessionCallbackFacade(null);
+        callbackFacade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state,
+                new MessageParser(),
+                callbackFacade,
+                historyAccess,
+                (usedTokens, maxTokens) -> {
+                },
+                0,
+                0
+        );
+
+        orchestrator.loadFromServer().join();
+
+        List<ClaudeSession.Message> messages = state.getMessages();
+        assertTrue(
+                "the turn that landed while the page was open must reach the transcript",
+                messages.stream().anyMatch(m -> "answer 32".equals(m.content))
+        );
+        assertTrue(
+                "turns the page no longer carries must stay in the transcript",
+                messages.stream().anyMatch(m -> "prompt 1".equals(m.content))
+        );
+        // Every turn from 1 to 32, exactly once.
+        assertEquals(64, messages.size());
+        // The load announces the page's own start, then the merge corrects the
+        // cursor back to the window the kept prefix actually starts at, or the
+        // frontend's "load earlier" would re-request the kept turns.
+        assertEquals(2, callback.claudeHistoryPageInfos.size());
+        assertEquals("session-long|2|32|true|false|null", callback.claudeHistoryPageInfos.get(0));
+        assertEquals("session-long|0|32|true|false|null", callback.claudeHistoryPageInfos.get(1));
+    }
+
+    @Test
+    public void loadFromServerStillRejectsAPageThatLagsBehindTheLiveTail() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("session-lagging-page");
+        state.setCwd("/workspace");
+
+        // The live transcript already holds turn 2, which the JSONL has not written yet.
+        state.addMessage(liveMessage(ClaudeSession.Message.Type.USER, "prompt 1", 1));
+        state.addMessage(liveMessage(ClaudeSession.Message.Type.ASSISTANT, "answer 1", 1));
+        state.addMessage(liveMessage(ClaudeSession.Message.Type.USER, "prompt 2", 2));
+        state.addMessage(liveMessage(ClaudeSession.Message.Type.ASSISTANT, "answer 2", 2));
+
+        List<JsonObject> stalePage = new ArrayList<>();
+        stalePage.add(createProviderMessage("user", "prompt 1", "uuid-1-user"));
+        stalePage.add(createProviderMessage("assistant", "answer 1", "uuid-1-assistant"));
+        RecordingHistoryAccess historyAccess = new RecordingHistoryAccess();
+        historyAccess.messagesPage = createHistoryPage(stalePage, 0, 1, 1, false, false);
+
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade callbackFacade = new SessionCallbackFacade(null);
+        callbackFacade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state,
+                new MessageParser(),
+                callbackFacade,
+                historyAccess,
+                (usedTokens, maxTokens) -> {
+                },
+                0,
+                0
+        );
+
+        orchestrator.loadFromServer().join();
+
+        List<ClaudeSession.Message> messages = state.getMessages();
+        assertEquals(4, messages.size());
+        assertEquals("answer 2", messages.get(3).content);
+        // The load itself announced the page; the rejected merge must not send a
+        // cursor correction on top of it.
+        assertEquals(1, callback.claudeHistoryPageInfos.size());
+    }
+
+    private static ClaudeSession.Message liveMessage(ClaudeSession.Message.Type type, String content, int turn) {
+        JsonObject raw = new JsonObject();
+        raw.addProperty("uuid", "uuid-" + turn + "-" + (type == ClaudeSession.Message.Type.USER ? "user" : "assistant"));
+        return new ClaudeSession.Message(type, content, raw);
+    }
+
+    @Test
     public void loadFromServerPreservesANewLiveRowAddedWhileReading() throws Exception {
         SessionState state = new SessionState();
         state.setProvider("claude");
@@ -722,6 +830,10 @@ public class SessionMessageOrchestratorTest {
     }
 
     private JsonObject createProviderMessage(String type, String text) {
+        return createProviderMessage(type, text, null);
+    }
+
+    private JsonObject createProviderMessage(String type, String text, String uuid) {
         JsonObject contentBlock = new JsonObject();
         contentBlock.addProperty("type", "text");
         contentBlock.addProperty("text", text);
@@ -735,6 +847,9 @@ public class SessionMessageOrchestratorTest {
         JsonObject serverMessage = new JsonObject();
         serverMessage.addProperty("type", type);
         serverMessage.add("message", message);
+        if (uuid != null) {
+            serverMessage.addProperty("uuid", uuid);
+        }
         return serverMessage;
     }
 

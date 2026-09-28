@@ -119,7 +119,10 @@ public class SessionLifecycleManager {
             ClaudeSession newSession = createDefaultSession();
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(previousProvider);
-            newSession.setModel(previousModel);
+            // Verbatim copy: the live value was already sanitized when set (migrated
+            // on restore, or an explicit custom id via set_model), so re-migrating
+            // here could only rewrite a user's custom model behind their back.
+            newSession.setModelVerbatim(previousModel);
             LOG.info("Restored session state to new session: mode=" + previousPermissionMode
                              + ", provider=" + previousProvider + ", model=" + previousModel);
 
@@ -171,7 +174,9 @@ public class SessionLifecycleManager {
                 newSession.setProvider(template.getProvider());
             }
             if (template.getModel() != null) {
-                newSession.setModel(template.getModel());
+                // Templates hold an explicit user choice (possibly a custom model id),
+                // so keep it verbatim like any other explicit selection.
+                newSession.setModelVerbatim(template.getModel());
             }
             if (template.getReasoningEffort() != null) {
                 newSession.setReasoningEffort(template.getReasoningEffort());
@@ -257,7 +262,10 @@ public class SessionLifecycleManager {
             ClaudeSession newSession = createDefaultSession();
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
-            newSession.setModel(modelToRestore);
+            // Verbatim: a payload model comes from the webview, which is the authority
+            // on custom ids and already applied retired-id migration where it is safe;
+            // a fallback previousModel is a live value that was sanitized when set.
+            newSession.setModelVerbatim(modelToRestore);
             LOG.info("Restored session state to loaded session: mode=" + previousPermissionMode
                              + ", provider=" + newSession.getProvider() + ", model=" + modelToRestore);
 

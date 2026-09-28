@@ -154,8 +154,30 @@
   }
 }
 
+/*
+ * Centered menus (trigger owns `transform: translateX(-50%)`) need the offset
+ * inside the keyframes: animation values beat inline styles, so the frames
+ * above would drop the centering for the whole 150ms and the menu would snap
+ * half a width sideways when the animation ends.
+ */
+@keyframes selector-dropdown-in-centered {
+  from {
+    opacity: 0;
+    transform: translate(-50%, var(--selector-enter-y));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.selector-dropdown.selector-dropdown--centered {
+  animation-name: selector-dropdown-in-centered;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .selector-dropdown {
+  .selector-dropdown,
+  .selector-dropdown.selector-dropdown--centered {
     animation: none;
   }
 }
@@ -296,6 +318,21 @@
   color: #c4b5fd;
   background: rgba(139, 92, 246, 0.18);
   border: 1px solid rgba(139, 92, 246, 0.4);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* "Retired" tag for a custom Claude model whose id the API no longer serves */
+.model-retired-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.4);
   flex-shrink: 0;
   user-select: none;
 }
