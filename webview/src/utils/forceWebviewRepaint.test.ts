@@ -62,8 +62,9 @@ describe('forceWebviewRepaint', () => {
 
     flushRaf();
 
-    // 临时修改 zoom 触发 Chromium/JCEF 重新光栅化，结束后必须清空。
-    expect(zoomWrites).toEqual(['1.001', '']);
+    // zoom is forced to '1' then restored to the --font-scale value, forcing
+    // Chromium/JCEF to re-rasterize the whole viewport.
+    expect(zoomWrites).toEqual(['1.0989', '1.1']);
     const resizeDispatched = dispatchSpy.mock.calls.some(
       ([evt]) => evt instanceof Event && evt.type === 'resize'
     );
@@ -115,11 +116,11 @@ describe('forceWebviewRepaint', () => {
     forceWebviewRepaint('tab-activated');
     vi.advanceTimersByTime(50);
 
-    expect(zoomWrites).toEqual(['1.001', '']);
+    expect(zoomWrites).toEqual(['1.0989', '1.1']);
     expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'resize' }));
   });
 
-  it('clears the zoom nudge after every repeated repaint', () => {
+  it('uses a distinct zoom nudge for repeated repaints at 100 percent scale', () => {
     fontScale = '1';
     const zoomWrites: string[] = [];
     const app = {
@@ -137,7 +138,7 @@ describe('forceWebviewRepaint', () => {
     forceWebviewRepaint('second-activation');
     flushRaf();
 
-    expect(zoomWrites).toEqual(['1.001', '', '1.001', '']);
+    expect(zoomWrites).toEqual(['0.999', '1', '0.999', '1']);
   });
 
   it('coalesces generic repaints until a strict two-frame pulse has finished', async () => {
@@ -166,7 +167,7 @@ describe('forceWebviewRepaint', () => {
     await Promise.resolve();
     flushRaf();
 
-    expect(zoomWrites).toEqual(['1.001', '']);
+    expect(zoomWrites).toEqual(['0.999', '1']);
     expect(firstCallback).toHaveBeenCalledTimes(1);
     expect(secondCallback).toHaveBeenCalledTimes(1);
   });
@@ -195,6 +196,6 @@ describe('forceWebviewRepaint', () => {
     expect(finishSurfaceDamagePulse('strict-attempt')).toBe(true);
     await Promise.resolve();
 
-    expect(zoomWrites).toEqual(['1.001', '']);
+    expect(zoomWrites).toEqual(['0.999', '1']);
   });
 });

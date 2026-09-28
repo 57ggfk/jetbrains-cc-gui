@@ -34,8 +34,10 @@ export function forceWebviewRepaint(_reason?: string, onRepaint?: () => void): v
       pendingCallbacks = [];
       return;
     }
-    // 通用重绘只临时扰动 zoom，结束后清空，不再恢复字号缩放值。
-    if (!performGenericSurfaceDamage(app)) {
+    const expectedScale = getComputedStyle(document.documentElement)
+      .getPropertyValue('--font-scale')
+      .trim();
+    if (!performGenericSurfaceDamage(app, expectedScale)) {
       runAfterSurfaceDamagePulse(repaint);
       return;
     }
