@@ -241,6 +241,43 @@ export async function askClaudeNonStreaming(client, modelId, prompt) {
 }
 
 /**
+ * Build the Claude Agent SDK options for the commit fallback path.
+ * Exposed for tests.
+ *
+ * MCP servers are deliberately NOT loaded (`strictMcpConfig`). Generating a
+ * commit message never runs tools, and booting the user's configured MCP
+ * servers happens before the model can stream anything: measured ~12s on a
+ * typical config versus ~0.5s with MCP suppressed. This is the same reasoning
+ * behind the deny-all canUseTool below - the commit task must stay a plain
+ * text-to-text call, not an agent session.
+ */
+export function buildClaudeAgentCommitOptions({
+  model,
+  sdkModelName,
+  workingDirectory,
+  claudeCliOverride,
+}) {
+  return {
+    cwd: workingDirectory,
+    // Commit message generation only summarizes a diff - it must never execute
+    // tools. Deny-all canUseTool, and do NOT load project/local settings (whose
+    // permissions.allow could otherwise auto-approve a prompt-injected tool call).
+    permissionMode: 'default',
+    model: sdkModelName,
+    maxTurns: 1,
+    env: buildCliEnv(),
+    settings: buildWebviewControlledSettingsOverride(model),
+    settingSources: ['user'],
+    // Only MCP servers passed via the `mcpServers` option are used, and we pass
+    // none: project .mcp.json, user settings and plugin servers are ignored.
+    strictMcpConfig: true,
+    canUseTool: async () => ({ behavior: 'deny', message: 'Commit message generation does not execute tools' }),
+    includePartialMessages: true,
+    ...(claudeCliOverride && { pathToClaudeCodeExecutable: claudeCliOverride }),
+  };
+}
+
+/**
  * Fallback path: Claude Agent SDK (CLI login OAuth / apiKeyHelper / Bedrock).
  * The Agent SDK performs the CLI's native OAuth flow, so it works without a
  * raw API key (#1655). Mirrors enhancePromptWithClaudeAgent in prompt-enhancer.js.
@@ -264,21 +301,12 @@ async function generateWithClaudeAgent(prompt, model, config) {
   ].join('\n');
 
   const claudeCliOverride = getClaudeCliPathOverride();
-  const options = {
-    cwd: workingDirectory,
-    // Commit message generation only summarizes a diff - it must never execute
-    // tools. Deny-all canUseTool, and do NOT load project/local settings (whose
-    // permissions.allow could otherwise auto-approve a prompt-injected tool call).
-    permissionMode: 'default',
-    model: sdkModelName,
-    maxTurns: 1,
-    env: buildCliEnv(),
-    settings: buildWebviewControlledSettingsOverride(model),
-    settingSources: ['user'],
-    canUseTool: async () => ({ behavior: 'deny', message: 'Commit message generation does not execute tools' }),
-    includePartialMessages: true,
-    ...(claudeCliOverride && { pathToClaudeCodeExecutable: claudeCliOverride }),
-  };
+  const options = buildClaudeAgentCommitOptions({
+    model,
+    sdkModelName,
+    workingDirectory,
+    claudeCliOverride,
+  });
 
   console.log('[CommitMessage] Calling Claude Agent SDK...');
 
