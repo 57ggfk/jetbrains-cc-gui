@@ -90,6 +90,19 @@ describe('session tool result snapshots', () => {
     expect(result.current.findToolResult(undefined, 0)).toBeNull();
     expect(result.current.findToolResult('recent')).toBeNull();
   });
+
+  it('uses a later result revision without confusing identical content from another tool', () => {
+    const original = resultMessage('tool', 'pending output');
+    const unrelated = resultMessage('other', 'pending output');
+    const { result, rerender } = mount([original, unrelated]);
+    const revised = resultMessage('tool', 'denied', true);
+    rerender({ messages: [original, unrelated, revised], sessionId: 'session-a' });
+    expect(result.current.findToolResult('tool', 0)).toMatchObject({ content: 'denied', is_error: true });
+    expect(result.current.getToolResultRaw('tool')).toBe(revised.raw);
+    expect(result.current.getToolResultRaw('other')).toBe(unrelated.raw);
+    rerender({ messages: [resultMessage('tool', 'older history'), original, unrelated, revised], sessionId: 'session-a' });
+    expect(result.current.findToolResult('tool', 0)?.content).toBe('denied');
+  });
 });
 
 describe('deriveTodosForTurn', () => {

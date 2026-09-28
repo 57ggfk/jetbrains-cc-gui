@@ -221,7 +221,7 @@ export function useChatComputations({
       }
       for (const entry of extracted) {
         const toolId = entry.result.tool_use_id;
-        if (toolId && !entries.has(toolId)) entries.set(toolId, entry);
+        if (toolId) entries.set(toolId, entry);
       }
     }
     const previous = previousSnapshot.current;
