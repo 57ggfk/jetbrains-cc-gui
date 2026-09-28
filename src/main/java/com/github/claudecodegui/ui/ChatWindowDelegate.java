@@ -436,7 +436,9 @@ public class ChatWindowDelegate {
                 // instead of interrupting the in-flight turn.
                 LOG.info("[HistoryHandler] Same-session resume, soft-reloading transcript: " + sessionId);
                 if (model != null && !model.trim().isEmpty()) {
-                    current.setModel(model.trim());
+                    // The payload model is webview-normalized (custom ids kept
+                    // verbatim, retired built-ins already migrated there).
+                    current.setModelVerbatim(model.trim());
                 }
                 host.reloadActiveSessionMessages();
             } else {

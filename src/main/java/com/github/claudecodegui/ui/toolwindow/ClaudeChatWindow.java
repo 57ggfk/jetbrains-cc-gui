@@ -8,6 +8,7 @@ import com.github.claudecodegui.handler.PermissionHandler;
 import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.startup.CefPasteHook;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.dsh.DshCliBridge;
 import com.github.claudecodegui.provider.grok.GrokSDKBridge;
@@ -1246,6 +1247,9 @@ public class ClaudeChatWindow {
         webviewEventQueue.browserChanged();
         streamCoalescer.resetDeliveryBaseline();
         if (nextBrowser != null) {
+            // macOS 27 paste fix: every browser instance carries its own CefClient,
+            // so each (re)bind needs the hook installed on the new client.
+            CefPasteHook.installForWindow(this);
             observedBrowserComponent = nextBrowser.getComponent();
             observedBrowserComponent.addComponentListener(surfaceRefreshComponentListener);
             rebindNativeSurfaceComponent(getNativeSurfaceComponent(nextBrowser));
