@@ -1979,6 +1979,11 @@
     "copied": "已複製",
     "openDependencySettings": "開啟相依性管理",
     "recommended": "推薦",
+    "codexWriterConflict": {
+      "title": "Codex 執行緒被佔用",
+      "intro": "新回合啟動時，上一個回合的 Codex 程序仍在寫入該執行緒。外掛現在會在傳送前自動停止上一回合的程序。",
+      "reason": "請稍等幾秒後重新傳送該訊息，無需新建會話。"
+    },
     "codexThreadResume": {
       "title": "工作階段執行緒已失效",
       "intro": "新建工作階段即可解決此問題。目前工作階段的執行緒 ID 在 Codex 伺服器端已不存在。",
