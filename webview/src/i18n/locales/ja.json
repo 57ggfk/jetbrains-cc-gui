@@ -1113,7 +1113,10 @@
     "quoteSuccess": "引用しました!"
   },
   "contextMenu": {
+    "cut": "切り取り",
     "copy": "コピー",
+    "paste": "貼り付け",
+    "newline": "改行を挿入",
     "quote": "引用",
     "copyLink": "リンクアドレスをコピー"
   },
@@ -1909,6 +1912,11 @@
     "copied": "コピー済み",
     "openDependencySettings": "依存関係管理を開く",
     "recommended": "推奨",
+    "codexWriterConflict": {
+      "title": "Codex スレッドが使用中",
+      "intro": "新しいターンの開始時、前のターンの Codex プロセスがまだこのスレッドに書き込んでいました。プラグインは送信前に前のターンを自動停止するようになりました。",
+      "reason": "数秒待ってからメッセージを再送してください。新しいセッションを作る必要はありません。"
+    },
     "codexThreadResume": {
       "title": "セッションスレッドが無効です",
       "intro": "新しいセッションを作成することでこの問題を解決できます。現在のセッションのスレッド ID は Codex サーバーに存在しなくなりました。",

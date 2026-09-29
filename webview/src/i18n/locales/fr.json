@@ -1108,7 +1108,10 @@
     "quoteSuccess": "Cité !"
   },
   "contextMenu": {
+    "cut": "Couper",
     "copy": "Copier",
+    "paste": "Coller",
+    "newline": "Insérer un saut de ligne",
     "quote": "Citer",
     "copyLink": "Copier l'adresse du lien"
   },
@@ -1904,6 +1907,11 @@
     "copied": "Copié",
     "openDependencySettings": "Ouvrir la gestion des dépendances",
     "recommended": "Recommandé",
+    "codexWriterConflict": {
+      "title": "Fil Codex occupé",
+      "intro": "Au démarrage du nouveau tour, le processus Codex du tour précédent écrivait encore dans ce fil. Le plugin arrête désormais automatiquement le tour précédent avant l'envoi.",
+      "reason": "Attendez quelques secondes puis renvoyez le message — inutile de créer une nouvelle session."
+    },
     "codexThreadResume": {
       "title": "Le thread de session n'est plus valide",
       "intro": "La création d'une nouvelle session résoudra ce problème. L'identifiant de thread de la session actuelle n'existe plus sur le serveur Codex.",

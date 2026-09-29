@@ -1256,7 +1256,10 @@
     "quoteSuccess": "Citado!"
   },
   "contextMenu": {
+    "cut": "Recortar",
     "copy": "Copiar",
+    "paste": "Colar",
+    "newline": "Inserir nova linha",
     "quote": "Citar",
     "copyLink": "Copiar endereço do link"
   },
@@ -2054,6 +2057,11 @@
     "copied": "Copiado",
     "openDependencySettings": "Abrir Gerenciamento de Dependências",
     "recommended": "Recomendado",
+    "codexWriterConflict": {
+      "title": "Thread do Codex ocupada",
+      "intro": "Quando o novo turno começou, o processo Codex do turno anterior ainda estava gravando nesta thread. O plugin agora interrompe automaticamente o turno anterior antes de enviar.",
+      "reason": "Aguarde alguns segundos e reenvie a mensagem — não é necessário criar uma nova sessão."
+    },
     "codexThreadResume": {
       "title": "O thread da sessão não é mais válido",
       "intro": "Criar uma nova sessão resolverá esse problema. O ID de thread da sessão atual não existe mais no servidor Codex.",
