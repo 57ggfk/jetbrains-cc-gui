@@ -1552,9 +1552,9 @@
   },
   "contextMenu": {
     "cut": "剪切",
+    "copy": "复制",
     "paste": "粘贴",
     "newline": "插入换行",
-    "copy": "复制",
     "quote": "引用"
   },
   "usage": {

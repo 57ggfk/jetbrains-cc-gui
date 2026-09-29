@@ -1547,9 +1547,9 @@
   },
   "contextMenu": {
     "cut": "Cut",
+    "copy": "Copy",
     "paste": "Paste",
     "newline": "Insert Newline",
-    "copy": "Copy",
     "quote": "Quote"
   },
   "usage": {

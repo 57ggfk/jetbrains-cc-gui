@@ -1109,9 +1109,9 @@
   },
   "contextMenu": {
     "cut": "Cortar",
+    "copy": "Copiar",
     "paste": "Pegar",
     "newline": "Insertar salto de línea",
-    "copy": "Copiar",
     "quote": "Citar"
   },
   "usage": {
