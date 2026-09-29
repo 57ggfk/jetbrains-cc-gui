@@ -1141,7 +1141,8 @@
     "copy": "複製",
     "paste": "貼上",
     "newline": "插入換行",
-    "quote": "引用"
+    "quote": "引用",
+    "copyLink": "複製連結位址"
   },
   "usage": {
     "checkingLabel": "正在偵測 tokentracker-cli…",

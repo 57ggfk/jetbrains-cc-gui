@@ -1555,7 +1555,8 @@
     "copy": "复制",
     "paste": "粘贴",
     "newline": "插入换行",
-    "quote": "引用"
+    "quote": "引用",
+    "copyLink": "复制链接地址"
   },
   "usage": {
     "checkingLabel": "正在检测 tokentracker-cli…",

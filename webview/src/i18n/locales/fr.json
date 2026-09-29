@@ -1112,7 +1112,8 @@
     "copy": "Copier",
     "paste": "Coller",
     "newline": "Insérer un saut de ligne",
-    "quote": "Citer"
+    "quote": "Citer",
+    "copyLink": "Copier l'adresse du lien"
   },
   "usage": {
     "checkingLabel": "Vérification de tokentracker-cli…",

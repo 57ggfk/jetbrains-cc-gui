@@ -1206,7 +1206,8 @@
     "copy": "복사",
     "paste": "붙여넣기",
     "newline": "줄바꿈 삽입",
-    "quote": "인용"
+    "quote": "인용",
+    "copyLink": "링크 주소 복사"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli 확인 중…",

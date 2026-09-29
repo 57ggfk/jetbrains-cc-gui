@@ -1550,7 +1550,8 @@
     "copy": "Copy",
     "paste": "Paste",
     "newline": "Insert Newline",
-    "quote": "Quote"
+    "quote": "Quote",
+    "copyLink": "Copy Link Address"
   },
   "usage": {
     "checkingLabel": "Checking for tokentracker-cli…",

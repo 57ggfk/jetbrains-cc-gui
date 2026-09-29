@@ -1117,7 +1117,8 @@
     "copy": "コピー",
     "paste": "貼り付け",
     "newline": "改行を挿入",
-    "quote": "引用"
+    "quote": "引用",
+    "copyLink": "リンクアドレスをコピー"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli を確認しています…",
