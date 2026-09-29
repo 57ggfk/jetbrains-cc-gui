@@ -1546,7 +1546,10 @@
     "quoteSuccess": "Quoted!"
   },
   "contextMenu": {
+    "cut": "Cut",
     "copy": "Copy",
+    "paste": "Paste",
+    "newline": "Insert Newline",
     "quote": "Quote"
   },
   "usage": {

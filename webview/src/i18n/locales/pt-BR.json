@@ -1256,7 +1256,10 @@
     "quoteSuccess": "Citado!"
   },
   "contextMenu": {
+    "cut": "Recortar",
     "copy": "Copiar",
+    "paste": "Colar",
+    "newline": "Inserir nova linha",
     "quote": "Citar"
   },
   "usage": {

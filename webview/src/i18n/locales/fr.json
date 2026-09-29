@@ -1108,7 +1108,10 @@
     "quoteSuccess": "Cité !"
   },
   "contextMenu": {
+    "cut": "Couper",
     "copy": "Copier",
+    "paste": "Coller",
+    "newline": "Insérer un saut de ligne",
     "quote": "Citer"
   },
   "usage": {
