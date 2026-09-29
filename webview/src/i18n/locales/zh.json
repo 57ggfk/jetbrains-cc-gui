@@ -1552,7 +1552,8 @@
   },
   "contextMenu": {
     "copy": "复制",
-    "quote": "引用"
+    "quote": "引用",
+    "copyLink": "复制链接地址"
   },
   "usage": {
     "checkingLabel": "正在检测 tokentracker-cli…",

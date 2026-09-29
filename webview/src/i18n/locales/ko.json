@@ -1203,7 +1203,8 @@
   },
   "contextMenu": {
     "copy": "복사",
-    "quote": "인용"
+    "quote": "인용",
+    "copyLink": "링크 주소 복사"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli 확인 중…",

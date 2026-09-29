@@ -1114,7 +1114,8 @@
   },
   "contextMenu": {
     "copy": "コピー",
-    "quote": "引用"
+    "quote": "引用",
+    "copyLink": "リンクアドレスをコピー"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli を確認しています…",

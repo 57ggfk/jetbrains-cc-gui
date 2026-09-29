@@ -1257,7 +1257,8 @@
   },
   "contextMenu": {
     "copy": "Copiar",
-    "quote": "Citar"
+    "quote": "Citar",
+    "copyLink": "Copiar endereço do link"
   },
   "usage": {
     "checkingLabel": "Verificando tokentracker-cli…",

@@ -1109,7 +1109,8 @@
   },
   "contextMenu": {
     "copy": "कॉपी करें",
-    "quote": "उद्धृत करें"
+    "quote": "उद्धृत करें",
+    "copyLink": "लिंक पता कॉपी करें"
   },
   "usage": {
     "checkingLabel": "tokentracker-cli की जाँच हो रही है…",

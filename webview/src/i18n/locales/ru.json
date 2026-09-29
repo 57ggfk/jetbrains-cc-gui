@@ -1136,7 +1136,8 @@
   },
   "contextMenu": {
     "copy": "Копировать",
-    "quote": "Цитировать"
+    "quote": "Цитировать",
+    "copyLink": "Копировать адрес ссылки"
   },
   "usage": {
     "checkingLabel": "Проверка tokentracker-cli…",
