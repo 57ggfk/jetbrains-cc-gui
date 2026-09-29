@@ -2467,6 +2467,11 @@
     "copied": "已复制",
     "openDependencySettings": "打开依赖管理",
     "recommended": "推荐",
+    "codexWriterConflict": {
+      "title": "Codex 线程被占用",
+      "intro": "新回合启动时，上一个回合的 Codex 进程仍在写入该线程。插件现在会在发送前自动停止上一回合的进程。",
+      "reason": "请稍等几秒后重新发送该消息，无需新建会话。"
+    },
     "codexThreadResume": {
       "title": "会话线程已失效",
       "intro": "新建会话即可解决此问题。当前会话的线程 ID 在 Codex 服务端已不存在。",

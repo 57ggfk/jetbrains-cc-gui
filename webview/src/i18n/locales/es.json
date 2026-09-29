@@ -1909,6 +1909,11 @@
     "copied": "Copiado",
     "openDependencySettings": "Abrir Gestión de dependencias",
     "recommended": "Recomendado",
+    "codexWriterConflict": {
+      "title": "Hilo de Codex ocupado",
+      "intro": "Cuando comenzó el nuevo turno, el proceso de Codex del turno anterior seguía escribiendo en este hilo. El complemento ahora detiene automáticamente el turno anterior antes de enviar.",
+      "reason": "Espere unos segundos y reenvíe el mensaje; no es necesario crear una nueva sesión."
+    },
     "codexThreadResume": {
       "title": "El hilo de sesión ya no es válido",
       "intro": "Crear una nueva sesión resolverá este problema. El ID de hilo de la sesión actual ya no existe en el servidor de Codex.",

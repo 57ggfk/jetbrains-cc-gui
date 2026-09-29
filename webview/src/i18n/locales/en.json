@@ -2461,6 +2461,11 @@
     "copied": "Copied",
     "openDependencySettings": "Open Dependency Settings",
     "recommended": "Recommended",
+    "codexWriterConflict": {
+      "title": "Codex thread is busy",
+      "intro": "When the new turn started, the previous turn's Codex process was still writing to this thread. The plugin now stops the previous turn automatically before sending.",
+      "reason": "Wait a few seconds and resend the message — there is no need to create a new session."
+    },
     "codexThreadResume": {
       "title": "Session thread is no longer valid",
       "intro": "Creating a new session will resolve this issue. The thread ID for the current session no longer exists on the Codex server.",
