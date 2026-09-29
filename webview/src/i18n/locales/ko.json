@@ -1202,6 +1202,9 @@
     "quoteSuccess": "인용됨!"
   },
   "contextMenu": {
+    "cut": "잘라내기",
+    "paste": "붙여넣기",
+    "newline": "줄바꿈 삽입",
     "copy": "복사",
     "quote": "인용"
   },

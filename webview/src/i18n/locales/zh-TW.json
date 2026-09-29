@@ -1137,6 +1137,9 @@
     "quoteSuccess": "已引用！"
   },
   "contextMenu": {
+    "cut": "剪下",
+    "paste": "貼上",
+    "newline": "插入換行",
     "copy": "複製",
     "quote": "引用"
   },

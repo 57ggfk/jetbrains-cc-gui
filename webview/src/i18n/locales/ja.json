@@ -1113,6 +1113,9 @@
     "quoteSuccess": "引用しました!"
   },
   "contextMenu": {
+    "cut": "切り取り",
+    "paste": "貼り付け",
+    "newline": "改行を挿入",
     "copy": "コピー",
     "quote": "引用"
   },

@@ -1108,6 +1108,9 @@
     "quoteSuccess": "Cité !"
   },
   "contextMenu": {
+    "cut": "Couper",
+    "paste": "Coller",
+    "newline": "Insérer un saut de ligne",
     "copy": "Copier",
     "quote": "Citer"
   },

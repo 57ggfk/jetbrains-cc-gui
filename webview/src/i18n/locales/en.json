@@ -1546,6 +1546,9 @@
     "quoteSuccess": "Quoted!"
   },
   "contextMenu": {
+    "cut": "Cut",
+    "paste": "Paste",
+    "newline": "Insert Newline",
     "copy": "Copy",
     "quote": "Quote"
   },
