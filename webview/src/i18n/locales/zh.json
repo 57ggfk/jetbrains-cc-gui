@@ -2055,7 +2055,9 @@
   "models": {
     "addModel": "添加模型",
     "searchPlaceholder": "搜索模型",
+    "clearSearch": "清除搜索",
     "noModelsFound": "未找到模型",
+    "noSearchMatches": "没有匹配“{{query}}”的模型",
     "hiddenModelCount": "+ 还有 {{count}} 个模型。输入以搜索。",
     "pinned": "置顶",
     "pin": "置顶",

@@ -2050,7 +2050,9 @@
   "models": {
     "addModel": "Add Model",
     "searchPlaceholder": "Search models",
+    "clearSearch": "Clear search",
     "noModelsFound": "No models found",
+    "noSearchMatches": "No models match \"{{query}}\"",
     "hiddenModelCount": "+ {{count}} more models. Type to search.",
     "pinned": "Pinned",
     "pin": "Pin",

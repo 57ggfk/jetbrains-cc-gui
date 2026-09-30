@@ -1584,7 +1584,9 @@
   "models": {
     "addModel": "Ajouter un modèle",
     "searchPlaceholder": "Rechercher des modèles",
+    "clearSearch": "Effacer la recherche",
     "noModelsFound": "Aucun modèle trouvé",
+    "noSearchMatches": "Aucun modèle ne correspond à « {{query}} »",
     "hiddenModelCount": "+ {{count}} modèles supplémentaires. Tapez pour rechercher.",
     "pinned": "Épinglés",
     "pin": "Épingler",

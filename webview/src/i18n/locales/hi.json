@@ -1583,7 +1583,9 @@
   "models": {
     "addModel": "मॉडल जोड़ें",
     "searchPlaceholder": "मॉडल खोजें",
+    "clearSearch": "सर्च साफ़ करें",
     "noModelsFound": "कोई मॉडल नहीं मिला",
+    "noSearchMatches": "\"{{query}}\" से मेल खाता कोई मॉडल नहीं मिला",
     "hiddenModelCount": "+ {{count}} और मॉडल. खोजने के लिए टाइप करें.",
     "pinned": "पिन किए गए",
     "pin": "पिन करें",
