@@ -1631,6 +1631,10 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · 預設推薦模型"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Sonnet 最新升級模型"
+      },
       "opus55": {
         "label": "Opus 5.5",
         "description": "Opus 5.5 · Opus 最新升級模型"
@@ -1666,6 +1670,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "新一代旗艦模型，擅長自主電腦操作與長鏈路智慧體任務"
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "面向複雜專業工作的 GPT-6.1 前沿模型"
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",

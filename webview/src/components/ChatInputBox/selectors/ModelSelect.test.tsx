@@ -83,6 +83,7 @@ describe('ModelSelect', () => {
       'claude-fable-5',
       'claude-opus-5-5',
       'claude-opus-5',
+      'claude-sonnet-5-5',
       'claude-sonnet-5',
       'claude-haiku-4-5',
     ]);
@@ -98,6 +99,7 @@ describe('ModelSelect', () => {
   it('Codex 内置模型列表应与目标设计一致', () => {
     expect(CODEX_MODELS.map((model) => model.id)).toEqual([
       'gpt-6-astra',
+      'gpt-6.1-sol',
       'gpt-6-sol',
       'gpt-5.6-sol',
       'gpt-5.6-terra',

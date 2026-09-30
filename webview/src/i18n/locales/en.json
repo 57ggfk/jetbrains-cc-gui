@@ -2074,6 +2074,10 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Use the default model"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Latest Sonnet upgrade"
+      },
       "opus55": {
         "label": "Opus 5.5",
         "description": "Opus 5.5 · Latest Opus upgrade"
@@ -2103,6 +2107,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "New-generation flagship for autonomous computer use and long agentic tasks."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "GPT-6.1 frontier model for complex professional work."
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",

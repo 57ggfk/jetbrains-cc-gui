@@ -1601,6 +1601,10 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · डिफ़ॉल्ट अनुशंसित मॉडल"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · नवीनतम Sonnet अपग्रेड"
+      },
       "opus55": {
         "label": "Opus 5.5",
         "description": "Opus 5.5 · नवीनतम Opus अपग्रेड"
@@ -1636,6 +1640,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "स्वायत्त कंप्यूटर उपयोग और लंबे एजेंटिक कार्यों के लिए नई पीढ़ी का फ्लैगशिप मॉडल।"
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "जटिल पेशेवर कार्यों के लिए GPT-6.1 फ्रंटियर मॉडल।"
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",

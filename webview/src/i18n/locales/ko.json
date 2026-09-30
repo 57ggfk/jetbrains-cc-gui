@@ -1697,6 +1697,10 @@
         "label": "Sonnet 5",
         "description": "Sonnet 5 · 기본 모델 사용"
       },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · 최신 Sonnet 업그레이드"
+      },
       "opus55": {
         "label": "Opus 5.5",
         "description": "Opus 5.5 · 최신 Opus 업그레이드"
@@ -1732,6 +1736,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "자율 컴퓨터 조작과 장기 에이전트 작업을 위한 차세대 플래그십 모델."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "복잡한 전문 작업을 위한 GPT-6.1 프런티어 모델."
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",
