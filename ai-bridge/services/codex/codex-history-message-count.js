@@ -3,16 +3,36 @@ import { readNativeHistoryPage } from './codex-native-history.js';
 /** Count the same native projections as history display without retaining transcript bodies. */
 async function tallyNativeHistoryMessages(read, threadId) {
   const messageIds = new Set();
+  // A turn's id-less messages count once; when an overlapping page repeats the
+  // turn with more of them (an output can land between page reads on an active
+  // thread), the largest sighting wins instead of the first.
+  const anonymousTurnCounts = new Map();
   const cursors = new Set();
   let anonymousMessages = 0;
   let cursor = null;
   let readMode = 'paged';
   do {
     const page = await readNativeHistoryPage(read, { threadId, cursor, limit: 100, readMode });
+    const anonymousByTurn = new Map();
     for (const message of page.messages) {
       const id = message.raw?.uuid;
-      if (id) messageIds.add(id);
-      else anonymousMessages += 1;
+      if (id) {
+        messageIds.add(id);
+        continue;
+      }
+      const turnId = message.raw?.codexTurnId;
+      if (turnId == null) anonymousMessages += 1;
+      else anonymousByTurn.set(turnId, (anonymousByTurn.get(turnId) ?? 0) + 1);
+    }
+    for (const [turnId, count] of anonymousByTurn) {
+      const counted = anonymousTurnCounts.get(turnId);
+      if (counted == null) {
+        anonymousMessages += count;
+        anonymousTurnCounts.set(turnId, count);
+      } else if (count > counted) {
+        anonymousMessages += count - counted;
+        anonymousTurnCounts.set(turnId, count);
+      }
     }
     readMode = page.readMode;
     cursor = page.cursor;

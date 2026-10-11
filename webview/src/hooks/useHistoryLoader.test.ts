@@ -217,6 +217,22 @@ describe('native history visibility', () => {
     deliver({ requestType: 'codex_native_list_threads', data: [{ id: 'saved' }] });
     expect(history.data?.sessions?.[0].messageCount).toBeUndefined();
     expect(history.data?.total).toBeUndefined();
-    expect(vi.getTimerCount()).toBe(1);
+    // The refused count stays parked at the queue head for a short-interval retry
+    // instead of being dropped, alongside the history loader's own retry timer.
+    expect(vi.getTimerCount()).toBe(2);
+  });
+
+  it('retries the list request when the bridge refuses the send', () => {
+    vi.mocked(sendBridgeEvent).mockReturnValue(false);
+    mountHistory();
+    const listRequests = () => vi.mocked(sendBridgeEvent).mock.calls
+      .filter(([type]) => type === 'codex_native_list_threads').length;
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(listRequests()).toBe(1);
+    // A refused send must not lose the list request for the rest of the view session.
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(listRequests()).toBe(2);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(listRequests()).toBe(3);
   });
 });

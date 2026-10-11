@@ -58,6 +58,7 @@ interface ImagePasteScope {
 }
 
 const NATIVE_IMAGE_TIMEOUT_MS = 30000;
+const IMAGE_SCOPE_RETRY_MS = 1000;
 
 /**
  * usePasteAndDrop - Handle paste and drag-drop operations
@@ -91,13 +92,23 @@ export function usePasteAndDrop({
   const nativeRequestsRef = useRef(new Map<string, (attachment: Attachment | null) => void>());
   const mountedRef = useRef(false);
   const draftScopeIdRef = useRef<string | null>(null);
+  const scopeRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const publicationSequenceRef = useRef(0);
   const committedPublicationRef = useRef(0);
   const [publication, setPublication] = useState(0);
   const [isPreparingImages, setIsPreparingImages] = useState(false);
 
-  const publishImageScope = useCallback(() => {
-    sendBridgeEvent('paste_image_scope', draftScopeIdRef.current ?? '');
+  const publishImageScope = useCallback(function publishImageScope() {
+    if (scopeRetryTimerRef.current !== null) {
+      clearTimeout(scopeRetryTimerRef.current);
+      scopeRetryTimerRef.current = null;
+    }
+    const sent = sendBridgeEvent('paste_image_scope', draftScopeIdRef.current ?? '');
+    if (!sent && mountedRef.current) {
+      // Native offers need this handshake; a refused send cannot disable pastes
+      // for the rest of the draft. Retry the current id, never a retired one.
+      scopeRetryTimerRef.current = setTimeout(publishImageScope, IMAGE_SCOPE_RETRY_MS);
+    }
   }, []);
 
   const invalidateImagePastes = useCallback(() => {
@@ -134,7 +145,7 @@ export function usePasteAndDrop({
     if (mountedRef.current) setIsPreparingImages(hasPendingImagePastes());
   }, [publication, hasPendingImagePastes]);
 
-  const queuePastedImage = useCallback((prepare: () => Promise<Attachment | null>, source: ImagePasteSource | null) => {
+  const queuePastedImage = useCallback((prepare: () => Promise<Attachment | null>, source: ImagePasteSource | null, gestureId?: string) => {
     if (!mountedRef.current) return;
     const scope = pasteScopeRef.current ??= {
       dedupe: createImagePasteDedupe(), pending: 0, publication: 0, processing: Promise.resolve(),
@@ -160,7 +171,7 @@ export function usePasteAndDrop({
       try {
         const attachment = await prepared;
         if (!attachment || !mountedRef.current || pasteScopeRef.current !== scope) return;
-        const accepted = source === null || await scope.dedupe.isNewPaste(attachment, source, arrivedAt);
+        const accepted = source === null || await scope.dedupe.isNewPaste(attachment, source, arrivedAt, gestureId);
         if (accepted && mountedRef.current && pasteScopeRef.current === scope) {
           scope.publication = ++publicationSequenceRef.current;
           setInternalAttachments((prev) => pasteScopeRef.current === scope ? [...prev, attachment] : prev);
@@ -191,7 +202,7 @@ export function usePasteAndDrop({
       // Native actions already captured the clipboard; claiming that snapshot must not reread newer contents.
       const request = snapshotId ? JSON.stringify({ requestId, snapshotId, scopeId: draftScopeIdRef.current }) : requestId;
       if (!sendBridgeEvent('paste_image', request)) finish(null);
-    }), 'java-bridge');
+    }), 'java-bridge', snapshotId);
   }, [queuePastedImage]);
 
   /**
@@ -245,6 +256,11 @@ export function usePasteAndDrop({
               };
               reader.readAsDataURL(blob);
             }), 'dom-paste');
+          } else {
+            // Some clipboard flavors expose an image item without a readable
+            // file; let the native side materialize it instead of swallowing
+            // the paste. Java settles the request itself when nothing is there.
+            requestNativeImage();
           }
 
           return;
@@ -511,7 +527,7 @@ export function usePasteAndDrop({
   // Listen for image paste events dispatched from Java side (when clipboard has image but no text)
   useEffect(() => {
     const onJavaPasteImage = (e: Event) => {
-      const { base64, mediaType, requestId } = (e as CustomEvent).detail;
+      const { base64, mediaType, requestId } = (e as CustomEvent).detail ?? {};
       // A request can outlive its session or draft; only its original pending owner may consume it.
       const finish = requestId ? nativeRequestsRef.current.get(requestId) : undefined;
       if (requestId && !finish) return;

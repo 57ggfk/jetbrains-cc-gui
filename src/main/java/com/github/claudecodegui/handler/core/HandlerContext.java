@@ -10,7 +10,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.ui.jcef.JBCefBrowser;
 
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -54,9 +53,26 @@ public class HandlerContext {
          * Capture a queued script sender bound to the originating browser and page.
          * Implementations without lifecycle-aware delivery reject deferred replies.
          */
-        default Consumer<String> captureJavaScriptExecutor() {
-            return ignored -> { };
+        default JsSender captureJavaScriptExecutor() {
+            return ignored -> false;
         }
+    }
+
+    /**
+     * A queued script sender bound to the originating browser and page. Reports
+     * whether the page still accepted the script, so callers holding resources
+     * for the reply (e.g. clipboard snapshots) can release them immediately when
+     * delivery can no longer happen.
+     */
+    @FunctionalInterface
+    public interface JsSender {
+        /**
+         * Queue a script only while the captured browser page still owns the reply.
+         *
+         * @param script JavaScript to deliver to the originating page
+         * @return whether the page accepted the queued script
+         */
+        boolean send(String script);
     }
 
     public HandlerContext(
@@ -238,16 +254,12 @@ public class HandlerContext {
      * Capture a lifecycle-bound queued reply before scheduling asynchronous handler work.
      * The queue preserves the original browser/page rather than targeting whichever page is current later.
      */
-    public Consumer<String> captureJavaScriptExecutor() {
+    public JsSender captureJavaScriptExecutor() {
         if (this.disposed || this.jsCallback == null) {
-            return ignored -> { };
+            return ignored -> false;
         }
-        Consumer<String> reply = this.jsCallback.captureJavaScriptExecutor();
-        return jsCode -> {
-            if (!this.disposed) {
-                reply.accept(jsCode);
-            }
-        };
+        JsSender reply = this.jsCallback.captureJavaScriptExecutor();
+        return jsCode -> !this.disposed && reply.send(jsCode);
     }
 
     /**

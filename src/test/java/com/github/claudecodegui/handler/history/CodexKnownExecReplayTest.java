@@ -96,6 +96,118 @@ public class CodexKnownExecReplayTest {
                         .map(block -> string(block, "tool_use_id")).toList());
     }
 
+    /** A native process id can close the original command even after another user turn starts. */
+    @Test
+    public void closesProcessOwnedCompletionsAcrossUserTurns() {
+        for (boolean insideWrapper : List.of(false, true)) {
+            JsonArray records = new JsonArray();
+            JsonObject started = call("earlier-process", "text(await tools.exec_command({cmd:'npm test'}));");
+            started.getAsJsonObject("payload").add("internal_chat_message_metadata_passthrough",
+                    JsonParser.parseString("{\"turn_id\":\"earlier-turn\"}"));
+            records.add(JsonParser.parseString("{\"type\":\"session_meta\",\"payload\":{\"id\":\"root\"}}"));
+            records.add(started);
+            records.add(output("earlier-process", "{\"session_id\":11,\"output\":\"running\"}"));
+            if (insideWrapper) {
+                records.add(call("later-poll", "text(await tools.write_stdin({session_id:11,chars:'\\u0003'}));"
+                        + "text(await tools.exec_command({cmd:'git status'}));"));
+            }
+            JsonObject completed = nativeCommand("native-earlier", "failed", 130);
+            completed.getAsJsonObject("payload").getAsJsonObject("item").addProperty("process_id", "11");
+            records.add(completed);
+            if (insideWrapper) {
+                records.add(output("later-poll", "{\"exit_code\":130,\"output\":\"interrupted\"}",
+                        "{\"exit_code\":0,\"output\":\"status checked\"}"));
+            }
+
+            List<JsonObject> projected = blocks(records);
+
+            assertEquals(insideWrapper ? List.of("bash", "bash") : List.of("bash"), toolNames(projected));
+            assertEquals(1, projected.stream().filter(block -> "earlier-process:command:0".equals(string(block, "tool_use_id"))).count());
+            assertTrue(results(projected).contains("native-earlier output"));
+            assertFalse(toolNames(projected).contains("exec"));
+        }
+    }
+
+    /** An owned background receipt keeps its original turn without invalidating the current wrapper. */
+    @Test
+    public void backgroundCompletionCannotBorrowTheCurrentWrappersTurn() {
+        for (boolean explicitTurn : List.of(false, true)) {
+            for (boolean pollsProcess : List.of(false, true)) {
+                JsonArray records = new JsonArray();
+                records.add(JsonParser.parseString("{\"type\":\"session_meta\",\"payload\":{\"id\":\"root\"}}"));
+                JsonObject started = call("earlier-process", "text(await tools.exec_command({cmd:'npm test'}));");
+                started.getAsJsonObject("payload").add("internal_chat_message_metadata_passthrough",
+                        JsonParser.parseString("{\"turn_id\":\"earlier-turn\"}"));
+                records.add(started);
+                records.add(output("earlier-process", "{\"session_id\":11,\"output\":\"running\"}"));
+                String poll = pollsProcess ? "text(await tools.write_stdin({session_id:11,chars:'\\u0003'}));" : "";
+                JsonObject current = call("current-batch", poll + "text(await tools.exec_command({cmd:'git status'}));");
+                if (explicitTurn) {
+                    current.getAsJsonObject("payload").add("internal_chat_message_metadata_passthrough",
+                            JsonParser.parseString("{\"turn_id\":\"current-turn\"}"));
+                }
+                records.add(current);
+                JsonObject earlier = nativeCommand("native-earlier", "failed", 130);
+                earlier.getAsJsonObject("payload").addProperty("turn_id", "earlier-turn");
+                earlier.getAsJsonObject("payload").getAsJsonObject("item").addProperty("process_id", "11");
+                records.add(earlier);
+                JsonObject completed = nativeCommand("native-current", "completed", 0);
+                completed.getAsJsonObject("payload").addProperty("turn_id", "current-turn");
+                completed.getAsJsonObject("payload").getAsJsonObject("item").addProperty("command", "git status");
+                records.add(completed);
+                if (pollsProcess) {
+                    records.add(output("current-batch", "{\"exit_code\":130,\"output\":\"interrupted\"}",
+                            "{\"exit_code\":0,\"output\":\"status checked\"}"));
+                } else {
+                    records.add(output("current-batch", "{\"exit_code\":0,\"output\":\"status checked\"}"));
+                }
+
+                List<JsonObject> projected = blocks(records);
+
+                assertEquals(List.of("bash", "bash"), toolNames(projected));
+                assertEquals(2, results(projected).size());
+                assertTrue(results(projected).contains("native-earlier output"));
+                assertTrue(results(projected).contains("native-current output"));
+                for (JsonObject message : HistoryMessageInjector.convertCodexMessagesToFrontendBatch(records)) {
+                    JsonObject raw = message.getAsJsonObject("raw");
+                    JsonObject block = raw.getAsJsonArray("content").get(0).getAsJsonObject();
+                    String toolId = block.has("id") ? string(block, "id") : string(block, "tool_use_id");
+                    assertEquals("earlier-process:command:0".equals(toolId) ? "earlier-turn" : "current-turn",
+                            string(raw, "codexTurnId"));
+                }
+            }
+        }
+    }
+
+    /** Reused numeric process ids in another thread must not close the original command. */
+    @Test
+    public void keepsForeignThreadCompletionsAwayFromTheTrackedProcess() {
+        for (boolean insideWrapper : List.of(false, true)) {
+            JsonObject owner = JsonParser.parseString("{\"codexThreadId\":\"root\",\"codexTurnId\":\"earlier-turn\"}").getAsJsonObject();
+            var process = new CodexKnownExecReplay.Process("original-command", owner, "npm test");
+            var processes = new java.util.LinkedHashMap<String, CodexKnownExecReplay.Process>();
+            processes.put("11", process);
+            JsonObject completed = nativeCommand("foreign-command", "completed", 0);
+            completed.getAsJsonObject("payload").addProperty("thread_id", "another-thread");
+            completed.getAsJsonObject("payload").getAsJsonObject("item").addProperty("process_id", "11");
+            if (insideWrapper) {
+                // Missing wrapper scope must not weaken the process's own recorded thread.
+                CodexKnownExecReplay poll = CodexKnownExecReplay.begin(
+                        call("poll", "text(await tools.write_stdin({session_id:11,chars:''}));"), null);
+                poll.rememberNative(completed);
+                assertNull(poll.project(output("poll", "{\"exit_code\":0,\"output\":\"foreign output\"}"), processes));
+                assertTrue(poll.keepsOriginalWrapper());
+            } else {
+                List<JsonObject> messages = CodexKnownExecReplay.readNativeCommand(completed, processes);
+                assertEquals(2, messages.size());
+                assertEquals("foreign-command", messages.get(1).getAsJsonObject("raw").getAsJsonArray("content")
+                        .get(0).getAsJsonObject().get("tool_use_id").getAsString());
+            }
+            assertEquals(process, processes.get("11"));
+            assertEquals(1, processes.size());
+        }
+    }
+
     /** A new identical command cannot borrow an earlier process's receipt, regardless of call order. */
     @Test
     public void separatesInterruptedAndNewIdenticalCommandsInEitherOrder() {
@@ -381,6 +493,111 @@ public class CodexKnownExecReplayTest {
         assertEquals(List.of("bash", "bash", "bash"), toolNames(projected));
         assertEquals(3, results(projected).size());
         assertTrue(projected.stream().anyMatch(block -> "earlier-command".equals(string(block, "id"))));
+    }
+
+    /** Reusing a completed process id for another literal must not duplicate the new command. */
+    @Test
+    public void completedProcessIdCanBelongToANewCommand() {
+        JsonArray records = new JsonArray();
+        records.add(call("earlier", "text(await tools.exec_command({cmd:'npm test'}));"));
+        records.add(output("earlier", "{\"session_id\":11,\"output\":\"running\"}"));
+        records.add(call("finished", "text(await tools.write_stdin({session_id:11,chars:''}));"));
+        records.add(output("finished", "{\"exit_code\":0,\"output\":\"old command stopped\"}"));
+        records.add(call("current", "text(await tools.exec_command({cmd:'git status'}));"));
+        JsonObject completed = nativeCommand("native-current", "completed", 0);
+        completed.getAsJsonObject("payload").getAsJsonObject("item").addProperty("process_id", "11");
+        completed.getAsJsonObject("payload").getAsJsonObject("item").addProperty("command", "git status");
+        records.add(completed);
+        records.add(output("current", "{\"exit_code\":0,\"output\":\"new command stopped\"}"));
+
+        List<JsonObject> projected = blocks(records);
+
+        assertEquals(List.of("bash", "bash"), toolNames(projected));
+        assertEquals(List.of("old command stopped", "native-current output"), results(projected));
+        assertEquals("native-current", string(projected.get(projected.size() - 1), "tool_use_id"));
+    }
+
+    /** Optional completed owners must stay bounded without evicting a newly started command. */
+    @Test
+    public void completedOwnersMakeRoomForRunningCommands() {
+        var processes = new java.util.LinkedHashMap<String, CodexKnownExecReplay.Process>();
+        for (int index = 0; index < 256; index++) {
+            processes.put("completed-" + index,
+                    new CodexKnownExecReplay.Process("tool-" + index, new JsonObject(), "old command", true));
+        }
+        CodexKnownExecReplay replay = CodexKnownExecReplay.begin(
+                call("new-command", "text(await tools.exec_command({cmd:'npm test'}));"), null);
+
+        replay.project(output("new-command", "{\"session_id\":11,\"output\":\"running\"}"), processes);
+
+        assertEquals(256, processes.size());
+        assertTrue(processes.containsKey("11"));
+        assertFalse(processes.containsKey("completed-0"));
+        assertFalse(processes.get("11").completed());
+    }
+
+    /** Retained completion ownership cannot hide fresh input directed at an already closed process. */
+    @Test
+    public void keepsInputToACompletedProcessObservable() {
+        for (boolean withNativeReceipt : List.of(false, true)) {
+            var processes = new java.util.LinkedHashMap<String, CodexKnownExecReplay.Process>();
+            CodexKnownExecReplay started = CodexKnownExecReplay.begin(
+                    call("started", "text(await tools.exec_command({cmd:'npm test'}));"), null);
+            started.project(output("started", "{\"session_id\":11,\"output\":\"running\"}"), processes);
+            CodexKnownExecReplay finished = CodexKnownExecReplay.begin(
+                    call("finished", "text(await tools.write_stdin({session_id:11,chars:''}));"), null);
+            finished.project(output("finished", "{\"exit_code\":0,\"output\":\"stopped\"}"), processes);
+            CodexKnownExecReplay input = CodexKnownExecReplay.begin(
+                    call("input", "text(await tools.write_stdin({session_id:11,chars:'yes\\n'}));"), null);
+            if (withNativeReceipt) {
+                JsonObject completed = nativeCommand("native-started", "completed", 0);
+                completed.getAsJsonObject("payload").getAsJsonObject("item").addProperty("process_id", "11");
+                input.rememberNative(completed);
+            }
+
+            assertNull(input.project(output("input", "{\"exit_code\":0,\"output\":\"already stopped\"}"), processes));
+            assertTrue(input.keepsOriginalWrapper());
+            assertTrue(processes.get("11").completed());
+        }
+    }
+
+    /** Repeated terminal polls cannot replace the first outcome while its native receipt is delayed. */
+    @Test
+    public void repeatedTerminalPollsKeepOneOutcomeBeforeTheNativeReceipt() {
+        JsonArray records = new JsonArray();
+        records.add(call("started", "text(await tools.exec_command({cmd:'npm test'}));"));
+        records.add(output("started", "{\"session_id\":11,\"output\":\"running\"}"));
+        for (String id : List.of("first-poll", "repeated-poll")) {
+            records.add(call(id, "text(await tools.write_stdin({session_id:11,chars:''}));"));
+            records.add(output(id, "{\"exit_code\":0,\"output\":\"stopped\"}"));
+        }
+
+        assertEquals(List.of("bash"), toolNames(blocks(records)));
+        assertEquals(List.of("stopped"), results(blocks(records)));
+    }
+
+    /** A terminal stdin reply can beat its native completion without creating a second command card. */
+    @Test
+    public void nativeCompletionKeepsTheCommandAlreadyClosedByStdin() {
+        for (String chars : List.of("", "\\u0003")) {
+            JsonArray records = new JsonArray();
+            records.add(call("started", "text(await tools.exec_command({cmd:'npm test'}));"));
+            records.add(output("started", "{\"session_id\":11,\"output\":\"running\"}"));
+            records.add(call("finish", "text(await tools.write_stdin({session_id:11,chars:'" + chars + "'}));"));
+            records.add(output("finish", "{\"exit_code\":130,\"output\":\"stopped by stdin\"}"));
+            JsonObject completed = nativeCommand("native-started", "failed", 130);
+            completed.getAsJsonObject("payload").getAsJsonObject("item").addProperty("process_id", "11");
+            records.add(completed);
+            records.add(call("poll-again", "text(await tools.write_stdin({session_id:11,chars:''}));"));
+            records.add(output("poll-again", "{\"exit_code\":130,\"output\":\"already stopped\"}"));
+
+            List<JsonObject> projected = blocks(records);
+
+            assertEquals(List.of("bash"), toolNames(projected));
+            assertTrue(projected.stream().filter(block -> "tool_result".equals(string(block, "type")))
+                    .allMatch(block -> "started:command:0".equals(string(block, "tool_use_id"))));
+            assertEquals("native-started output", results(projected).get(results(projected).size() - 1));
+        }
     }
 
     /** Late native output closes the original process and later polls cannot add a duplicate result. */

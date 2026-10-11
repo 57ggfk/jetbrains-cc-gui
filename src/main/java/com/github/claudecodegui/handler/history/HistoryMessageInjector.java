@@ -418,10 +418,10 @@ public class HistoryMessageInjector {
                 }
 
                 // Delegate to the session orchestrator which handles the actual pagination
-                ClaudeSession session = context.getSession();
+                ClaudeSession session = this.context.getSession();
                 if (session != null && sessionId.equals(session.getSessionId())) {
-                    String cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
-                    session.getOrchestrator().loadEarlierClaudeHistoryPage(sessionId, cwd, beforeTurn);
+                    // Paging must use the same custom working directory as the accepted transcript.
+                    session.getOrchestrator().loadEarlierClaudeHistoryPage(sessionId, session.getCwd(), beforeTurn);
                 } else {
                     LOG.warn("[HistoryHandler] Claude history page request for inactive session: " + sessionId);
                 }
@@ -795,7 +795,7 @@ public class HistoryMessageInjector {
             String callId = getStringProperty(payload, "call_id");
             String payloadType = getStringProperty(payload, "type");
             if (this.knownExec != null) {
-                if (this.knownExec.rememberNative(rawMessage)) {
+                if (this.knownExec.rememberNative(rawMessage, this.processCalls)) {
                     if (this.retainedBytes() > MAX_REPLAY_BYTES) {
                         this.flushKnownExec(null);
                     }
@@ -831,14 +831,22 @@ public class HistoryMessageInjector {
             if (replay == null) {
                 return;
             }
-            List<JsonObject> messages = null;
+            // A record stashed while the wrapper was open belongs after the wrapper's
+            // own cards, matching its position in the transcript.
+            JsonObject stashed = this.pending;
+            this.pending = null;
+            boolean projected = false;
             try {
-                messages = replay.project(output, this.processCalls);
+                List<JsonObject> messages = replay.project(output, this.processCalls);
+                if (messages != null) {
+                    messages.forEach(this::acceptConverted);
+                    projected = true;
+                }
             } catch (RuntimeException ignored) {
                 // Malformed independent results cannot establish a complete replacement.
             }
-            if (messages != null) {
-                messages.forEach(this::acceptConverted);
+            if (projected) {
+                this.acceptConverted(stashed);
                 return;
             }
             if (replay.keepsOriginalWrapper()) {
@@ -855,13 +863,14 @@ public class HistoryMessageInjector {
                 if (output != null) {
                     this.acceptOpaqueExecRecord(output, replay.callId(), true);
                 }
-                return;
+            } else {
+                this.acceptLegacy(replay.original());
+                replay.nativeRecords().forEach(this::acceptLegacy);
+                if (output != null) {
+                    this.acceptLegacy(output);
+                }
             }
-            this.acceptLegacy(replay.original());
-            replay.nativeRecords().forEach(this::acceptLegacy);
-            if (output != null) {
-                this.acceptLegacy(output);
-            }
+            this.acceptConverted(stashed);
         }
 
         private void acceptOpaqueExecRecord(JsonObject record, String callId, boolean result) {
@@ -1136,7 +1145,13 @@ public class HistoryMessageInjector {
 
         List<JsonObject> pendingMessages() {
             if (this.knownExec != null) {
-                return this.knownExec.snapshot(this.processCalls);
+                List<JsonObject> messages = new ArrayList<>(this.knownExec.snapshot(this.processCalls));
+                JsonObject message = this.pendingMessage();
+                // A record stashed while the wrapper was open follows the wrapper's own cards.
+                if (message != null) {
+                    messages.add(message);
+                }
+                return messages;
             }
             JsonObject message = this.pendingMessage();
             return message == null ? List.of() : List.of(message);
@@ -1160,7 +1175,8 @@ public class HistoryMessageInjector {
             }
             for (var process : this.processCalls.entrySet()) {
                 bytes += 3L * (process.getKey().length() + process.getValue().toolId().length()
-                        + process.getValue().metadata().toString().length());
+                        + process.getValue().metadata().toString().length()
+                        + (process.getValue().command() == null ? 0 : process.getValue().command().length()));
             }
             for (String callId : this.shellCalls.keySet()) {
                 bytes += 3L * callId.length();
@@ -1184,7 +1200,12 @@ public class HistoryMessageInjector {
             if (this.knownExec != null) {
                 List<JsonObject> pendingKnown = this.knownExec.snapshot(this.processCalls);
                 this.knownExec = null;
+                // A record stashed while the wrapper was open follows the wrapper's own
+                // cards, matching its position in the transcript and the paged index.
+                JsonObject stashed = this.pending;
+                this.pending = null;
                 pendingKnown.forEach(this::acceptConverted);
+                this.acceptConverted(stashed);
             }
             emitPending();
         }

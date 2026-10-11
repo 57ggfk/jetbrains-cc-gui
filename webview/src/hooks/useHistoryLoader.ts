@@ -7,6 +7,7 @@ import { isKnownHistoryMessageCount, sumKnownHistoryMessages } from '../utils/hi
 const MAX_NATIVE_COUNT_REQUESTS = 4;
 const NATIVE_COUNT_TIMEOUT_MS = 125_000;
 const NATIVE_COUNT_CACHE_TTL_MS = 60_000;
+const BRIDGE_SEND_RETRY_MS = 1_000;
 
 interface NativeCountJob {
   session: HistorySessionSummary;
@@ -39,6 +40,7 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
     const countQueue: NativeCountJob[] = [];
     const pendingCounts = new Map<string, { job: NativeCountJob; timer: ReturnType<typeof setTimeout> }>();
     let countRequestSequence = 0;
+    let sendRetryTimer: ReturnType<typeof setTimeout> | null = null;
     const countExpirations = new Map<string, number>();
 
     const publishNativeHistory = (previousById: Map<string, HistorySessionSummary>) => {
@@ -72,6 +74,10 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
       for (const pending of pendingCounts.values()) clearTimeout(pending.timer);
       pendingCounts.clear();
       countQueue.length = 0;
+      if (sendRetryTimer !== null) {
+        clearTimeout(sendRetryTimer);
+        sendRetryTimer = null;
+      }
     };
 
     const dispatchCounts = () => {
@@ -92,8 +98,18 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
           requestId: countRequestId,
         }));
         if (!sent) {
+          // The bridge refused the send; park the job at the queue head and retry
+          // shortly instead of dropping its count for the rest of the view session.
           clearTimeout(timer);
           pendingCounts.delete(countRequestId);
+          countQueue.unshift(job);
+          if (sendRetryTimer === null) {
+            sendRetryTimer = setTimeout(() => {
+              sendRetryTimer = null;
+              dispatchCounts();
+            }, BRIDGE_SEND_RETRY_MS);
+          }
+          break;
         }
       }
     };
@@ -215,10 +231,16 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
 
     const requestHistoryData = () => {
       if (window.sendToJava) {
-        if (currentProvider === 'codex') {
-          sendBridgeEvent('codex_native_list_threads', JSON.stringify({ requestId }));
-        } else {
-          sendBridgeEvent('load_history_data', currentProvider);
+        const sent = currentProvider === 'codex'
+          ? sendBridgeEvent('codex_native_list_threads', JSON.stringify({ requestId }))
+          : sendBridgeEvent('load_history_data', currentProvider);
+        if (!sent && sendRetryTimer === null) {
+          // The bridge refused the send; retry shortly instead of dropping the
+          // list request for the rest of the view session, like the count pipeline.
+          sendRetryTimer = setTimeout(() => {
+            sendRetryTimer = null;
+            requestHistoryData();
+          }, BRIDGE_SEND_RETRY_MS);
         }
       } else {
         historyRetryCount++;

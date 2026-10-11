@@ -64,7 +64,6 @@ import javax.swing.*;
 import java.util.List;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 /**
  * Delegates for initialization setup and runtime operations:
@@ -105,7 +104,7 @@ public class ChatWindowDelegate {
         /**
          * Capture an ordered script sender for the current browser page.
          */
-        Consumer<String> captureJavaScriptExecutor();
+        HandlerContext.JsSender captureJavaScriptExecutor();
 
         Content getParentContent();
         String getOriginalTabName();
@@ -334,7 +333,7 @@ public class ChatWindowDelegate {
                 host.executeJavaScriptCode(jsCode);
             }
             @Override
-            public Consumer<String> captureJavaScriptExecutor() {
+            public HandlerContext.JsSender captureJavaScriptExecutor() {
                 return host.captureJavaScriptExecutor();
             }
             @Override

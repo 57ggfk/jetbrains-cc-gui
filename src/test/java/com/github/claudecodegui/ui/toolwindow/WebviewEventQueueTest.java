@@ -1,5 +1,7 @@
 package com.github.claudecodegui.ui.toolwindow;
 
+import com.github.claudecodegui.handler.core.HandlerContext;
+
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -14,7 +16,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -140,10 +141,10 @@ public class WebviewEventQueueTest {
         List<Runnable> scheduled = new ArrayList<>();
         List<String> scripts = new ArrayList<>();
         WebviewEventQueue<Object> queue = newQueue(browser, disposed, scheduled, scripts);
-        Consumer<String> reply = queue.captureRawSender();
+        HandlerContext.JsSender reply = queue.captureRawSender();
 
         queue.enqueue("beforePaste");
-        reply.accept("pasteImage()");
+        reply.send("pasteImage()");
         queue.enqueue("afterPaste");
         assertTrue("captured replies must not execute outside the queue", scripts.isEmpty());
         scheduled.remove(0).run();
@@ -166,7 +167,7 @@ public class WebviewEventQueueTest {
                 (ignoredBrowser, ignoredPage, script) -> scripts.add(script), () -> true);
         MessageDispatchGate gate = new MessageDispatchGate();
         gate.activatePageGeneration(1);
-        AtomicReference<Consumer<String>> oldReply = new AtomicReference<>();
+        AtomicReference<HandlerContext.JsSender> oldReply = new AtomicReference<>();
         assertTrue(gate.runInDispatch(1, () -> oldReply.set(queue.captureRawSender())));
         AtomicBoolean baselinesReset = new AtomicBoolean();
         CountDownLatch publicationEntered = new CountDownLatch(1);
@@ -191,7 +192,7 @@ public class WebviewEventQueueTest {
                 newDispatchStarted.countDown();
                 return gate.runInDispatch(2, () -> {
                     assertTrue(baselinesReset.get());
-                    queue.captureRawSender().accept("newPageImage()");
+                    queue.captureRawSender().send("newPageImage()");
                 });
             });
             assertTrue(newDispatchStarted.await(2, TimeUnit.SECONDS));
@@ -206,7 +207,7 @@ public class WebviewEventQueueTest {
             releasePublication.countDown();
             assertTrue(activation.get(2, TimeUnit.SECONDS));
             assertTrue(newDispatch.get(2, TimeUnit.SECONDS));
-            oldReply.get().accept("staleImage()");
+            oldReply.get().send("staleImage()");
             scheduled.remove(0).run();
             assertEquals(1, scripts.size());
             assertTrue(scripts.get(0).contains("newPageImage()"));
@@ -229,12 +230,12 @@ public class WebviewEventQueueTest {
         WebviewEventQueue<Object> queue = new WebviewEventQueue<>(
                 () -> browser, () -> false, pageGeneration::get, scheduled::add,
                 (ignoredBrowser, ignoredPage, script) -> scripts.add(script), () -> true);
-        Consumer<String> oldReply = queue.captureRawSender();
+        HandlerContext.JsSender oldReply = queue.captureRawSender();
 
         pageGeneration.set(2);
         queue.pageChanged();
         queue.enqueueRaw("newPage()");
-        oldReply.accept("staleImage()");
+        oldReply.send("staleImage()");
         scheduled.remove(0).run();
 
         assertEquals(1, scripts.size());
@@ -250,12 +251,12 @@ public class WebviewEventQueueTest {
         List<Runnable> scheduled = new ArrayList<>();
         List<String> scripts = new ArrayList<>();
         WebviewEventQueue<Object> queue = newQueue(browser, disposed, scheduled, scripts);
-        Consumer<String> oldReply = queue.captureRawSender();
+        HandlerContext.JsSender oldReply = queue.captureRawSender();
 
         browser.set(new Object());
         queue.browserChanged();
         queue.enqueueRaw("newBrowser()");
-        oldReply.accept("staleImage()");
+        oldReply.send("staleImage()");
         scheduled.remove(0).run();
 
         assertEquals(1, scripts.size());
@@ -271,10 +272,10 @@ public class WebviewEventQueueTest {
         List<Runnable> scheduled = new ArrayList<>();
         List<String> scripts = new ArrayList<>();
         WebviewEventQueue<Object> queue = newQueue(browser, disposed, scheduled, scripts);
-        Consumer<String> reply = queue.captureRawSender();
+        HandlerContext.JsSender reply = queue.captureRawSender();
         disposed.set(true);
 
-        reply.accept("staleImage()");
+        reply.send("staleImage()");
         assertTrue(scheduled.isEmpty());
         assertTrue(scripts.isEmpty());
         queue.dispose();

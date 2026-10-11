@@ -67,7 +67,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 /**
  * Chat window instance. Coordinates UI components, session management,
@@ -1248,9 +1247,8 @@ public class ClaudeChatWindow {
         webviewEventQueue.browserChanged();
         streamCoalescer.resetDeliveryBaseline();
         if (nextBrowser != null) {
-            // macOS 27 paste fix: every browser instance carries its own CefClient,
-            // so each (re)bind needs the hook installed on the new client.
-            CefPasteHook.installForWindow(this);
+            // Register per browser through the platform client so default keyboard handling survives.
+            CefPasteHook.install(nextBrowser, this);
             observedBrowserComponent = nextBrowser.getComponent();
             observedBrowserComponent.addComponentListener(surfaceRefreshComponentListener);
             rebindNativeSurfaceComponent(getNativeSurfaceComponent(nextBrowser));
@@ -3334,7 +3332,7 @@ public class ClaudeChatWindow {
             }
 
             @Override
-            public Consumer<String> captureJavaScriptExecutor() {
+            public HandlerContext.JsSender captureJavaScriptExecutor() {
                 return webviewEventQueue.captureRawSender();
             }
 

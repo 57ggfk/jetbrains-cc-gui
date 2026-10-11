@@ -1849,6 +1849,49 @@ test('native image preparation preserves the draft until the owned reply arrives
   await expect(page.locator('.chat-input-box .attachment-item')).toHaveCount(0);
 });
 
+for (const withDomPaste of [false, true]) {
+  test(`native image captures keep intentional identical pastes with a DOM echo: ${withDomPaste}`, async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-12T00:00:00Z'));
+    const editable = page.locator('.input-editable');
+    await editable.fill('two deliberate captures');
+    const base64 = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      canvas.getContext('2d')!.fillStyle = '#ff0000';
+      canvas.getContext('2d')!.fillRect(0, 0, 1, 1);
+      return canvas.toDataURL('image/png').split(',')[1];
+    });
+    if (withDomPaste) {
+      await editable.evaluate((input, data) => {
+        const clipboard = new DataTransfer();
+        clipboard.items.add(new File([Uint8Array.from(atob(data), byte => byte.charCodeAt(0))], 'a.png', { type: 'image/png' }));
+        input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true }));
+      }, base64);
+      await expect(page.locator('.attachment-item')).toHaveCount(1);
+    }
+    const pasteCapturedImage = (snapshotId: string) => page.evaluate(({ snapshotId, base64 }) => {
+      const bridge = window as InputTestWindow;
+      window.dispatchEvent(new CustomEvent('java-request-paste-image', {
+        detail: { snapshotId, scopeId: bridge.__nativePasteScope },
+      }));
+      const { requestId } = JSON.parse(bridge.__nativePasteRequests.at(-1)!);
+      window.dispatchEvent(new CustomEvent('java-paste-image', { detail: { requestId, mediaType: 'image/png', base64 } }));
+      return requestId as string;
+    }, { snapshotId, base64 });
+    const firstRequestId = await pasteCapturedImage('first-capture');
+    await expect(page.locator('.attachment-item')).toHaveCount(1);
+    await pasteCapturedImage('second-capture');
+    await expect(page.locator('.attachment-item')).toHaveCount(2);
+    await page.evaluate(({ requestId, base64 }) => window.dispatchEvent(new CustomEvent('java-paste-image', {
+      detail: { requestId, mediaType: 'image/png', base64 },
+    })), { requestId: firstRequestId, base64 });
+    await editable.press('Enter');
+    await expect.poll(() => sentMessages(page)).toEqual(['two deliberate captures']);
+    expect(await page.evaluate(() => (window as InputTestWindow).__sentAttachments[0].map(({ data }) => data)))
+      .toEqual([base64, base64]);
+  });
+}
+
 test('leaving and returning to chat discards the previous native image request', async ({ page }) => {
   const requestId = await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent('java-request-paste-image'));

@@ -31,9 +31,13 @@ final class CodexKnownExecReplay {
 
     record Action(String kind, JsonObject input, int position, int resultIndex) { }
     record IndexLabel(Pattern pattern, boolean settledReceipt) { }
-    record Process(String toolId, JsonObject metadata, String command) {
+    record Process(String toolId, JsonObject metadata, String command, boolean completed) {
         Process(String toolId, JsonObject metadata) {
-            this(toolId, metadata, null);
+            this(toolId, metadata, null, false);
+        }
+
+        Process(String toolId, JsonObject metadata, String command) {
+            this(toolId, metadata, command, false);
         }
     }
 
@@ -129,6 +133,10 @@ final class CodexKnownExecReplay {
     }
 
     boolean rememberNative(JsonObject record) {
+        return this.rememberNative(record, Map.of());
+    }
+
+    boolean rememberNative(JsonObject record, Map<String, Process> processes) {
         JsonObject payload = object(record, "payload");
         JsonObject item = object(payload, "item");
         if (!"event_msg".equals(string(record, "type")) || !"item_completed".equals(string(payload, "type"))
@@ -140,7 +148,8 @@ final class CodexKnownExecReplay {
         String thread = string(payload, "thread_id");
         String turn = string(payload, "turn_id");
         if (this.rootThreadId != null && thread != null && !this.rootThreadId.equals(thread)
-                || this.turnId != null && turn != null && !this.turnId.equals(turn)) {
+                || this.turnId != null && turn != null && !this.turnId.equals(turn)
+                && !isOwnedProcessCompletion(record, processes)) {
             return true;
         }
         for (int index = 0; index < this.nativeRecords.size(); index++) {
@@ -158,7 +167,7 @@ final class CodexKnownExecReplay {
 
     List<JsonObject> project(JsonObject outputRecord, Map<String, Process> processes) {
         this.opaqueFallback = false;
-        JsonObject replayScope = this.recordedScope();
+        JsonObject replayScope = this.recordedScope(processes);
         if (replayScope == null) {
             return this.keepWrapperForReview();
         }
@@ -248,9 +257,8 @@ final class CodexKnownExecReplay {
                     && command.equals(command(candidate.input))).count();
             long receipts = this.nativeRecords.stream().filter(record -> {
                 JsonObject item = object(object(record, "payload"), "item");
-                String processId = string(item, "process_id");
                 return "CommandExecution".equals(string(item, "type")) && command.equals(nativeCommand(item))
-                        && (processId == null || !processes.containsKey(processId));
+                        && !isOwnedProcessCompletion(record, processes);
             }).count();
             if (receipts > calls) {
                 // Extra executions of the same literal can represent a loop, not a different background command.
@@ -375,6 +383,10 @@ final class CodexKnownExecReplay {
             if (action.kind.equals("write_stdin")) {
                 String sessionId = string(action.input, "session_id");
                 Process process = nextProcesses.get(sessionId);
+                if (process != null && process.completed && !firstText(action.input, "chars").isEmpty()) {
+                    // Retained ownership proves a late receipt, not a new write to a closed process.
+                    return this.keepWrapperForReview();
+                }
                 JsonObject completion = this.findNativeProcessCompletion(sessionId, nextProcesses, usedNativeIds);
                 if (this.opaqueFallback) {
                     return null;
@@ -382,7 +394,7 @@ final class CodexKnownExecReplay {
                 if (completion != null) {
                     JsonObject item = object(object(completion, "payload"), "item");
                     if (process != null && (!nativeCommand(item).equals(process.command)
-                            || !compatibleScope(process.metadata, metadata(completion, null, null)))) {
+                            || !recognizesProcessCompletion(process, sessionId, completion))) {
                         return this.keepWrapperForReview();
                     }
                     // Ctrl+C can emit its native receipt before the wrapper returns. Consume it
@@ -398,9 +410,11 @@ final class CodexKnownExecReplay {
                         || !isTerminal(result) && !sessionId.equals(string(result, "session_id")))) {
                     // Literal input changes a process; preserve the wrapper when its target is unknown.
                     return this.keepWrapperForReview();
-                } else if (process != null && result != null && isTerminal(result)) {
+                } else if (process != null && result != null && isTerminal(result) && !process.completed) {
                     messages.add(resultMessage(outputRecord, process, result));
-                    nextProcesses.remove(sessionId);
+                    // The native completion can follow this wrapper's terminal reply. Keep its
+                    // ownership until then so that receipt updates this card instead of inventing one.
+                    nextProcesses.put(sessionId, new Process(process.toolId, process.metadata, process.command, true));
                 }
                 continue;
             }
@@ -450,6 +464,13 @@ final class CodexKnownExecReplay {
                 messages.addAll(readNativeCommand(record, nextProcesses));
             }
         }
+        // Completed owners awaiting an optional native receipt must not crowd out running commands.
+        var retained = nextProcesses.entrySet().iterator();
+        while (nextProcesses.size() > 256 && retained.hasNext()) {
+            if (retained.next().getValue().completed) {
+                retained.remove();
+            }
+        }
         processes.clear();
         nextProcesses.forEach((id, process) -> {
             if (processes.size() < 256) {
@@ -475,7 +496,7 @@ final class CodexKnownExecReplay {
         List<Map.Entry<String, Process>> matching = processes.entrySet().stream().filter(entry -> {
             Process process = entry.getValue();
             return (processId == null || processId.equals(entry.getKey()))
-                    && command.equals(process.command) && compatibleScope(process.metadata, scope);
+                    && command.equals(process.command) && recognizesProcessCompletion(process, entry.getKey(), record);
         }).toList();
         Process process;
         List<JsonObject> messages = new ArrayList<>();
@@ -506,6 +527,20 @@ final class CodexKnownExecReplay {
         }
         result.addProperty("is_error", !"completed".equals(string(item, "status")));
         return result;
+    }
+
+    private static boolean recognizesProcessCompletion(Process process, String processId, JsonObject record) {
+        JsonObject scope = metadata(record, null, null);
+        String recordedProcessId = string(object(object(record, "payload"), "item"), "process_id");
+        if (recordedProcessId == null) {
+            return compatibleScope(process.metadata, scope);
+        }
+        String ownerThread = string(process.metadata, "codexThreadId");
+        String receiptThread = string(scope, "codexThreadId");
+        // A background process can finish in a later turn. Its id proves ownership,
+        // but never permits a receipt from another thread to close it.
+        return recordedProcessId.equals(processId)
+                && (ownerThread == null || receiptThread == null || ownerThread.equals(receiptThread));
     }
 
     private static boolean compatibleScope(JsonObject first, JsonObject second) {
@@ -692,11 +727,26 @@ final class CodexKnownExecReplay {
         return value != null && value.has("codexExecRejected") && value.get("codexExecRejected").getAsBoolean();
     }
 
-    private JsonObject recordedScope() {
+    private static boolean isOwnedProcessCompletion(JsonObject record, Map<String, Process> processes) {
+        JsonObject item = object(object(record, "payload"), "item");
+        String processId = string(item, "process_id");
+        Process owner = processId == null ? null : processes.get(processId);
+        return "CommandExecution".equals(string(item, "type")) && owner != null
+                && owner.command != null && owner.command.equals(nativeCommand(item))
+                && recognizesProcessCompletion(owner, processId, record);
+    }
+
+    private JsonObject recordedScope(Map<String, Process> processes) {
         JsonObject scope = metadata(this.original, this.rootThreadId, this.turnId);
         for (JsonObject record : this.nativeRecords) {
             JsonObject payload = object(record, "payload");
+            boolean ownedCompletion = isOwnedProcessCompletion(record, processes);
             for (String field : List.of("thread", "turn")) {
+                // A proved background receipt keeps its own turn; it cannot lend that turn to this wrapper.
+                // Thread conflicts still fail closed, even when a numeric process id has been reused.
+                if (ownedCompletion && "turn".equals(field)) {
+                    continue;
+                }
                 String key = "codex" + (field.equals("thread") ? "ThreadId" : "TurnId");
                 String received = string(payload, field + "_id");
                 String known = string(scope, key);
@@ -739,10 +789,9 @@ final class CodexKnownExecReplay {
         List<JsonObject> candidates = this.nativeRecords.stream().filter(record -> {
             JsonObject item = object(object(record, "payload"), "item");
             String id = string(item, "id");
-            String processId = string(item, "process_id");
-            // A tracked process keeps its receipt even when the wrapper starts an identical command first.
+            // A process id keeps its receipt only when the command and thread prove the same owner.
             return "CommandExecution".equals(string(item, "type")) && id != null && !usedIds.contains(id)
-                    && (processId == null || !processes.containsKey(processId)) && command.equals(nativeCommand(item))
+                    && !isOwnedProcessCompletion(record, processes) && command.equals(nativeCommand(item))
                     && List.of("completed", "failed", "interrupted").contains(String.valueOf(string(item, "status")));
         }).toList();
         boolean identified = false;

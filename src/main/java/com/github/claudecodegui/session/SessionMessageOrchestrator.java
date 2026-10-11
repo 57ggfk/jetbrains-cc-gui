@@ -12,7 +12,9 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -59,6 +61,13 @@ public class SessionMessageOrchestrator {
     private volatile int claudeHistoryTotalTurns = 0;
     private volatile boolean claudeHistoryHasMore = false;
     private volatile String claudeHistorySessionTitle = null;
+    /**
+     * Guard earlier-page commits against a transcript replaced while their read was in flight.
+     * A plain long on purpose: every read and write happens inside
+     * {@code synchronized (state.getMessageStateLock())}, so the message lock already
+     * provides visibility and atomicity — do not read or write it outside that lock.
+     */
+    private long claudeHistoryVersion;
 
     public SessionMessageOrchestrator(
             Project project,
@@ -166,6 +175,7 @@ public class SessionMessageOrchestrator {
         }
     }
 
+    /** Load provider history without letting obsolete reads replace a newer transcript. */
     public CompletableFuture<Void> loadFromServer() {
         String requestedSessionId = state.getSessionId();
         if (requestedSessionId == null) {
@@ -185,16 +195,11 @@ public class SessionMessageOrchestrator {
             try {
                 LOG.info("Loading session from server: sessionId=" + requestedSessionId + ", cwd=" + requestedCwd);
 
-                // The turn the live window currently starts at. A page load overwrites
-                // claudeHistoryFromTurn with its own start, but a merged transcript keeps
-                // the older live prefix, so this value has to survive the load (see the
-                // merge branch below).
-                int windowStartTurnBeforeLoad = claudeHistoryFromTurn;
-
                 List<JsonObject> serverMessages;
                 boolean pagedClaudeLoad;
+                ClaudeHistoryLoad historyLoad = null;
                 if ("claude".equals(requestedProvider)) {
-                    ClaudeHistoryLoad historyLoad = loadClaudeSessionWithPagination(requestedSessionId, requestedCwd);
+                    historyLoad = this.loadClaudeSessionWithPagination(requestedSessionId, requestedCwd);
                     serverMessages = historyLoad.messages;
                     pagedClaudeLoad = historyLoad.paged;
                 } else {
@@ -226,14 +231,20 @@ public class SessionMessageOrchestrator {
                         LOG.info("Ignoring history result for a session that changed while loading");
                         return;
                     }
-                    List<ClaudeSession.Message> currentMessages = state.getMessagesReference();
+                    // Safety checks must see buffered stream deltas before replacement materializes them.
+                    List<ClaudeSession.Message> currentMessages = this.state.getMessages();
                     // A new row added during this read belongs to newer live work.
                     // Metadata patches keep the same row identities and remain valid.
                     if (!currentMessages.equals(messagesBeforeLoad)) {
                         return;
                     }
-                    if (pagedClaudeLoad && !historyRetainsUnidentifiedTail(loadedMessages, currentMessages)) {
-                        LOG.warn("Ignoring history page that has not persisted the unidentified live tail");
+                    // The anchor walk backs every Claude guard below; run it once per commit.
+                    int alignedAnchorIndex = "claude".equals(requestedProvider)
+                            ? lastAlignedHistoryIndex(loadedMessages, currentMessages) : -1;
+                    // A full fallback can lag the writer just like a page; neither may erase live narrative.
+                    if ("claude".equals(requestedProvider)
+                            && !historyKeepsLiveNarrative(loadedMessages, currentMessages, alignedAnchorIndex)) {
+                        LOG.warn("Ignoring history result that has not persisted the live narrative");
                         return;
                     }
                     // A page load only carries the newest turns, so a transcript that
@@ -243,7 +254,7 @@ public class SessionMessageOrchestrator {
                     // mergeLoadedPageWithLivePrefix.
                     List<ClaudeSession.Message> mergedMessages = "codex".equals(requestedProvider)
                             ? CodexHistoryMerger.reconcile(loadedMessages, currentMessages) : pagedClaudeLoad
-                            ? mergeLoadedPageWithLivePrefix(loadedMessages, currentMessages)
+                            ? mergeLoadedPageWithLivePrefix(loadedMessages, currentMessages, alignedAnchorIndex)
                             : null;
                     if (mergedMessages != null) {
                         if (!"codex".equals(requestedProvider) && !MessageStructure.structuralBlockKeys(mergedMessages)
@@ -251,7 +262,7 @@ public class SessionMessageOrchestrator {
                             LOG.warn("Ignoring history page that would remove live structural blocks");
                             return;
                         }
-                        keptOlderLivePrefix = pagedClaudeLoad && lastHistoryBackedIndex(currentMessages) > 0;
+                        keptOlderLivePrefix = pagedClaudeLoad && alignedAnchorIndex > 0;
                         loadedMessages = mergedMessages;
                     } else {
                         int liveHistoryBacked = countHistoryBackedMessages(currentMessages);
@@ -269,26 +280,31 @@ public class SessionMessageOrchestrator {
                     // Replace only after the complete response has been parsed and all
                     // ownership checks pass. A failed or partial read must never clear
                     // the live list first and leave the UI with a shorter transcript.
-                    state.replaceMessages(loadedMessages);
-                    state.setError(null);
-                    callbackMessages = state.getMessagesSnapshot();
-                    restoreTokenUsage(serverMessages);
-                    callbackFacade.notifyMessageUpdate(callbackMessages);
-                    if (keptOlderLivePrefix && pagedClaudeLoad) {
-                        // The merge kept turns the page no longer carries, so the
-                        // window still starts where it started before this load. The
-                        // load already announced the page's own start; announce the
-                        // real one or the frontend's "load earlier" cursor would step
-                        // past the kept turns and re-request them as duplicates.
-                        claudeHistoryFromTurn = windowStartTurnBeforeLoad;
-                        callbackFacade.notifyClaudeHistoryPageInfo(
+                    this.state.replaceMessages(loadedMessages);
+                    this.state.setError(null);
+                    if (historyLoad != null) {
+                        this.claudeHistoryVersion++;
+                        // The cursor belongs to the accepted transcript. Rejected or obsolete
+                        // reads must not move it past messages that are still on screen.
+                        if (!keptOlderLivePrefix) {
+                            this.claudeHistoryFromTurn = historyLoad.fromTurn;
+                        }
+                        this.claudeHistoryTotalTurns = historyLoad.totalTurns;
+                        this.claudeHistoryHasMore = historyLoad.hasMore && this.claudeHistoryFromTurn > 0;
+                        this.claudeHistorySessionTitle = historyLoad.sessionTitle;
+                        // A full fallback retires the frontend's old cursor too, or scrolling
+                        // would prepend already-loaded turns into the complete transcript.
+                        this.callbackFacade.notifyClaudeHistoryPageInfo(
                                 requestedSessionId,
-                                claudeHistoryFromTurn,
-                                claudeHistoryTotalTurns,
-                                claudeHistoryHasMore,
-                                false,
-                                claudeHistorySessionTitle);
+                                this.claudeHistoryFromTurn,
+                                this.claudeHistoryTotalTurns,
+                                this.claudeHistoryHasMore,
+                                historyLoad.cursorReset || !pagedClaudeLoad,
+                                this.claudeHistorySessionTitle);
                     }
+                    callbackMessages = this.state.getMessagesSnapshot();
+                    this.restoreTokenUsage(serverMessages);
+                    this.callbackFacade.notifyMessageUpdate(callbackMessages);
                 }
             } catch (SessionHistoryNotFoundException e) {
                 // A missing history file is an explicit stale-session signal, so unlike
@@ -345,10 +361,38 @@ public class SessionMessageOrchestrator {
     private static final class ClaudeHistoryLoad {
         private final List<JsonObject> messages;
         private final boolean paged;
+        private final int fromTurn;
+        private final int totalTurns;
+        private final boolean hasMore;
+        private final boolean cursorReset;
+        private final String sessionTitle;
 
-        ClaudeHistoryLoad(List<JsonObject> messages, boolean paged) {
+        private ClaudeHistoryLoad(List<JsonObject> messages, JsonObject page) {
             this.messages = messages;
-            this.paged = paged;
+            this.paged = page != null;
+            this.fromTurn = page != null ? requirePageInt(page, "fromTurn") : 0;
+            this.totalTurns = page != null ? requirePageInt(page, "totalTurns") : 0;
+            this.hasMore = page != null && requirePageBoolean(page, "hasMore");
+            this.cursorReset = page != null && page.has("cursorReset") && page.get("cursorReset").getAsBoolean();
+            this.sessionTitle = page != null ? extractSessionTitle(page) : null;
+        }
+
+        /**
+         * A missing pagination field must fail with a nameable error instead of an
+         * NPE whose null message reaches the frontend's error toast.
+         */
+        private static int requirePageInt(JsonObject page, String key) {
+            if (!page.has(key)) {
+                throw new IllegalStateException("Claude history page is missing " + key);
+            }
+            return page.get(key).getAsInt();
+        }
+
+        private static boolean requirePageBoolean(JsonObject page, String key) {
+            if (!page.has(key)) {
+                throw new IllegalStateException("Claude history page is missing " + key);
+            }
+            return page.get(key).getAsBoolean();
         }
     }
 
@@ -365,29 +409,16 @@ public class SessionMessageOrchestrator {
             JsonObject page = historyAccess.getProviderSessionMessagesPage(sessionId, cwd, null, 30);
             if (page != null && page.has("success") && page.get("success").getAsBoolean()) {
                 List<JsonObject> messages = new ArrayList<>();
-                if (page.has("messages")) {
-                    JsonArray messagesArray = page.getAsJsonArray("messages");
-                    for (JsonElement msg : messagesArray) {
-                        messages.add(msg.getAsJsonObject());
-                    }
+                for (JsonElement msg : requireClaudeHistoryMessages(page)) {
+                    messages.add(msg.getAsJsonObject());
                 }
-                // Save pagination metadata for scroll-based loading
-                claudeHistoryFromTurn = page.get("fromTurn").getAsInt();
-                claudeHistoryTotalTurns = page.get("totalTurns").getAsInt();
-                claudeHistoryHasMore = page.get("hasMore").getAsBoolean();
-                String sessionTitle = extractSessionTitle(page);
-                claudeHistorySessionTitle = sessionTitle;
+                ClaudeHistoryLoad load = new ClaudeHistoryLoad(messages, page);
                 LOG.info("Loaded Claude session page: " + messages.size() + " messages"
-                        + ", fromTurn=" + claudeHistoryFromTurn
-                        + ", toTurn=" + page.get("toTurn").getAsInt()
-                        + ", totalTurns=" + claudeHistoryTotalTurns
-                        + ", hasMore=" + claudeHistoryHasMore);
-                // Notify frontend of pagination metadata (plus the CLI-derived
-                // session title so the header does not depend on this page's
-                // message span)
-                callbackFacade.notifyClaudeHistoryPageInfo(sessionId, claudeHistoryFromTurn, claudeHistoryTotalTurns, claudeHistoryHasMore,
-                        page.has("cursorReset") && page.get("cursorReset").getAsBoolean(), sessionTitle);
-                return new ClaudeHistoryLoad(messages, true);
+                        + ", fromTurn=" + load.fromTurn
+                        + ", toTurn=" + (page.has("toTurn") ? page.get("toTurn").getAsInt() : -1)
+                        + ", totalTurns=" + load.totalTurns
+                        + ", hasMore=" + load.hasMore);
+                return load;
             }
         } catch (Exception e) {
             LOG.warn("Paginated session load failed, falling back to full history: " + e.getMessage());
@@ -395,11 +426,8 @@ public class SessionMessageOrchestrator {
 
         // Fallback: full history load (legacy behavior)
         LOG.info("Using full-history fallback for Claude session: " + sessionId);
-        claudeHistoryFromTurn = 0;
-        claudeHistoryTotalTurns = 0;
-        claudeHistoryHasMore = false;
         return new ClaudeHistoryLoad(
-                historyAccess.getProviderSessionMessages("claude", sessionId, cwd), false);
+                this.historyAccess.getProviderSessionMessages("claude", sessionId, cwd), null);
     }
 
     /**
@@ -414,53 +442,133 @@ public class SessionMessageOrchestrator {
      * <p>Any failure notifies the frontend so its loading indicator clears.</p>
      */
     public CompletableFuture<Void> loadEarlierClaudeHistoryPage(String sessionId, String cwd, int beforeTurn) {
+        long requestedVersion;
+        List<ClaudeSession.Message> messageOwnersBeforeRead;
+        List<ClaudeSession.Message> messagesBeforeRead;
+        synchronized (this.state.getMessageStateLock()) {
+            if (!this.recognizesClaudeHistorySession(sessionId, cwd)) {
+                return CompletableFuture.completedFuture(null);
+            }
+            // Before the first accepted load publishes a cursor (version 0) the Java
+            // side cannot validate the frontend's restored cursor. While a load is in
+            // flight, prepending an older page would break its identity guard and
+            // silently discard the newest page, so the request must wait; without an
+            // in-flight load a prepend lands before the next read captures its snapshot.
+            // Version 0 therefore only admits a restored-window cursor that beat the
+            // initial load's claim — a milliseconds-wide race the next full reload heals.
+            if (beforeTurn != this.claudeHistoryFromTurn
+                    && (this.claudeHistoryVersion > 0 || this.state.isLoading())) {
+                this.callbackFacade.notifyClaudeHistoryPageError(sessionId, "History cursor is obsolete; retry the earlier page");
+                return CompletableFuture.completedFuture(null);
+            }
+            requestedVersion = this.claudeHistoryVersion;
+            messageOwnersBeforeRead = this.state.getMessages();
+            // Streams grow existing rows in place, so identities alone cannot protect a reset.
+            messagesBeforeRead = this.state.getMessagesSnapshot();
+        }
         return CompletableFuture.runAsync(() -> {
             try {
-                JsonObject page = historyAccess.getProviderSessionMessagesPage(sessionId, cwd, beforeTurn, 30);
+                JsonObject page = this.historyAccess.getProviderSessionMessagesPage(sessionId, cwd, beforeTurn, 30);
                 if (page == null || !page.has("success") || !page.get("success").getAsBoolean()) {
                     String error = page != null && page.has("error") && !page.get("error").isJsonNull()
                             ? page.get("error").getAsString()
                             : "History page query failed";
                     LOG.warn("Failed to load earlier Claude history page: " + error);
-                    callbackFacade.notifyClaudeHistoryPageError(sessionId, error);
+                    synchronized (this.state.getMessageStateLock()) {
+                        if (this.recognizesClaudeHistorySession(sessionId, cwd)
+                                && requestedVersion == this.claudeHistoryVersion) {
+                            this.callbackFacade.notifyClaudeHistoryPageError(sessionId, error);
+                        }
+                    }
                     return;
                 }
 
                 List<ClaudeSession.Message> newMessages = new ArrayList<>();
-                if (page.has("messages")) {
-                    for (JsonElement msg : page.getAsJsonArray("messages")) {
-                        ClaudeSession.Message message = messageParser.parseServerMessage(msg.getAsJsonObject());
-                        if (message != null) {
-                            newMessages.add(message);
-                        }
+                for (JsonElement msg : requireClaudeHistoryMessages(page)) {
+                    ClaudeSession.Message message = this.messageParser.parseServerMessage(msg.getAsJsonObject());
+                    if (message != null) {
+                        newMessages.add(message);
                     }
                 }
-
-                boolean cursorReset = page.has("cursorReset") && page.get("cursorReset").getAsBoolean();
-                claudeHistoryFromTurn = page.get("fromTurn").getAsInt();
-                claudeHistoryHasMore = page.get("hasMore").getAsBoolean();
-                claudeHistoryTotalTurns = page.get("totalTurns").getAsInt();
-
-                if (cursorReset) {
-                    // The page holds the latest turns, not earlier ones — replacing
-                    // is the only non-duplicating option.
-                    state.replaceMessages(newMessages);
-                    LOG.info("Claude history cursor reset; replaced transcript with latest page: "
-                            + newMessages.size() + " messages, totalTurns=" + claudeHistoryTotalTurns);
-                } else {
-                    state.prependMessages(newMessages);
-                    LOG.info("Prepended Claude history page: " + newMessages.size() + " messages"
-                            + ", fromTurn=" + claudeHistoryFromTurn
-                            + ", hasMore=" + claudeHistoryHasMore);
+                ClaudeHistoryLoad historyLoad = new ClaudeHistoryLoad(List.of(), page);
+                Set<String> loadedStructure = MessageStructure.structuralBlockKeys(newMessages);
+                synchronized (this.state.getMessageStateLock()) {
+                    if (!this.recognizesClaudeHistorySession(sessionId, cwd)
+                            || requestedVersion != this.claudeHistoryVersion) {
+                        // The winning commit already settled the old page's spinner. Its late
+                        // reply must not settle a newer request or report an obsolete failure.
+                        return;
+                    }
+                    // The cursor is meaningful only for the transcript that requested it.
+                    // Flush buffered deltas before checking whether a reset could erase them.
+                    List<ClaudeSession.Message> currentMessages = this.state.getMessages();
+                    boolean keepsReadTranscript = currentMessages.size() >= messageOwnersBeforeRead.size()
+                            && currentMessages.subList(0, messageOwnersBeforeRead.size()).equals(messageOwnersBeforeRead);
+                    // A reset can lag an already-visible reply or tool even when no new delta arrived during IO.
+                    boolean safeToReset = !historyLoad.cursorReset
+                            || historyHasNotChangedSinceRead(messagesBeforeRead, currentMessages)
+                            && historyKeepsLiveNarrative(newMessages, currentMessages,
+                                    lastAlignedHistoryIndex(newMessages, currentMessages))
+                            && historyPreservesCurrentStructure(loadedStructure, currentMessages);
+                    if (!keepsReadTranscript || !safeToReset) {
+                        this.callbackFacade.notifyClaudeHistoryPageError(sessionId, "History changed while loading; retry the earlier page");
+                        return;
+                    }
+                    if (historyLoad.cursorReset) {
+                        this.state.replaceMessages(newMessages);
+                    } else {
+                        this.state.prependMessages(newMessages);
+                    }
+                    this.claudeHistoryVersion++;
+                    this.claudeHistoryFromTurn = historyLoad.fromTurn;
+                    this.claudeHistoryHasMore = historyLoad.hasMore && historyLoad.fromTurn > 0;
+                    this.claudeHistoryTotalTurns = historyLoad.totalTurns;
+                    this.claudeHistorySessionTitle = historyLoad.sessionTitle;
+                    this.callbackFacade.notifyMessageUpdate(this.state.getMessagesSnapshot());
+                    this.callbackFacade.notifyClaudeHistoryPageInfo(sessionId, this.claudeHistoryFromTurn,
+                            this.claudeHistoryTotalTurns, this.claudeHistoryHasMore, historyLoad.cursorReset,
+                            this.claudeHistorySessionTitle);
                 }
-                callbackFacade.notifyMessageUpdate(state.getMessages());
-                callbackFacade.notifyClaudeHistoryPageInfo(sessionId, claudeHistoryFromTurn, claudeHistoryTotalTurns, claudeHistoryHasMore, cursorReset,
-                        extractSessionTitle(page));
             } catch (Exception e) {
-                LOG.error("Failed to load earlier Claude history page: " + e.getMessage(), e);
-                callbackFacade.notifyClaudeHistoryPageError(sessionId, e.getMessage());
+                LOG.warn("Failed to load earlier Claude history page: " + e.getMessage(), e);
+                synchronized (this.state.getMessageStateLock()) {
+                    if (this.recognizesClaudeHistorySession(sessionId, cwd)
+                            && requestedVersion == this.claudeHistoryVersion) {
+                        this.callbackFacade.notifyClaudeHistoryPageError(sessionId, e.getMessage());
+                    }
+                }
             }
         });
+    }
+
+    private static JsonArray requireClaudeHistoryMessages(JsonObject page) {
+        JsonElement messages = page.get("messages");
+        // Only an explicit array proves an empty page; missing bodies cannot advance its cursor.
+        if (messages == null || !messages.isJsonArray()) {
+            throw new IllegalStateException("Claude history page is missing a messages array");
+        }
+        return messages.getAsJsonArray();
+    }
+
+    private static boolean historyHasNotChangedSinceRead(List<ClaudeSession.Message> before, List<ClaudeSession.Message> current) {
+        if (before.size() != current.size()) {
+            return false;
+        }
+        for (int index = 0; index < before.size(); index++) {
+            ClaudeSession.Message captured = before.get(index);
+            ClaudeSession.Message live = current.get(index);
+            if (captured.type != live.type || !Objects.equals(captured.content, live.content)
+                    || !Objects.equals(captured.raw, live.raw)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean recognizesClaudeHistorySession(String sessionId, String cwd) {
+        return "claude".equals(this.state.getProvider())
+                && Objects.equals(sessionId, this.state.getSessionId())
+                && Objects.equals(cwd, this.state.getCwd());
     }
 
 
@@ -479,21 +587,22 @@ public class SessionMessageOrchestrator {
      * guard rejects that too. Only navigating away and back (which rebuilds the
      * session with an empty live list) shows the content.</p>
      *
-     * <p>Anchor the page to the live tail by uuid. Only when the newest
-     * uuid-carrying history-reproducible live message is found inside the page
-     * can its older live prefix be kept verbatim. The caller also verifies that
-     * any unidentified text or thinking after this anchor has been persisted;
-     * the anchor alone cannot prove that the page covers the live tail.</p>
+     * <p>Anchor the page to an independently covered UUID row, preferably the
+     * latest human request. Streaming assistant rows can aggregate several
+     * history entries under one tool snapshot's UUID, so that UUID alone does
+     * not identify a safe replacement boundary. The caller verifies the text,
+     * thinking and structure following the selected anchor before replacing it.</p>
      *
      * @param loadedMessages  the freshly loaded page
      * @param currentMessages the live transcript
+     * @param anchorIndex     the pre-computed {@link #lastAlignedHistoryIndex} for these lists
      * @return the merged transcript, or null when the page cannot be aligned
      */
     private static List<ClaudeSession.Message> mergeLoadedPageWithLivePrefix(
             List<ClaudeSession.Message> loadedMessages,
-            List<ClaudeSession.Message> currentMessages
+            List<ClaudeSession.Message> currentMessages,
+            int anchorIndex
     ) {
-        int anchorIndex = lastHistoryBackedIndex(currentMessages);
         if (anchorIndex < 0) {
             return null;
         }
@@ -518,39 +627,38 @@ public class SessionMessageOrchestrator {
     }
 
     /**
-     * Require unidentified live text and thinking to survive an anchored page replacement.
+     * Require all live text and thinking after a safe anchor to survive a history replacement.
      * Structural blocks have a separate identity guard; their synthetic display labels
      * cannot establish whether the writer has persisted the newest narrative.
      */
-    private static boolean historyRetainsUnidentifiedTail(
+    private static boolean historyKeepsLiveNarrative(
             List<ClaudeSession.Message> loadedMessages,
-            List<ClaudeSession.Message> currentMessages
+            List<ClaudeSession.Message> currentMessages,
+            int anchorIndex
     ) {
-        int anchorIndex = lastHistoryBackedIndex(currentMessages);
-        if (anchorIndex < 0) {
-            return true;
-        }
-        int loadedAnchorIndex = indexOfHistoryUuid(loadedMessages, historyMessageUuid(currentMessages.get(anchorIndex)));
-        if (loadedAnchorIndex < 0) {
-            return true;
-        }
+        int loadedAnchorIndex = anchorIndex < 0 ? -1
+                : indexOfHistoryUuid(loadedMessages, historyMessageUuid(currentMessages.get(anchorIndex)));
+        // An image-only send or an unpatched first request can have no UUID at all.
+        // Row counts still cannot prove that its streamed reply has reached disk.
         int nextLoadedIndex = loadedAnchorIndex + 1;
         for (int i = anchorIndex + 1; i < currentMessages.size(); i++) {
             ClaudeSession.Message live = currentMessages.get(i);
             if (!MessageParser.isHistoryReproducible(live)) {
                 continue;
             }
-            boolean syntheticResult = live.type == ClaudeSession.Message.Type.USER && "[tool_result]".equals(live.content)
-                    && MessageStructure.structuralBlockKeys(List.of(live)).stream().anyMatch(key -> key.startsWith("tool_result:"));
+            boolean syntheticResult = isHistoryToolResult(live);
             String text = historyTextContent(live);
             boolean carriesText = !text.isBlank() && !syntheticResult;
             String thinking = historyThinkingContent(live);
-            if (!carriesText && thinking.isEmpty()) {
+            if (syntheticResult || !carriesText && thinking.isEmpty() && live.type != ClaudeSession.Message.Type.USER) {
                 continue;
             }
             boolean matched = false;
             while (nextLoadedIndex < loadedMessages.size()) {
                 ClaudeSession.Message loaded = loadedMessages.get(nextLoadedIndex++);
+                if (isHistoryToolResult(loaded)) {
+                    continue;
+                }
                 if (loaded.type != live.type) {
                     // Repeated wording in a later request cannot prove this reply was persisted.
                     if (live.type == ClaudeSession.Message.Type.ASSISTANT
@@ -564,7 +672,8 @@ public class SessionMessageOrchestrator {
                 // Automatic continuation changes API reply IDs within one live streaming row.
                 // Stop once this row is covered so later live rows retain their own history.
                 while (loaded.type == ClaudeSession.Message.Type.ASSISTANT && nextLoadedIndex < loadedMessages.size()
-                        && loadedMessages.get(nextLoadedIndex).type == ClaudeSession.Message.Type.ASSISTANT
+                        && (loadedMessages.get(nextLoadedIndex).type == ClaudeSession.Message.Type.ASSISTANT
+                        || isHistoryToolResult(loadedMessages.get(nextLoadedIndex)))
                         && (carriesText && !loadedText.toString().startsWith(text)
                         || !loadedThinking.toString().startsWith(thinking))) {
                     // An unrelated row must not consume the rows that could cover the live reply.
@@ -575,8 +684,10 @@ public class SessionMessageOrchestrator {
                         break;
                     }
                     ClaudeSession.Message sibling = loadedMessages.get(nextLoadedIndex++);
-                    loadedText.append(historyTextContent(sibling));
-                    loadedThinking.append(historyThinkingContent(sibling));
+                    if (!isHistoryToolResult(sibling)) {
+                        loadedText.append(historyTextContent(sibling));
+                        loadedThinking.append(historyThinkingContent(sibling));
+                    }
                 }
                 if ((!carriesText || loadedText.toString().startsWith(text))
                         && loadedThinking.toString().startsWith(thinking)) {
@@ -640,21 +751,50 @@ public class SessionMessageOrchestrator {
         return thinking.toString();
     }
 
+    /** Tool receipts share the USER transport role without starting another human request. */
+    private static boolean isHistoryToolResult(ClaudeSession.Message message) {
+        return message.type == ClaudeSession.Message.Type.USER && "[tool_result]".equals(message.content)
+                && MessageStructure.structuralBlockKeys(List.of(message)).stream().anyMatch(key -> key.startsWith("tool_result:"));
+    }
+
     /**
-     * Index of the newest live message a history read can align a page against.
+     * Find an independently covered row that can anchor a history replacement.
      *
-     * <p>Synthesized tool results and streamed assistant rows may lack a uuid.
-     * Skip those as anchors, then verify their bodies and structural identities
-     * separately before replacing them with persisted counterparts.</p>
-     *
-     * @param messages live transcript
-     * @return the index of the newest history-reproducible message with a uuid
+     * <p>A live assistant can aggregate several persisted rows while carrying only
+     * the latest tool snapshot's UUID. Prefer its human request so a reload brings
+     * back the complete reply, not just that final snapshot. Older payloads without
+     * a request UUID may still align against a fully covered assistant row, or
+     * a leading receipt when the live transcript starts partway through a turn.</p>
      */
-    private static int lastHistoryBackedIndex(List<ClaudeSession.Message> messages) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if (MessageParser.isHistoryReproducible(messages.get(i))
-                    && historyMessageUuid(messages.get(i)) != null) {
-                return i;
+    private static int lastAlignedHistoryIndex(List<ClaudeSession.Message> loadedMessages,
+                                               List<ClaudeSession.Message> currentMessages) {
+        // A full fallback can be large; probing every candidate must not repeatedly walk it under the state lock.
+        Map<String, ClaudeSession.Message> loadedByUuid = new HashMap<>();
+        for (ClaudeSession.Message loaded : loadedMessages) {
+            String uuid = historyMessageUuid(loaded);
+            if (uuid != null) {
+                loadedByUuid.putIfAbsent(uuid, loaded);
+            }
+        }
+        for (boolean humanRequest : List.of(true, false)) {
+            for (int index = currentMessages.size() - 1; index >= 0; index--) {
+                ClaudeSession.Message live = currentMessages.get(index);
+                if (!MessageParser.isHistoryReproducible(live)
+                        || isHistoryToolResult(live) && (humanRequest || index > 0)
+                        || humanRequest && live.type != ClaudeSession.Message.Type.USER) {
+                    continue;
+                }
+                String uuid = historyMessageUuid(live);
+                ClaudeSession.Message loaded = uuid == null ? null : loadedByUuid.get(uuid);
+                if (loaded == null) {
+                    continue;
+                }
+                if (loaded.type == live.type && historyTextContent(loaded).startsWith(historyTextContent(live))
+                        && historyThinkingContent(loaded).startsWith(historyThinkingContent(live))
+                        && MessageStructure.structuralBlockKeys(List.of(loaded))
+                        .containsAll(MessageStructure.structuralBlockKeys(List.of(live)))) {
+                    return index;
+                }
             }
         }
         return -1;

@@ -6,6 +6,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import org.junit.After;
@@ -23,6 +24,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Unit tests for loading provider history and restoring session-side derived state.
@@ -405,12 +407,9 @@ public class SessionMessageOrchestratorTest {
         );
         // Every turn from 1 to 32, exactly once.
         assertEquals(64, messages.size());
-        // The load announces the page's own start, then the merge corrects the
-        // cursor back to the window the kept prefix actually starts at, or the
-        // frontend's "load earlier" would re-request the kept turns.
-        assertEquals(2, callback.claudeHistoryPageInfos.size());
-        assertEquals("session-long|2|32|true|false|null", callback.claudeHistoryPageInfos.get(0));
-        assertEquals("session-long|0|32|true|false|null", callback.claudeHistoryPageInfos.get(1));
+        // Publish only the accepted window. Its retained prefix already starts at
+        // turn zero, so there is no earlier page to offer or re-request.
+        assertEquals(List.of("session-long|0|32|false|false|null"), callback.claudeHistoryPageInfos);
     }
 
     @Test
@@ -451,9 +450,219 @@ public class SessionMessageOrchestratorTest {
         List<ClaudeSession.Message> messages = state.getMessages();
         assertEquals(4, messages.size());
         assertEquals("answer 2", messages.get(3).content);
-        // The load itself announced the page; the rejected merge must not send a
-        // cursor correction on top of it.
-        assertEquals(1, callback.claudeHistoryPageInfos.size());
+        assertTrue("a rejected page must leave pagination unchanged", callback.claudeHistoryPageInfos.isEmpty());
+    }
+
+    /** A rejected transcript must not advance the cursor past the still-visible live prefix. */
+    @Test
+    public void rejectedClaudeReloadKeepsItsPublishedPaginationWindow() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("session-rejected-cursor");
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(List.of(
+                createProviderMessage("user", "prompt", "user-uuid")), 0, 1, 1, false, false);
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+        orchestrator.loadFromServer().join();
+        state.addMessage(liveSynthesizedAssistant("not persisted yet"));
+        access.messagesPage = createHistoryPage(List.of(
+                createProviderMessage("user", "prompt", "user-uuid")), 10, 40, 40, true, false);
+
+        orchestrator.loadFromServer().join();
+
+        assertEquals(List.of("prompt", "not persisted yet"),
+                state.getMessages().stream().map(message -> message.content).toList());
+        assertEquals(List.of("session-rejected-cursor|0|1|false|false|null"), callback.claudeHistoryPageInfos);
+    }
+
+    /** Keeping a partial live window must still offer pages older than that window. */
+    @Test
+    public void mergedClaudeReloadKeepsTheExistingNonzeroWindowStart() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("session-partial-window");
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        JsonObject user = createProviderMessage("user", "older prompt", "older-user");
+        JsonObject answer = createProviderMessage("assistant", "older answer", "older-answer");
+        access.messagesPage = createHistoryPage(List.of(user, answer), 10, 40, 40, true, false);
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+        orchestrator.loadFromServer().join();
+        access.messagesPage = createHistoryPage(List.of(answer,
+                createProviderMessage("assistant", "new report", "report")), 20, 50, 50, true, false);
+
+        orchestrator.loadFromServer().join();
+
+        assertEquals(List.of("older prompt", "older answer", "new report"),
+                state.getMessages().stream().map(message -> message.content).toList());
+        assertEquals(List.of("session-partial-window|10|40|true|false|null",
+                "session-partial-window|10|50|true|false|null"), callback.claudeHistoryPageInfos);
+    }
+
+    /** Only an explicit messages array can establish an empty history page. */
+    @Test
+    public void malformedClaudeMessagesFallBackToCompleteHistory() {
+        for (String shape : List.of("missing", "null", "object")) {
+            SessionState state = new SessionState();
+            state.setProvider("claude");
+            state.setSessionId("session-malformed-page");
+            RecordingHistoryAccess access = new RecordingHistoryAccess();
+            access.messagesPage = createHistoryPage(List.of(), 10, 40, 40, true, false);
+            access.messagesPage.remove("messages");
+            if (!"missing".equals(shape)) {
+                access.messagesPage.add("messages", "null".equals(shape) ? null : new JsonObject());
+            }
+            access.providerHistory = List.of(createProviderMessage("user", "saved prompt", "saved-user"),
+                    createProviderMessage("assistant", "saved answer", "saved-answer"));
+            RecordingCallback callback = new RecordingCallback();
+            SessionCallbackFacade facade = new SessionCallbackFacade(null);
+            facade.setCallback(callback);
+            SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                    state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+            orchestrator.loadFromServer().join();
+
+            assertEquals(shape, 1, access.providerHistoryRequests.get());
+            assertEquals(List.of("saved prompt", "saved answer"),
+                    state.getMessages().stream().map(message -> message.content).toList());
+            assertEquals(List.of("session-malformed-page|0|0|false|true|null"), callback.claudeHistoryPageInfos);
+        }
+    }
+
+    /** A malformed earlier page must leave its messages and cursor available for a valid retry. */
+    @Test
+    public void malformedEarlierClaudeMessagesCannotAdvanceTheCursor() {
+        for (String shape : List.of("missing", "null", "object")) {
+            SessionState state = new SessionState();
+            state.setProvider("claude");
+            state.setSessionId("session-malformed-earlier-page");
+            state.setCwd("/workspace");
+            RecordingHistoryAccess access = new RecordingHistoryAccess();
+            access.messagesPage = createHistoryPage(List.of(
+                    createProviderMessage("user", "current prompt", "current-user"),
+                    createProviderMessage("assistant", "current answer", "current-answer")), 10, 40, 40, true, false);
+            RecordingCallback callback = new RecordingCallback();
+            SessionCallbackFacade facade = new SessionCallbackFacade(null);
+            facade.setCallback(callback);
+            SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                    state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+            orchestrator.loadFromServer().join();
+            access.messagesPage = createHistoryPage(List.of(), 0, 10, 40, false, false);
+            access.messagesPage.remove("messages");
+            if (!"missing".equals(shape)) {
+                access.messagesPage.add("messages", "null".equals(shape) ? null : new JsonObject());
+            }
+
+            orchestrator.loadEarlierClaudeHistoryPage(state.getSessionId(), state.getCwd(), 10).join();
+
+            assertEquals(shape, List.of("current prompt", "current answer"),
+                    state.getMessages().stream().map(message -> message.content).toList());
+            assertEquals(shape, 1, callback.claudeHistoryPageInfos.size());
+            assertEquals(shape, 1, callback.claudeHistoryPageErrors.size());
+            assertTrue(callback.claudeHistoryPageErrors.get(0).contains("messages"));
+            access.messagesPage = createHistoryPage(List.of(
+                    createProviderMessage("user", "older prompt", "older-user")), 0, 10, 40, false, false);
+
+            orchestrator.loadEarlierClaudeHistoryPage(state.getSessionId(), state.getCwd(), 10).join();
+
+            assertEquals(List.of("older prompt", "current prompt", "current answer"),
+                    state.getMessages().stream().map(message -> message.content).toList());
+            assertEquals(2, callback.claudeHistoryPageInfos.size());
+            assertEquals(1, callback.claudeHistoryPageErrors.size());
+        }
+    }
+
+    /** A full-history fallback must retire the frontend cursor along with the Java cursor. */
+    @Test
+    public void fullClaudeHistoryFallbackClosesThePreviouslyPublishedPageWindow() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("session-full-fallback");
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        JsonObject user = createProviderMessage("user", "prompt", "user-uuid");
+        JsonObject answer = createProviderMessage("assistant", "answer", "answer-uuid");
+        access.messagesPage = createHistoryPage(List.of(user, answer), 10, 40, 40, true, false);
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+        orchestrator.loadFromServer().join();
+        access.messagesPage = null;
+        access.providerHistory = List.of(createProviderMessage("user", "older", "older-uuid"), user, answer);
+
+        orchestrator.loadFromServer().join();
+
+        assertEquals(List.of("older", "prompt", "answer"),
+                state.getMessages().stream().map(message -> message.content).toList());
+        assertEquals(List.of("session-full-fallback|10|40|true|false|null",
+                "session-full-fallback|0|0|false|true|null"), callback.claudeHistoryPageInfos);
+    }
+
+    /** A slow obsolete page must not republish its cursor after a newer load has won. */
+    @Test
+    public void obsoleteClaudeReloadCannotOverwriteTheWinningPaginationWindow() throws Exception {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("session-cursor-race");
+        CountDownLatch firstRead = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicInteger reads = new AtomicInteger();
+        SessionMessageOrchestrator.SessionHistoryAccess access = new SessionMessageOrchestrator.SessionHistoryAccess() {
+            /** Reject fallback so the concurrency check exercises page reads. */
+            @Override
+            public List<JsonObject> getProviderSessionMessages(String provider, String sessionId, String cwd) {
+                fail("valid pages must not use full-history fallback");
+                return List.of();
+            }
+
+            /** Keep UUID synchronization out of this page-only fixture. */
+            @Override
+            public JsonObject getLatestClaudeUserMessage(String sessionId, String cwd) {
+                return null;
+            }
+
+            /** Return pages in reverse completion order to expose stale publication. */
+            @Override
+            public JsonObject getProviderSessionMessagesPage(String sessionId, String cwd, Integer beforeTurn, int limit) {
+                if (reads.incrementAndGet() == 1) {
+                    firstRead.countDown();
+                    try {
+                        assertTrue(releaseFirst.await(5, TimeUnit.SECONDS));
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(exception);
+                    }
+                    return createHistoryPage(List.of(createProviderMessage("assistant", "older", "older-uuid")),
+                            10, 40, 40, true, false);
+                }
+                return createHistoryPage(List.of(createProviderMessage("assistant", "newer", "newer-uuid")),
+                        20, 50, 50, true, false);
+            }
+        };
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+        var first = orchestrator.loadFromServer();
+        try {
+            assertTrue(firstRead.await(5, TimeUnit.SECONDS));
+            orchestrator.loadFromServer().join();
+        } finally {
+            releaseFirst.countDown();
+        }
+        first.join();
+
+        assertEquals("newer", state.getMessages().get(0).content);
+        assertEquals(List.of("session-cursor-race|20|50|true|false|null"), callback.claudeHistoryPageInfos);
     }
 
     private static ClaudeSession.Message liveMessage(ClaudeSession.Message.Type type, String content, int turn) {
@@ -584,9 +793,7 @@ public class SessionMessageOrchestratorTest {
         // from the anchor onwards. The duplicate synthetic bubble is replaced by
         // the page's uuid-carrying row.
         assertEquals(5, messages.size());
-        assertEquals(2, callback.claudeHistoryPageInfos.size());
-        assertEquals("session-synthetic-tail|0|5|false|false|null", callback.claudeHistoryPageInfos.get(0));
-        assertEquals("session-synthetic-tail|0|5|false|false|null", callback.claudeHistoryPageInfos.get(1));
+        assertEquals(List.of("session-synthetic-tail|0|5|false|false|null"), callback.claudeHistoryPageInfos);
     }
 
     /**
@@ -1130,6 +1337,294 @@ public class SessionMessageOrchestratorTest {
         assertTrue(callback.stateChanges.contains("false:false:null"));
     }
 
+    /** Pending stream deltas must be materialized before a reload decides whether its snapshot is safe. */
+    @Test
+    public void reloadKeepsBufferedLiveTextAndThinking() {
+        for (boolean thinking : List.of(false, true)) {
+            SessionState state = new SessionState();
+            state.setProvider("claude");
+            state.setSessionId("buffered-reply");
+            state.setCwd("/workspace");
+            JsonObject user = this.createProviderMessage("user", "prompt", "user-uuid");
+            state.addMessage(new MessageParser().parseServerMessage(user));
+            ClaudeSession.Message live = liveSynthesizedAssistant("First paragraph.");
+            state.addMessage(live);
+            JsonObject persisted = this.createProviderMessage("assistant", "First paragraph.", "reply-uuid");
+            SessionMessageOrchestrator.SessionHistoryAccess access = new SessionMessageOrchestrator.SessionHistoryAccess() {
+                /** This fixture returns a paginated snapshot. */
+                @Override
+                public List<JsonObject> getProviderSessionMessages(String provider, String sessionId, String cwd) {
+                    throw new AssertionError("Unexpected full-history fallback");
+                }
+
+                /** UUID patching is unrelated to the buffered reply. */
+                @Override
+                public JsonObject getLatestClaudeUserMessage(String sessionId, String cwd) {
+                    return null;
+                }
+
+                /** A delta arrives after the read began, before its safety check runs. */
+                @Override
+                public JsonObject getProviderSessionMessagesPage(String sessionId, String cwd, Integer beforeTurn, int limit) {
+                    state.setMessageMaterializer(() -> {
+                        JsonArray blocks = live.raw.getAsJsonObject("message").getAsJsonArray("content");
+                        if (thinking) {
+                            if (blocks.size() == 1) {
+                                JsonObject thought = new JsonObject();
+                                thought.addProperty("type", "thinking");
+                                thought.addProperty("thinking", "A newer thought.");
+                                blocks.add(thought);
+                            }
+                        } else {
+                            live.content = "First paragraph. A newer ending.";
+                            blocks.get(0).getAsJsonObject().addProperty("text", live.content);
+                        }
+                    });
+                    return createHistoryPage(List.of(user, persisted), 0, 1, 1, false, false);
+                }
+            };
+            RecordingCallback callback = new RecordingCallback();
+            SessionCallbackFacade facade = new SessionCallbackFacade(null);
+            facade.setCallback(callback);
+            SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                    state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+            orchestrator.loadFromServer().join();
+
+            assertTrue("a stale read must retain the live stream owner", state.getMessages().get(1) == live);
+            assertEquals(thinking ? 2 : 1, live.raw.getAsJsonObject("message").getAsJsonArray("content").size());
+            assertEquals(thinking ? "First paragraph." : "First paragraph. A newer ending.", live.content);
+            assertTrue(callback.messageUpdates.isEmpty());
+            assertFalse(state.isLoading());
+        }
+    }
+
+    /** A UUID identifies a persisted row, not the newest deltas still accumulating in its live owner. */
+    @Test
+    public void reloadKeepsUnpersistedContentInsideItsUuidAnchor() {
+        for (boolean thinking : List.of(false, true)) {
+            SessionState state = new SessionState();
+            state.setProvider("claude");
+            state.setSessionId("growing-uuid-anchor");
+            JsonObject user = this.createProviderMessage("user", "prompt", "user-uuid");
+            state.addMessage(new MessageParser().parseServerMessage(user));
+            ClaudeSession.Message live = streamAssistantReply(state, thinking ? "Complete thought." : "",
+                    "First paragraph.", "Complete ending.");
+            live.raw.addProperty("uuid", "assistant-uuid");
+            JsonObject persisted = live.raw.deepCopy();
+            JsonArray blocks = persisted.getAsJsonObject("message").getAsJsonArray("content");
+            if (thinking) {
+                blocks.get(0).getAsJsonObject().addProperty("thinking", "Complete");
+            } else {
+                blocks.get(blocks.size() - 1).getAsJsonObject().addProperty("text", "Complete");
+            }
+            RecordingHistoryAccess access = new RecordingHistoryAccess();
+            access.messagesPage = createHistoryPage(List.of(user, persisted), 0, 1, 1, false, false);
+            RecordingCallback callback = new RecordingCallback();
+            SessionCallbackFacade facade = new SessionCallbackFacade(null);
+            facade.setCallback(callback);
+            SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                    state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+            orchestrator.loadFromServer().join();
+
+            assertTrue("a UUID must not authorize discarding newer deltas", state.getMessages().get(1) == live);
+            assertTrue(callback.messageUpdates.isEmpty());
+            access.messagesPage = createHistoryPage(List.of(user, live.raw.deepCopy()), 0, 1, 1, false, false);
+            orchestrator.loadFromServer().join();
+            assertEquals(1, callback.messageUpdates.size());
+        }
+    }
+
+    /** Unpatched user rows also need narrative protection until the writer has caught up. */
+    @Test
+    public void reloadKeepsUnpersistedReplyWithoutAnyUuidAnchor() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("unidentified-conversation");
+        JsonObject user = this.createProviderMessage("user", "prompt");
+        state.addMessage(new MessageParser().parseServerMessage(user));
+        ClaudeSession.Message live = streamAssistantText(state, "First paragraph.", "Complete ending.");
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(List.of(this.createProviderMessage("user", "prompt", "user-uuid"),
+                this.createProviderMessage("assistant", "First paragraph.", "assistant-uuid")), 0, 1, 1, false, false);
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+        orchestrator.loadFromServer().join();
+
+        assertTrue(state.getMessages().get(1) == live);
+        assertTrue(callback.messageUpdates.isEmpty());
+        JsonObject complete = live.raw.deepCopy();
+        complete.addProperty("uuid", "assistant-uuid");
+        access.messagesPage = createHistoryPage(List.of(this.createProviderMessage("user", "prompt", "user-uuid"),
+                complete), 0, 1, 1, false, false);
+        orchestrator.loadFromServer().join();
+        assertEquals(1, callback.messageUpdates.size());
+    }
+
+    /** Image-only requests legitimately remain UUID-less because the SDK UUID patch matches text. */
+    @Test
+    public void reloadProtectsTheReplyToAnImageOnlyUnidentifiedRequest() {
+        for (boolean paged : List.of(false, true)) {
+            SessionState state = new SessionState();
+            state.setProvider("claude");
+            state.setSessionId("image-only-history");
+            JsonObject user = this.createProviderMessage("user", "");
+            JsonArray content = user.getAsJsonObject("message").getAsJsonArray("content");
+            content.remove(0);
+            content.add(JsonParser.parseString("{\"type\":\"image\",\"src\":\"data:image/png;base64,AAAA\"}"));
+            state.addMessage(new MessageParser().parseServerMessage(user));
+            ClaudeSession.Message live = streamAssistantText(state, "First paragraph.", "Complete ending.");
+            JsonObject persistedUser = user.deepCopy();
+            persistedUser.addProperty("uuid", "image-user-uuid");
+            RecordingHistoryAccess access = new RecordingHistoryAccess();
+            List<JsonObject> partial = List.of(persistedUser,
+                    this.createProviderMessage("assistant", "First paragraph.", "assistant-uuid"));
+            access.providerHistory = partial;
+            access.messagesPage = paged ? createHistoryPage(partial, 0, 1, 1, false, false) : null;
+            RecordingCallback callback = new RecordingCallback();
+            SessionCallbackFacade facade = new SessionCallbackFacade(null);
+            facade.setCallback(callback);
+            SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                    state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+            orchestrator.loadFromServer().join();
+
+            assertTrue(state.getMessages().get(1) == live);
+            assertTrue(callback.messageUpdates.isEmpty());
+            JsonObject persisted = live.raw.deepCopy();
+            persisted.addProperty("uuid", "assistant-uuid");
+            List<JsonObject> complete = List.of(persistedUser, persisted);
+            access.providerHistory = complete;
+            access.messagesPage = paged ? createHistoryPage(complete, 0, 1, 1, false, false) : null;
+            orchestrator.loadFromServer().join();
+            assertEquals(1, callback.messageUpdates.size());
+            assertEquals("image-user-uuid", state.getMessages().get(0).raw.get("uuid").getAsString());
+        }
+    }
+
+    /** A cursor reset must obey the same narrative guard as an ordinary reload. */
+    @Test
+    public void earlierResetProtectsTheGrowingUuidAnchor() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("identified-reset");
+        JsonObject user = this.createProviderMessage("user", "prompt", "user-uuid");
+        state.addMessage(new MessageParser().parseServerMessage(user));
+        ClaudeSession.Message live = streamAssistantText(state, "First paragraph.", "Complete ending.");
+        live.raw.addProperty("uuid", "assistant-uuid");
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(List.of(user,
+                this.createProviderMessage("assistant", "First paragraph.", "assistant-uuid")), 0, 1, 1, false, true);
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+        orchestrator.loadEarlierClaudeHistoryPage("identified-reset", null, 99).join();
+
+        assertTrue(state.getMessages().get(1) == live);
+        assertTrue(callback.messageUpdates.isEmpty());
+        assertEquals(1, callback.claudeHistoryPageErrors.size());
+        access.messagesPage = createHistoryPage(List.of(user, live.raw.deepCopy()), 0, 1, 1, false, true);
+        orchestrator.loadEarlierClaudeHistoryPage("identified-reset", null, 99).join();
+        assertEquals(1, callback.messageUpdates.size());
+    }
+
+    /** Live tool snapshots can lend their UUID to a row that also carries earlier reply blocks. */
+    @Test
+    public void reloadWelcomesACompleteToolReplySplitAcrossHistoryRows() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("aggregated-tool-reply");
+        JsonObject user = this.createProviderMessage("user", "prompt", "user-uuid");
+        state.addMessage(new MessageParser().parseServerMessage(user));
+        ClaudeMessageHandler handler = new ClaudeMessageHandler(null, state, new CallbackHandler(),
+                new MessageParser(), new MessageMerger(), new Gson());
+        handler.onMessage("stream_start", "");
+        handler.onMessage("content_delta", "Before the tool.");
+        JsonObject tool = this.createProviderMessage("assistant", "", "tool-row-uuid");
+        JsonArray toolBlocks = tool.getAsJsonObject("message").getAsJsonArray("content");
+        toolBlocks.remove(0);
+        JsonObject use = new JsonObject();
+        use.addProperty("type", "tool_use");
+        use.addProperty("id", "lookup");
+        use.addProperty("name", "Read");
+        use.add("input", new JsonObject());
+        toolBlocks.add(use);
+        handler.onMessage("assistant", tool.toString());
+        state.addMessage(liveSynthesizedToolResult("lookup"));
+        handler.onMessage("block_reset", "");
+        handler.onMessage("content_delta", "After the tool.");
+        handler.onMessage("stream_end", "");
+        assertEquals("tool-row-uuid", state.getMessages().get(1).raw.get("uuid").getAsString());
+        JsonObject result = liveSynthesizedToolResult("lookup").raw.deepCopy();
+        result.addProperty("uuid", "result-row-uuid");
+        List<JsonObject> page = List.of(user,
+                this.createProviderMessage("assistant", "Before the tool.", "opening-row-uuid"), tool, result,
+                this.createProviderMessage("assistant", "After the tool.", "ending-row-uuid"),
+                this.createProviderMessage("assistant", "New background report.", "report-row-uuid"));
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(page, 0, 1, 1, false, false);
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+        access.messagesPage = createHistoryPage(page.subList(0, 4), 0, 1, 1, false, false);
+        orchestrator.loadFromServer().join();
+        assertEquals("a tool receipt cannot stand in for the unwritten ending", 3, state.getMessages().size());
+        assertTrue(callback.messageUpdates.isEmpty());
+        access.messagesPage = createHistoryPage(page, 0, 1, 1, false, false);
+        orchestrator.loadFromServer().join();
+
+        assertEquals(page.size(), state.getMessages().size());
+        assertEquals("Before the tool.", state.getMessages().get(1).content);
+        assertEquals("After the tool.", state.getMessages().get(4).content);
+        assertEquals("New background report.", state.getMessages().get(5).content);
+        assertEquals(1, callback.messageUpdates.size());
+    }
+
+    /** Falling back from pagination must not overwrite a reply the history writer has only partially persisted. */
+    @Test
+    public void fullHistoryFallbackKeepsUnpersistedLiveReply() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("fallback-live-reply");
+        state.setCwd("/workspace");
+        JsonObject user = this.createProviderMessage("user", "prompt", "user-uuid");
+        state.addMessage(new MessageParser().parseServerMessage(user));
+        ClaudeSession.Message live = liveSynthesizedAssistant("First paragraph. Complete ending.");
+        state.addMessage(live);
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.providerHistory = List.of(user, this.createProviderMessage("assistant", "First paragraph.", "reply-uuid"));
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+        orchestrator.loadFromServer().join();
+
+        assertTrue(state.getMessages().get(1) == live);
+        assertEquals("First paragraph. Complete ending.", state.getMessages().get(1).content);
+        assertTrue(callback.messageUpdates.isEmpty());
+        assertTrue(callback.claudeHistoryPageInfos.isEmpty());
+
+        access.providerHistory = List.of(user, this.createProviderMessage("assistant", live.content, "reply-uuid"));
+        orchestrator.loadFromServer().join();
+
+        assertEquals("reply-uuid", state.getMessages().get(1).raw.get("uuid").getAsString());
+        assertEquals(1, callback.messageUpdates.size());
+        assertEquals(List.of("fallback-live-reply|0|0|false|true|null"), callback.claudeHistoryPageInfos);
+    }
+
     @Test
     public void loadFromServerStillClearsLoadingWhenTheSessionChangesUnderIt() throws Exception {
         SessionState state = new SessionState();
@@ -1593,7 +2088,7 @@ public class SessionMessageOrchestratorTest {
         historyAccess.messagesPage = createHistoryPage(
                 List.of(createProviderMessage("user", "older question"),
                         createProviderMessage("assistant", "older answer")),
-                0, 2, 4, true, false, "Renamed in CLI");
+                0, 2, 4, false, false, "Renamed in CLI");
 
         SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
                 state, new MessageParser(), callbackFacade, historyAccess, (used, max) -> { }, 0, 0);
@@ -1605,7 +2100,7 @@ public class SessionMessageOrchestratorTest {
         assertEquals("older question", messages.get(0).content);
         assertEquals("older answer", messages.get(1).content);
         assertEquals("newer question", messages.get(2).content);
-        assertEquals(List.of("session-page|0|4|true|false|Renamed in CLI"), callback.claudeHistoryPageInfos);
+        assertEquals(List.of("session-page|0|4|false|false|Renamed in CLI"), callback.claudeHistoryPageInfos);
         assertTrue(callback.claudeHistoryPageErrors.isEmpty());
     }
 
@@ -1668,6 +2163,360 @@ public class SessionMessageOrchestratorTest {
         assertTrue(callback.claudeHistoryPageInfos.isEmpty());
     }
 
+    /** A late earlier-page response belongs to the session that requested it, not its replacement. */
+    @Test
+    public void earlierClaudePageCannotPrependIntoAReplacementSession() throws Exception {
+        for (String replacement : List.of("session", "provider", "cwd", "transcript")) {
+            for (boolean cursorReset : List.of(false, true)) {
+                this.verifyEarlierPageStaysWithItsTranscript(replacement, cursorReset);
+            }
+        }
+    }
+
+    private void verifyEarlierPageStaysWithItsTranscript(String replacement, boolean cursorReset) throws Exception {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("old-session");
+        state.setCwd("/workspace");
+        state.addMessage(liveSynthesizedAssistant("old conversation"));
+        CountDownLatch readStarted = new CountDownLatch(1);
+        CountDownLatch releaseRead = new CountDownLatch(1);
+        SessionMessageOrchestrator.SessionHistoryAccess access = new SessionMessageOrchestrator.SessionHistoryAccess() {
+            /** This fixture exercises only the older-page path. */
+            @Override
+            public List<JsonObject> getProviderSessionMessages(String provider, String sessionId, String cwd) {
+                return List.of();
+            }
+
+            /** No send is being reconciled in this fixture. */
+            @Override
+            public JsonObject getLatestClaudeUserMessage(String sessionId, String cwd) {
+                return null;
+            }
+
+            /** Delay the old page until the replacement transcript is already visible. */
+            @Override
+            public JsonObject getProviderSessionMessagesPage(String sessionId, String cwd, Integer beforeTurn, int limit) {
+                readStarted.countDown();
+                try {
+                    assertTrue(releaseRead.await(5, TimeUnit.SECONDS));
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(exception);
+                }
+                return createHistoryPage(List.of(createProviderMessage("assistant", "old history", "old-uuid")),
+                        0, 2, 4, false, cursorReset);
+            }
+        };
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+        var load = orchestrator.loadEarlierClaudeHistoryPage("old-session", "/workspace", 2);
+        try {
+            assertTrue(readStarted.await(5, TimeUnit.SECONDS));
+            switch (replacement) {
+                case "session" -> state.setSessionId("new-session");
+                case "provider" -> state.setProvider("codex");
+                case "cwd" -> state.setCwd("/another-workspace");
+                default -> { }
+            }
+            state.replaceMessages(List.of(liveSynthesizedAssistant("new conversation")));
+        } finally {
+            releaseRead.countDown();
+        }
+        load.join();
+
+        assertEquals(List.of("new conversation"), state.getMessages().stream().map(message -> message.content).toList());
+        assertTrue(callback.messageUpdates.isEmpty());
+        assertTrue(callback.claudeHistoryPageInfos.isEmpty());
+    }
+
+    /** A retired earlier-page failure cannot clear a newer page's loading state or show an obsolete toast. */
+    @Test
+    public void earlierClaudeFailureCannotOutliveANewerHistoryCommit() throws Exception {
+        for (boolean throwsFailure : List.of(false, true)) {
+            SessionState state = new SessionState();
+            state.setSessionId("session-obsolete-error");
+            RecordingCallback callback = new RecordingCallback();
+            SessionCallbackFacade facade = new SessionCallbackFacade(null);
+            facade.setCallback(callback);
+            RecordingHistoryAccess access = new RecordingHistoryAccess();
+            JsonObject latest = createHistoryPage(List.of(createProviderMessage("assistant", "current answer", "current")),
+                    10, 40, 40, true, false);
+            access.messagesPage = latest;
+            SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                    state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+            orchestrator.loadFromServer().join();
+            access.messagesPage = JsonParser.parseString("{\"success\":false,\"error\":\"obsolete failure\"}").getAsJsonObject();
+            access.earlierFailure = throwsFailure ? new IllegalStateException("obsolete failure") : null;
+            CountDownLatch readStarted = new CountDownLatch(1);
+            CountDownLatch releaseRead = new CountDownLatch(1);
+            access.earlierReadStarted = readStarted;
+            access.earlierReadRelease = releaseRead;
+            var obsolete = orchestrator.loadEarlierClaudeHistoryPage("session-obsolete-error", null, 10);
+            try {
+                assertTrue(readStarted.await(5, TimeUnit.SECONDS));
+                access.messagesPage = latest;
+                orchestrator.loadFromServer().join();
+            } finally {
+                releaseRead.countDown();
+            }
+            obsolete.join();
+
+            assertEquals(2, callback.claudeHistoryPageInfos.size());
+            assertTrue("the newer commit already retired the failed page", callback.claudeHistoryPageErrors.isEmpty());
+            assertEquals("current answer", state.getMessages().get(0).content);
+        }
+    }
+
+    /** Another accepted page or reload retires the cursor of an older in-flight read. */
+    @Test
+    public void earlierClaudePageCannotOutliveANewerHistoryCommit() throws Exception {
+        for (boolean newerIsReload : List.of(false, true)) {
+            SessionState state = new SessionState();
+            state.setSessionId("session-race");
+            state.setCwd("/workspace");
+            RecordingCallback callback = new RecordingCallback();
+            SessionCallbackFacade facade = new SessionCallbackFacade(null);
+            facade.setCallback(callback);
+            RecordingHistoryAccess access = new RecordingHistoryAccess();
+            JsonObject latest = createHistoryPage(List.of(createProviderMessage("assistant", "current answer", "current")),
+                    10, 40, 40, true, false);
+            access.messagesPage = latest;
+            SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                    state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+            orchestrator.loadFromServer().join();
+            access.messagesPage = createHistoryPage(List.of(createProviderMessage("assistant", "obsolete page", "obsolete")),
+                    0, 10, 40, false, false);
+            CountDownLatch readStarted = new CountDownLatch(1);
+            CountDownLatch releaseRead = new CountDownLatch(1);
+            access.earlierReadStarted = readStarted;
+            access.earlierReadRelease = releaseRead;
+            var obsolete = orchestrator.loadEarlierClaudeHistoryPage("session-race", "/workspace", 10);
+            try {
+                assertTrue(readStarted.await(5, TimeUnit.SECONDS));
+                access.earlierReadStarted = null;
+                access.earlierReadRelease = null;
+                if (newerIsReload) {
+                    access.messagesPage = latest;
+                    orchestrator.loadFromServer().join();
+                } else {
+                    access.messagesPage = createHistoryPage(List.of(createProviderMessage("assistant", "middle answer", "middle")),
+                            5, 10, 40, true, false);
+                    orchestrator.loadEarlierClaudeHistoryPage("session-race", "/workspace", 10).join();
+                }
+            } finally {
+                releaseRead.countDown();
+            }
+            obsolete.join();
+
+            assertEquals(newerIsReload ? List.of("current answer") : List.of("middle answer", "current answer"),
+                    state.getMessages().stream().map(message -> message.content).toList());
+            assertEquals(2, callback.messageUpdates.size());
+            assertEquals(2, callback.claudeHistoryPageInfos.size());
+            assertTrue(callback.claudeHistoryPageErrors.isEmpty());
+        }
+    }
+
+    /** Reset pages must not erase new rows or in-place deltas received during their read. */
+    @Test
+    public void earlierClaudePagesKeepLiveContentThatArrivesDuringRead() throws Exception {
+        for (boolean cursorReset : List.of(false, true)) {
+            for (boolean appendRow : List.of(false, true)) {
+                SessionState state = new SessionState();
+                state.setSessionId("session-live");
+                state.setCwd("/workspace");
+                state.addMessage(liveSynthesizedAssistant("live answer"));
+                RecordingCallback callback = new RecordingCallback();
+                SessionCallbackFacade facade = new SessionCallbackFacade(null);
+                facade.setCallback(callback);
+                RecordingHistoryAccess access = new RecordingHistoryAccess();
+                access.messagesPage = createHistoryPage(List.of(createProviderMessage("assistant", "older answer", "older")),
+                        0, 2, 4, false, cursorReset);
+                CountDownLatch readStarted = new CountDownLatch(1);
+                CountDownLatch releaseRead = new CountDownLatch(1);
+                access.earlierReadStarted = readStarted;
+                access.earlierReadRelease = releaseRead;
+                SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                        state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+                var load = orchestrator.loadEarlierClaudeHistoryPage("session-live", "/workspace", 2);
+                try {
+                    assertTrue(readStarted.await(5, TimeUnit.SECONDS));
+                    synchronized (state.getMessageStateLock()) {
+                        if (appendRow) {
+                            state.addMessage(liveSynthesizedAssistant("new live row"));
+                        } else {
+                            ClaudeSession.Message live = state.getMessagesReference().get(0);
+                            live.content += " continued";
+                            live.raw.getAsJsonObject("message").getAsJsonArray("content").get(0).getAsJsonObject()
+                                    .addProperty("text", live.content);
+                        }
+                    }
+                } finally {
+                    releaseRead.countDown();
+                }
+                load.join();
+
+                List<String> expected = new ArrayList<>();
+                if (!cursorReset) {
+                    expected.add("older answer");
+                }
+                expected.add(appendRow ? "live answer" : "live answer continued");
+                if (appendRow) {
+                    expected.add("new live row");
+                }
+                assertEquals(expected, state.getMessages().stream().map(message -> message.content).toList());
+                assertEquals(cursorReset ? 0 : 1, callback.messageUpdates.size());
+                assertEquals(cursorReset ? 0 : 1, callback.claudeHistoryPageInfos.size());
+                assertEquals(cursorReset ? 1 : 0, callback.claudeHistoryPageErrors.size());
+            }
+        }
+    }
+
+    /** A reset is not proof that the writer has persisted an already-visible streamed reply. */
+    @Test
+    public void earlierClaudeResetKeepsTheUnpersistedReplyAlreadyOnScreen() {
+        SessionState state = new SessionState();
+        state.setSessionId("session-reset-tail");
+        state.setCwd("/workspace");
+        JsonObject question = createProviderMessage("user", "question", "question-uuid");
+        state.addMessage(new MessageParser().parseServerMessage(question));
+        state.addMessage(liveSynthesizedAssistant("complete streamed reply"));
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(List.of(question,
+                createProviderMessage("assistant", "complete streamed", "persisted-prefix")), 0, 1, 1, false, true);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+        orchestrator.loadEarlierClaudeHistoryPage("session-reset-tail", "/workspace", 99).join();
+
+        assertEquals(List.of("question", "complete streamed reply"),
+                state.getMessages().stream().map(message -> message.content).toList());
+        assertTrue(callback.messageUpdates.isEmpty());
+        assertTrue(callback.claudeHistoryPageInfos.isEmpty());
+        assertEquals(1, callback.claudeHistoryPageErrors.size());
+    }
+
+    /** A reset page cannot erase tool cards merely because its text has already reached disk. */
+    @Test
+    public void earlierClaudeResetKeepsUnpersistedToolStructure() {
+        SessionState state = new SessionState();
+        state.setSessionId("session-reset-tools");
+        state.setCwd("/workspace");
+        JsonObject question = createProviderMessage("user", "question", "question-uuid");
+        JsonObject reply = createProviderMessage("assistant", "reply", "reply-uuid");
+        JsonObject liveReply = reply.deepCopy();
+        JsonObject tool = new JsonObject();
+        tool.addProperty("type", "tool_use");
+        tool.addProperty("id", "unpersisted-tool");
+        tool.addProperty("name", "Bash");
+        liveReply.getAsJsonObject("message").getAsJsonArray("content").add(tool);
+        state.addMessage(new MessageParser().parseServerMessage(question));
+        state.addMessage(new MessageParser().parseServerMessage(liveReply));
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(List.of(question, reply), 0, 1, 1, false, true);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+        orchestrator.loadEarlierClaudeHistoryPage("session-reset-tools", "/workspace", 99).join();
+
+        assertEquals(2, state.getMessages().get(1).raw.getAsJsonObject("message").getAsJsonArray("content").size());
+        assertTrue(callback.messageUpdates.isEmpty());
+        assertTrue(callback.claudeHistoryPageInfos.isEmpty());
+        assertEquals(1, callback.claudeHistoryPageErrors.size());
+    }
+
+    /** An old frontend cursor cannot read turns already committed by a newer window. */
+    @Test
+    public void earlierClaudePageRejectsObsoleteCursorBeforeReading() {
+        SessionState state = new SessionState();
+        state.setSessionId("session-cursor");
+        state.setCwd("/workspace");
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(List.of(createProviderMessage("assistant", "current answer", "current")),
+                10, 40, 40, true, false);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+        orchestrator.loadFromServer().join();
+
+        orchestrator.loadEarlierClaudeHistoryPage("session-cursor", "/workspace", 20).join();
+
+        assertEquals(0, access.earlierPageRequests.get());
+        assertEquals(1, callback.messageUpdates.size());
+        assertEquals(1, callback.claudeHistoryPageInfos.size());
+        assertEquals(1, callback.claudeHistoryPageErrors.size());
+    }
+
+    /** A restored frontend cursor must not prepend while the initial load is still building the transcript. */
+    @Test
+    public void earlierClaudePageWaitsForTheInitialLoadToPublishItsCursor() throws Exception {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("session-early-click");
+        state.setCwd("/workspace");
+        CountDownLatch initialReadStarted = new CountDownLatch(1);
+        CountDownLatch releaseInitialRead = new CountDownLatch(1);
+        AtomicInteger pageReads = new AtomicInteger();
+        SessionMessageOrchestrator.SessionHistoryAccess access = new SessionMessageOrchestrator.SessionHistoryAccess() {
+            @Override
+            public List<JsonObject> getProviderSessionMessages(String provider, String sessionId, String cwd) {
+                throw new AssertionError("valid pages must not use full-history fallback");
+            }
+
+            @Override
+            public JsonObject getLatestClaudeUserMessage(String sessionId, String cwd) {
+                return null;
+            }
+
+            /** Hold the initial page read so the restored cursor's click lands mid-load. */
+            @Override
+            public JsonObject getProviderSessionMessagesPage(String sessionId, String cwd, Integer beforeTurn, int limit) {
+                if (pageReads.incrementAndGet() == 1) {
+                    initialReadStarted.countDown();
+                    try {
+                        assertTrue(releaseInitialRead.await(5, TimeUnit.SECONDS));
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(exception);
+                    }
+                }
+                return createHistoryPage(List.of(createProviderMessage("user", "prompt", "prompt-uuid")),
+                        0, 1, 1, false, false);
+            }
+        };
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+
+        var initialLoad = orchestrator.loadFromServer();
+        try {
+            assertTrue(initialReadStarted.await(5, TimeUnit.SECONDS));
+            orchestrator.loadEarlierClaudeHistoryPage("session-early-click", "/workspace", 30).join();
+        } finally {
+            releaseInitialRead.countDown();
+        }
+        initialLoad.join();
+
+        assertEquals(List.of("prompt"), state.getMessages().stream().map(message -> message.content).toList());
+        assertEquals(1, pageReads.get());
+        assertEquals(1, callback.claudeHistoryPageErrors.size());
+        assertTrue(callback.claudeHistoryPageErrors.get(0).contains("obsolete"));
+        assertEquals("session-early-click|0|1|false|false|null", callback.claudeHistoryPageInfos.get(0));
+    }
+
     private static JsonObject createHistoryPage(List<JsonObject> messages, int fromTurn, int toTurn,
                                                 int totalTurns, boolean hasMore, boolean cursorReset) {
         return createHistoryPage(messages, fromTurn, toTurn, totalTurns, hasMore, cursorReset, null);
@@ -1700,6 +2549,10 @@ public class SessionMessageOrchestratorTest {
         private RuntimeException providerHistoryFailure;
         private JsonObject latestClaudeUserMessage;
         private JsonObject messagesPage;
+        private final AtomicInteger earlierPageRequests = new AtomicInteger();
+        private CountDownLatch earlierReadStarted;
+        private CountDownLatch earlierReadRelease;
+        private RuntimeException earlierFailure;
 
         @Override
         public List<JsonObject> getProviderSessionMessages(String provider, String sessionId, String cwd) {
@@ -1716,9 +2569,28 @@ public class SessionMessageOrchestratorTest {
             return latestClaudeUserMessage;
         }
 
+        /** Let a newer history commit overtake the earlier page's captured response. */
         @Override
         public JsonObject getProviderSessionMessagesPage(String sessionId, String cwd, Integer beforeTurn, int limit) {
-            return messagesPage;
+            JsonObject response = this.messagesPage;
+            if (beforeTurn != null) {
+                this.earlierPageRequests.incrementAndGet();
+                CountDownLatch readStarted = this.earlierReadStarted;
+                CountDownLatch releaseRead = this.earlierReadRelease;
+                if (readStarted != null && releaseRead != null) {
+                    readStarted.countDown();
+                    try {
+                        assertTrue(releaseRead.await(5, TimeUnit.SECONDS));
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(exception);
+                    }
+                }
+                if (this.earlierFailure != null) {
+                    throw this.earlierFailure;
+                }
+            }
+            return response;
         }
     }
 

@@ -47,6 +47,8 @@ import { prepareCodexRuntimeEnvironment } from './codex-native-runtime-env.js';
 /** sessionKey → {service, launchOptions, fingerprint, createdAt} */
 const sessionServices = new Map();
 const nativeHistoryCounters = new WeakMap();
+/** Services retired by a thread release: never cold-started again, only collected. */
+const retiredSessionServices = new WeakSet();
 
 /**
  * Pristine base environment for codex runtime construction, captured once
@@ -254,6 +256,8 @@ function ensureSessionService(stdinData, { nativeEnvironmentDependencies = {} } 
     existing.commandPrefix = commandPrefix;
     existing.nativeRuntime = runtime;
     existing.titleAbort?.abort();
+    // Counts belong to the old CLI/storage/auth runtime, not just to a reusable host object.
+    nativeHistoryCounters.delete(existing.service);
     existing.service.clientFactory = createClient;
     existing.service.startupAttempts = cliPlan.candidates.length;
     existing.service.notifyLaunchConfigChange(launchOptions, fingerprint);
@@ -634,13 +638,36 @@ export async function codexListThreadsPersistent(stdinData) {
 /** Counts history independently so listing metadata never waits for full transcripts. */
 export async function codexCountThreadMessagesPersistent(stdinData) {
   const { service } = ensureSessionService(stdinData);
-  let count = nativeHistoryCounters.get(service);
-  if (!count) {
-    count = createNativeHistoryCounter((method, params) => service.readOnly(method, params));
-    nativeHistoryCounters.set(service, count);
+  let counter = nativeHistoryCounters.get(service);
+  if (!counter || counter.generation !== null && (counter.generation !== service.runtimeGeneration
+      || ['failed', 'stopped', 'draining'].includes(service.state))) {
+    counter = { generation: null, count: null };
+    const owner = counter;
+    const stillOwnsRuntime = () => nativeHistoryCounters.get(service) === owner
+      && service.runtimeGeneration === owner.generation;
+    owner.count = createNativeHistoryCounter(async (method, params) => {
+      // A reset, release or reconfiguration must not resurrect its runtime just
+      // to fail one page read; an unbound counter still owns its cold start. A
+      // service retired by a thread release must never be cold-started again:
+      // its session entry is gone, so a runtime spawned here would be untracked.
+      if (nativeHistoryCounters.get(service) !== owner
+          || retiredSessionServices.has(service)
+          || owner.generation !== null && ['failed', 'stopped', 'draining'].includes(service.state)) {
+        throw new Error('Native message-count runtime changed; retry the count');
+      }
+      // Startup stays inside the counter's total deadline, not ahead of its timeout.
+      await service.ensureRuntime();
+      if (owner.generation === null) owner.generation = service.runtimeGeneration;
+      // A multi-page traversal must not splice an old runtime's page into a replacement reader.
+      if (!stillOwnsRuntime()) throw new Error('Native message-count runtime changed; retry the count');
+      const response = await service.readOnly(method, params);
+      if (!stillOwnsRuntime()) throw new Error('Native message-count runtime changed; retry the count');
+      return response;
+    });
+    nativeHistoryCounters.set(service, owner);
   }
   const threadId = stdinData.threadId;
-  return { threadId, messageCount: await count({ ...stdinData.params, id: threadId }) };
+  return { threadId, messageCount: await counter.count({ ...stdinData.params, id: threadId }) };
 }
 
 /** Keeps descendant directories while honoring Windows case and project boundaries. */
@@ -808,6 +835,11 @@ export async function codexReleaseThreadPersistent(stdinData) {
   }
   const entry = sessionServices.get(sessionKeyOf(stdinData));
   entry?.titleAbort?.abort();
+  // An in-flight count must not keep paging (or cold-start) a runtime this
+  // release is retiring; release does not bump the runtime generation, so the
+  // bound counter would otherwise consider the retired runtime still its own.
+  nativeHistoryCounters.delete(service);
+  retiredSessionServices.add(service);
   try {
     return await service.releaseThread(stdinData?.threadId || null);
   } finally {
@@ -824,6 +856,10 @@ export async function codexResetRuntimePersistent(stdinData) {
     return { reset: false };
   }
   entry.titleAbort?.abort();
+  nativeHistoryCounters.delete(entry.service);
+  // A disposing reset retires the service like a release does; a plain reset
+  // keeps it, and its next count legitimately cold-starts the same host.
+  if (stdinData?.dispose) retiredSessionServices.add(entry.service);
   await entry.service.resetRuntime({ reason: stdinData?.reason ?? 'requested' });
   await entry.titleTask;
   if (stdinData?.dispose) {
@@ -859,6 +895,10 @@ export async function codexShutdownPersistentRuntimes() {
   const teardowns = [];
   for (const [sessionKey, entry] of [...sessionServices]) {
     entry.titleAbort?.abort();
+    // Shutdown removes the host too; a count returning from startup or IO must
+    // lose ownership before it can ask the retired service to start again.
+    nativeHistoryCounters.delete(entry.service);
+    retiredSessionServices.add(entry.service);
     teardowns.push(
       Promise.all([entry.service.resetRuntime({ reason: 'shutdown' }).catch(() => {}), entry.titleTask])
     );

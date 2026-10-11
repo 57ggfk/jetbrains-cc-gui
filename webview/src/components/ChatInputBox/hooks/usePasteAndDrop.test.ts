@@ -324,6 +324,24 @@ describe('usePasteAndDrop clipboard images', () => {
     delete window.sendToJava;
   });
 
+  it('falls back to the native clipboard read when an image item exposes no file', () => {
+    const editable = createEditable();
+    const { result } = setupDraftHook(editable);
+    const sendToJava = vi.fn();
+    window.sendToJava = sendToJava;
+    act(() => result.current.handlePaste({
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => null }],
+        getData: () => '',
+      },
+      preventDefault: vi.fn(),
+    } as unknown as React.ClipboardEvent));
+    const message = sendToJava.mock.calls[0]?.[0] as string;
+    expect(message).toMatch(/^paste_image:.+/);
+    expect(result.current.hasPendingImagePastes()).toBe(true);
+    delete window.sendToJava;
+  });
+
   it('rejects a native reply that arrives after switching sessions and leaves new work pending', async () => {
     const editable = createEditable();
     const { result, rerender } = setupDraftHook(editable);
@@ -434,6 +452,30 @@ describe('usePasteAndDrop clipboard images', () => {
     expect(result.current.attachments.map(({ data }) => data)).toEqual(['IMAGE_A']);
   });
 
+  it.each([false, true])('keeps distinct captured native gestures even after a DOM echo: %s', async (withDomPaste) => {
+    vi.useFakeTimers();
+    const sendToJava = vi.fn();
+    window.sendToJava = sendToJava;
+    const { result } = setupDraftHook(createEditable());
+    const scopeId = sendToJava.mock.calls.find(([message]) => message.startsWith('paste_image_scope:'))![0]
+      .slice('paste_image_scope:'.length);
+    if (withDomPaste) {
+      await act(async () => result.current.handlePaste(createImagePasteEvent(new File(['shot'], 'shot.png', { type: 'image/png' }))));
+    }
+    const pasteSnapshot = async (snapshotId: string, data: string) => {
+      act(() => window.dispatchEvent(new CustomEvent('java-request-paste-image', { detail: { snapshotId, scopeId } })));
+      const claim = JSON.parse(sendToJava.mock.calls.filter(([message]) => message.startsWith('paste_image:')).at(-1)![0]
+        .slice('paste_image:'.length));
+      await act(async () => dispatchJavaPasteImage(data, claim.requestId));
+    };
+    await pasteSnapshot('first-gesture', withDomPaste ? 'REENCODED' : 'c2hvdA==');
+    expect(result.current.attachments.map(({ data }) => data)).toEqual(['c2hvdA==']);
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    await pasteSnapshot('second-gesture', 'c2hvdA==');
+    expect(result.current.attachments.map(({ data }) => data)).toEqual(['c2hvdA==', 'c2hvdA==']);
+    expect(result.current.hasPendingImagePastes()).toBe(false);
+  });
+
   it.each(['session change', 'draft replacement'])(
     'rejects the first offer of an old native snapshot after %s',
     async (boundary) => {
@@ -497,6 +539,53 @@ describe('usePasteAndDrop clipboard images', () => {
       .slice('paste_image:'.length));
     await act(async () => dispatchJavaPasteImage('CURRENT', claim.requestId));
     expect(result.current.attachments.map(({ data }) => data)).toEqual(['CURRENT']);
+  });
+
+  it('retries a refused draft scope without waiting for another bridge-ready event', async () => {
+    vi.useFakeTimers();
+    const sendToJava = vi.fn().mockImplementationOnce(() => { throw new Error('bridge temporarily unavailable'); });
+    window.sendToJava = sendToJava;
+    const { result, unmount } = setupDraftHook(createEditable());
+    const firstScope = sendToJava.mock.calls[0][0] as string;
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(sendToJava.mock.calls.map(([message]) => message)).toEqual([firstScope, firstScope]);
+    const scopeId = firstScope.slice('paste_image_scope:'.length);
+    act(() => window.dispatchEvent(new CustomEvent('java-request-paste-image', {
+      detail: { snapshotId: 'captured-after-retry', scopeId },
+    })));
+    const claim = JSON.parse(sendToJava.mock.calls.find(([message]) => message.startsWith('paste_image:'))![0]
+      .slice('paste_image:'.length));
+    await act(async () => dispatchJavaPasteImage('CURRENT', claim.requestId));
+    expect(result.current.attachments.map(({ data }) => data)).toEqual(['CURRENT']);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retries only the latest scope and stops retrying after unmount', async () => {
+    vi.useFakeTimers();
+    let available = false;
+    const sendToJava = vi.fn((_message: string) => {
+      if (!available) throw new Error('bridge temporarily unavailable');
+    });
+    window.sendToJava = sendToJava;
+    const { result, unmount } = setupDraftHook(createEditable());
+    const oldScope = sendToJava.mock.calls[0][0];
+    act(() => result.current.invalidateImagePastes());
+    const newScope = sendToJava.mock.calls.at(-1)![0];
+    expect(newScope).not.toBe(oldScope);
+    expect(vi.getTimerCount()).toBe(1);
+    available = true;
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(sendToJava.mock.calls.at(-1)![0]).toBe(newScope);
+    expect(vi.getTimerCount()).toBe(0);
+    available = false;
+    act(() => result.current.invalidateImagePastes());
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    const callsAfterUnmount = sendToJava.mock.calls.length;
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(sendToJava).toHaveBeenCalledTimes(callsAfterUnmount);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('collapses two identical Java deliveries into one attachment', async () => {
@@ -640,7 +729,7 @@ describe('usePasteAndDrop clipboard images', () => {
     await act(async () => dispatchJavaPasteImage('DIFFERENT'));
     act(() => result.current.submit());
     await act(() => vi.advanceTimersByTimeAsync(20));
-    expect(addToast).toHaveBeenCalledWith('common.loading', 'info');
+    expect(addToast).toHaveBeenCalledWith('chat.pasteImagePreparing', 'info');
     expect(onSubmit).not.toHaveBeenCalled();
     expect(clearInput).not.toHaveBeenCalled();
     expect(editable.textContent).toBe('prompt');

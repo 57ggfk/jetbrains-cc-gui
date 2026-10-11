@@ -82,6 +82,7 @@
     "disabled": "已停用",
     "sdkNotInstalled": "{{provider}} SDK 尚未安裝，請先安裝 SDK 才能開始對話",
     "sdkStatusLoading": "Checking SDK status...",
+    "pasteImagePreparing": "正在準備貼上的圖片...",
     "sdkStatusUnavailable": "無法檢查 SDK 狀態。",
     "retrySdkStatus": "重試",
     "openSourceBanner": "本專案保證100%開源和免費（謹防盜版項目）",

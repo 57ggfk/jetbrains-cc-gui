@@ -34,6 +34,36 @@ describe('createImagePasteDedupe', () => {
     expect(fingerprint).not.toHaveBeenCalled();
   });
 
+  it('keeps identical images from distinct proved native gestures without decoding', async () => {
+    const { dedupe, fingerprint } = createDedupe();
+    expect(await dedupe.isNewPaste(image, 'java-bridge', undefined, 'first-capture')).toBe(true);
+    expect(await dedupe.isNewPaste(image, 'java-bridge', undefined, 'second-capture')).toBe(true);
+    expect(fingerprint).not.toHaveBeenCalled();
+  });
+
+  it.each([image, reencodedImage])('remembers a native gesture after a DOM echo for $data', async (nextImage) => {
+    const { dedupe, fingerprint } = createDedupe();
+    expect(await dedupe.isNewPaste(image, 'dom-paste')).toBe(true);
+    expect(await dedupe.isNewPaste(reencodedImage, 'java-bridge', undefined, 'first-capture')).toBe(false);
+    fingerprint.mockClear();
+    expect(await dedupe.isNewPaste(nextImage, 'java-bridge', undefined, 'second-capture')).toBe(true);
+    expect(fingerprint).not.toHaveBeenCalled();
+  });
+
+  it('does not let an untagged echo forget a proved native gesture', async () => {
+    const { dedupe } = createDedupe();
+    expect(await dedupe.isNewPaste(image, 'java-bridge', undefined, 'first-capture')).toBe(true);
+    expect(await dedupe.isNewPaste(image, 'java-bridge')).toBe(false);
+    expect(await dedupe.isNewPaste(image, 'java-bridge', undefined, 'second-capture')).toBe(true);
+  });
+
+  it('recognizes a proved replay even after another native gesture is accepted', async () => {
+    const { dedupe } = createDedupe();
+    expect(await dedupe.isNewPaste(image, 'java-bridge', undefined, 'first-capture')).toBe(true);
+    expect(await dedupe.isNewPaste(otherImage, 'java-bridge', undefined, 'second-capture')).toBe(true);
+    expect(await dedupe.isNewPaste(image, 'java-bridge', undefined, 'first-capture')).toBe(false);
+  });
+
   it('drops identical bytes from either producer without decoding', async () => {
     const { dedupe, fingerprint } = createDedupe();
 

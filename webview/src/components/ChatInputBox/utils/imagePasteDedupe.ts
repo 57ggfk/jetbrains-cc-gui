@@ -9,7 +9,7 @@ export interface PastedImage {
 }
 
 export interface ImagePasteDedupe {
-  isNewPaste(image: PastedImage, source: ImagePasteSource, arrivedAt?: number): Promise<boolean>;
+  isNewPaste(image: PastedImage, source: ImagePasteSource, arrivedAt?: number, gestureId?: string): Promise<boolean>;
 }
 
 const MAX_COMPARISON_PIXELS = 16 * 1024 * 1024;
@@ -71,6 +71,7 @@ export function createImagePasteDedupe(
     source: ImagePasteSource;
     sequence: number;
     encodings: Partial<Record<ImagePasteSource, PastedImage>>;
+    gestureIds: Partial<Record<ImagePasteSource, string>>;
     lastSeenAt: number;
     fingerprint: Promise<string | null> | null;
   }
@@ -84,17 +85,21 @@ export function createImagePasteDedupe(
     Promise.resolve().then(() => fingerprint(image)).catch(() => null);
 
   return {
-    isNewPaste(image, source, arrivedAt = Date.now()): Promise<boolean> {
+    isNewPaste(image, source, arrivedAt = Date.now(), gestureId): Promise<boolean> {
       // Arrival time, not decoder completion time, defines the replay window.
       const now = arrivedAt;
-      // Java encoding can finish after another paste; serialize decisions, not just the last image.
-      pending = pending.then(async () => {
+      const decide = async (): Promise<boolean> => {
+        // Java encoding can finish after another paste; serialize decisions, not just the last image.
         recentImages = recentImages.filter((entry) => now - entry.lastSeenAt < windowMs);
         // A different accepted gesture invalidates old replay claims across both producers.
         // A producer that already accepted a newer image must not mistake its return to A for A's first echo.
-        const canReplay = (entry: RecentImage) => (!entry.encodings[source] &&
-          (lastDeliveries[source]?.sequence ?? 0) <= entry.sequence) ||
-          (entry === lastDeliveries[source] && observedGestures[source] === gestureSequence);
+        const canReplay = (entry: RecentImage) => {
+          // Different native captures prove distinct gestures even when their image bytes match.
+          const previousGesture = entry.gestureIds[source];
+          if (gestureId && previousGesture) return gestureId === previousGesture;
+          return (!entry.encodings[source] && (lastDeliveries[source]?.sequence ?? 0) <= entry.sequence) ||
+            (entry === lastDeliveries[source] && observedGestures[source] === gestureSequence);
+        };
         const identical = recentImages.find((entry) => canReplay(entry) &&
           Object.values(entry.encodings).some((encoding) =>
             encoding.mediaType === image.mediaType && encoding.data === image.data
@@ -103,6 +108,7 @@ export function createImagePasteDedupe(
         if (identical) {
           identical.lastSeenAt = now;
           identical.encodings[source] = image;
+          if (gestureId) identical.gestureIds[source] = gestureId;
           lastDeliveries[source] = identical;
           observedGestures[source] = gestureSequence;
           return false;
@@ -123,6 +129,7 @@ export function createImagePasteDedupe(
             match.lastSeenAt = now;
             // Cache both encodings without turning an echo into the original paste's identity.
             match.encodings[source] = image;
+            if (gestureId) match.gestureIds[source] = gestureId;
             match.fingerprint = currentFingerprint;
             lastDeliveries[source] = match;
             observedGestures[source] = gestureSequence;
@@ -131,7 +138,8 @@ export function createImagePasteDedupe(
         }
 
         const accepted = { image, source, sequence: ++gestureSequence,
-          encodings: { [source]: image }, lastSeenAt: now, fingerprint: currentFingerprint };
+          encodings: { [source]: image }, gestureIds: { [source]: gestureId },
+          lastSeenAt: now, fingerprint: currentFingerprint };
         lastDeliveries[source] = accepted;
         observedGestures[source] = gestureSequence;
         recentImages.push(accepted);
@@ -140,7 +148,10 @@ export function createImagePasteDedupe(
           recentImages.shift();
         }
         return true;
-      });
+      };
+      // A failed decision must not poison the serialized chain for later pastes:
+      // equivalence cannot be established, so keep the user's image.
+      pending = pending.then(decide).catch(() => true);
       return pending;
     },
   };

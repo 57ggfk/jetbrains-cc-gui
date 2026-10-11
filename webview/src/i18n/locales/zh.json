@@ -99,6 +99,7 @@
     "disabled": "已停用",
     "sdkNotInstalled": "{{provider}} SDK 尚未安装，请先安装 SDK 才能开始对话",
     "sdkStatusLoading": "正在检查 SDK 状态...",
+    "pasteImagePreparing": "正在准备粘贴的图片...",
     "sdkStatusUnavailable": "无法检查 SDK 状态。",
     "retrySdkStatus": "重试",
     "openSourceBanner": "本项目保证100%开源和免费（谨防盗版项目）",

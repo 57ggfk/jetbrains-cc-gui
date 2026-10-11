@@ -184,7 +184,7 @@ describe('useSubmitHandler', () => {
 
     result.current();
 
-    expect(addToast).toHaveBeenCalledWith('common.loading', 'info');
+    expect(addToast).toHaveBeenCalledWith('chat.pasteImagePreparing', 'info');
     expect(clearInput).not.toHaveBeenCalled();
     expect(setInternalAttachments).not.toHaveBeenCalled();
     expect(invalidateImagePastes).not.toHaveBeenCalled();

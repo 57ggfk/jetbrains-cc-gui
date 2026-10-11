@@ -130,7 +130,7 @@ public class ClipboardHandler extends BaseMessageHandler {
 
         // Dispatch clipboard access to EDT to avoid blocking the CEF browser thread.
         // Use ModalityState.any() so copy works even when a modal dialog (e.g. PermissionDialog) is open.
-        ApplicationManager.getApplication().invokeLater(() -> {
+        this.clipboardScheduler.accept(() -> {
             try {
                 Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
                 if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
@@ -139,11 +139,11 @@ public class ClipboardHandler extends BaseMessageHandler {
                 } else {
                     callJavaScript("window.onClipboardRead", "");
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 LOG.warn("Failed to read clipboard", e);
                 callJavaScript("window.onClipboardRead", "");
             }
-        }, ModalityState.any());
+        });
     }
 
     private void handleWriteClipboard(String content) {
@@ -153,14 +153,14 @@ public class ClipboardHandler extends BaseMessageHandler {
         }
         // Dispatch clipboard access to EDT to avoid blocking the CEF browser thread.
         // Use ModalityState.any() so copy works even when a modal dialog (e.g. PermissionDialog) is open.
-        ApplicationManager.getApplication().invokeLater(() -> {
+        this.clipboardScheduler.accept(() -> {
             try {
                 Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
                 clipboard.setContents(new StringSelection(content), null);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 LOG.warn("Failed to write clipboard", e);
             }
-        }, ModalityState.any());
+        });
     }
 
     private void publishImageScope(String scopeId) {
@@ -186,7 +186,7 @@ public class ClipboardHandler extends BaseMessageHandler {
             return;
         }
         // Bind the reply before yielding: encoding may finish after a page reload or browser replacement.
-        Consumer<String> reply = this.context.captureJavaScriptExecutor();
+        HandlerContext.JsSender reply = this.context.captureJavaScriptExecutor();
         if (requestId != null && requestId.startsWith("{")) {
             String ownedId = null;
             ImageOffer claimed = null;
@@ -200,7 +200,9 @@ public class ClipboardHandler extends BaseMessageHandler {
                     this.dispatchImageReply(reply, ownedId, null);
                 } else {
                     claimed.cancelExpiry.run();
-                    if (!claimed.scopeId.equals(scopeId) || !this.recognizesImageScope(scopeId)) {
+                    // Expiration can precede the timer's map removal; a racing claim must not revive it.
+                    if (claimed.expired.get() || !claimed.scopeId.equals(scopeId)
+                            || !this.recognizesImageScope(scopeId)) {
                         claimed.release.run();
                         this.dispatchImageReply(reply, ownedId, null);
                     } else {
@@ -211,6 +213,8 @@ public class ClipboardHandler extends BaseMessageHandler {
                 if (claimed != null) {
                     claimed.release.run();
                 }
+                // Without a readable requestId there is no pending frontend request
+                // to settle; its own timeout is the fallback for malformed claims.
                 this.dispatchImageReply(reply, ownedId, null);
                 LOG.warn("Invalid clipboard snapshot claim", e);
             }
@@ -235,13 +239,15 @@ public class ClipboardHandler extends BaseMessageHandler {
                     } else {
                         this.encodeAndReply(reply, requestId, image, release);
                     }
-                } catch (Exception e) {
+                } catch (Throwable e) {
+                    // An Error (e.g. OOM while materializing the bitmap) must still free the
+                    // admission slot and settle the frontend, or every later paste is refused.
                     release.run();
                     LOG.warn("Failed to schedule clipboard image encoding", e);
                     this.dispatchImageReply(reply, requestId, null);
                 }
             });
-        } catch (Exception e) {
+        } catch (Throwable e) {
             release.run();
             LOG.warn("Failed to schedule clipboard image read", e);
             this.dispatchImageReply(reply, requestId, null);
@@ -251,7 +257,7 @@ public class ClipboardHandler extends BaseMessageHandler {
     /** Capture the macOS hook's clipboard on its first EDT handoff, before requesting draft ownership. */
     public void captureClipboardPaste() {
         String scopeId = this.imageScopeId;
-        Consumer<String> reply = this.context.captureJavaScriptExecutor();
+        HandlerContext.JsSender reply = this.context.captureJavaScriptExecutor();
         if (!this.recognizesImageScope(scopeId) || !this.imageSlots.tryAcquire()) {
             return;
         }
@@ -264,12 +270,12 @@ public class ClipboardHandler extends BaseMessageHandler {
                         return;
                     }
                     this.offerImage(this.clipboardImageReader.get(), reply, release, scopeId);
-                } catch (RuntimeException e) {
+                } catch (Throwable e) {
                     release.run();
                     LOG.warn("Failed to capture clipboard paste", e);
                 }
             });
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
             release.run();
             LOG.warn("Failed to schedule clipboard paste capture", e);
         }
@@ -278,36 +284,61 @@ public class ClipboardHandler extends BaseMessageHandler {
     /** Preserve an image already read by an IDE action while the frontend claims its draft. */
     public boolean offerImagePaste(Image image) {
         String scopeId = this.imageScopeId;
-        if (!this.recognizesImageScope(scopeId) || !this.imageSlots.tryAcquire()) {
+        if (!this.recognizesImageScope(scopeId)) {
+            // The webview publishes a scope when an input mounts; a gesture before
+            // that has no owner to claim the image, so the paste is dropped rather
+            // than queued for a page that may never ask for it.
+            LOG.debug("Dropping clipboard image paste: no paste scope is published yet");
+            return false;
+        }
+        if (!this.imageSlots.tryAcquire()) {
             return false;
         }
         Runnable release = this.releaseOnce();
         try {
             return this.offerImage(image, this.context.captureJavaScriptExecutor(), release, scopeId);
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
             release.run();
             LOG.warn("Failed to capture clipboard reply ownership", e);
             return false;
         }
     }
 
-    private boolean offerImage(Image image, Consumer<String> reply, Runnable release, String scopeId) {
+    private boolean offerImage(Image image, HandlerContext.JsSender reply, Runnable release, String scopeId) {
         if (image == null || !this.recognizesImageScope(scopeId)) {
             release.run();
             return false;
         }
         String snapshotId = UUID.randomUUID().toString();
         ImageOffer offer = new ImageOffer(image, reply, release, scopeId);
+        // Arm expiry before publishing the offer: an expiry firing between the put
+        // and the assignment would otherwise discard through the no-op default and
+        // still dispatch an already-discarded snapshot to the frontend.
+        try {
+            offer.cancelExpiry = this.expirationScheduler.apply(() -> {
+                offer.expired.set(true);
+                this.discardOffer(snapshotId);
+            });
+        } catch (RuntimeException e) {
+            release.run();
+            LOG.warn("Failed to schedule clipboard snapshot expiry", e);
+            return false;
+        }
         this.imageOffers.put(snapshotId, offer);
         try {
-            offer.cancelExpiry = this.expirationScheduler.apply(() -> this.discardOffer(snapshotId));
-            if (!this.recognizesImageScope(scopeId)) {
+            if (offer.expired.get() || !this.recognizesImageScope(scopeId)) {
                 this.discardOffer(snapshotId);
                 return false;
             }
-            reply.accept("window.dispatchEvent(new CustomEvent('java-request-paste-image', "
+            // A stale or disposed page silently drops queued scripts; release the
+            // snapshot now instead of pinning its slot and image until expiry.
+            boolean delivered = reply.send("window.dispatchEvent(new CustomEvent('java-request-paste-image', "
                     + "{ detail: { snapshotId: " + GSON.toJson(snapshotId)
                     + ", scopeId: " + GSON.toJson(scopeId) + " } }));");
+            if (!delivered) {
+                this.discardOffer(snapshotId);
+                return false;
+            }
             return true;
         } catch (RuntimeException e) {
             this.discardOffer(snapshotId);
@@ -316,16 +347,21 @@ public class ClipboardHandler extends BaseMessageHandler {
         }
     }
 
-    private void encodeAndReply(Consumer<String> reply, String requestId, Image image, Runnable release) {
+    private void encodeAndReply(HandlerContext.JsSender reply, String requestId, Image image, Runnable release) {
         try {
             this.imageEncoder.execute(() -> {
                 try {
                     this.dispatchImageReply(reply, requestId, this.encodeImage(image));
+                } catch (Throwable e) {
+                    // An Error (e.g. OOM while materializing the bitmap) must still settle
+                    // the frontend, or the pending paste waits out its whole timeout.
+                    LOG.warn("Failed to encode clipboard image", e);
+                    this.dispatchImageReply(reply, requestId, null);
                 } finally {
                     release.run();
                 }
             });
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
             release.run();
             this.dispatchImageReply(reply, requestId, null);
             LOG.warn("Failed to schedule clipboard encoding", e);
@@ -360,12 +396,13 @@ public class ClipboardHandler extends BaseMessageHandler {
 
     private static final class ImageOffer {
         private final Image image;
-        private final Consumer<String> reply;
+        private final HandlerContext.JsSender reply;
         private final Runnable release;
         private final String scopeId;
+        private final AtomicBoolean expired = new AtomicBoolean();
         private volatile Runnable cancelExpiry = () -> { };
 
-        private ImageOffer(Image image, Consumer<String> reply, Runnable release, String scopeId) {
+        private ImageOffer(Image image, HandlerContext.JsSender reply, Runnable release, String scopeId) {
             this.image = image;
             this.reply = reply;
             this.release = release;
@@ -373,13 +410,15 @@ public class ClipboardHandler extends BaseMessageHandler {
         }
     }
 
-    private void dispatchImageReply(Consumer<String> reply, String requestId, String base64) {
+    private void dispatchImageReply(HandlerContext.JsSender reply, String requestId, String base64) {
         if (base64 == null && (requestId == null || requestId.isEmpty())) {
             return;
         }
         // JSON encoding keeps an opaque request id safe when it crosses back into JavaScript.
+        // A stale page refuses the script; the frontend's own timeout and scope rebind
+        // clean up its pending request, so the result needs no handling here.
         String encodedImage = base64 == null ? "null" : "'" + base64 + "'";
-        reply.accept("window.dispatchEvent(new CustomEvent('java-paste-image', "
+        reply.send("window.dispatchEvent(new CustomEvent('java-paste-image', "
                 + "{ detail: { base64: " + encodedImage + ", mediaType: 'image/png', requestId: "
                 + GSON.toJson(requestId) + " } }));");
     }

@@ -1,5 +1,6 @@
 package com.github.claudecodegui.ui.toolwindow;
 
+import com.github.claudecodegui.handler.core.HandlerContext;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.util.ArrayDeque;
@@ -28,9 +29,20 @@ final class WebviewEventQueue<T> {
     /**
      * Recovery events may exceed the soft bound, but the number of pending
      * entries still has a ceiling. Consecutive slices of one history page share
-     * an entry so the ceiling cannot cut a large page's transfer in half.
+     * an entry so the ceiling cannot cut a large page's transfer in half. The
+     * ceiling therefore bounds entries, not bytes: a page's full content may
+     * queue inside one entry while the webview cannot drain. Bounding those
+     * bytes by splitting entries again would let the ceiling truncate the page,
+     * so the growth is surfaced by {@link #MAX_GROUPED_HISTORY_ENTRY_CHARS}
+     * instead of bounded.
      */
     private static final int MAX_RECOVERY_OVERFLOW_EVENTS = MAX_PENDING_EVENTS * 2;
+    /**
+     * How many chars one history-page entry may accumulate before its growth is
+     * logged once. Diagnostic only: reaching it means the webview has retained a
+     * whole multi-megabyte page (attachment payloads included) without draining.
+     */
+    private static final int MAX_GROUPED_HISTORY_ENTRY_CHARS = 8_000_000;
     /**
      * How many times one batch may be requeued after a failed execution before it
      * is dropped. The failure is retried as soon as the scheduler runs again, so
@@ -100,15 +112,15 @@ final class WebviewEventQueue<T> {
         return enqueue(new JsCall<T>(browser, pageGeneration(), null, new String[0], script));
     }
 
-    /** Capture the destination now so deferred work cannot attach to a replacement page. */
-    Consumer<String> captureRawSender() {
+    /**
+     * Capture the destination now so deferred work cannot attach to a replacement page.
+     * The returned sender reports whether the captured page still accepted the script.
+     */
+    HandlerContext.JsSender captureRawSender() {
         T browser = currentBrowser();
         int generation = pageGeneration();
-        return script -> {
-            if (browser != null && script != null && !script.isEmpty()) {
-                enqueue(new JsCall<T>(browser, generation, null, new String[0], script));
-            }
-        };
+        return script -> browser != null && script != null && !script.isEmpty()
+                && enqueue(new JsCall<T>(browser, generation, null, new String[0], script));
     }
 
     void browserChanged() {
@@ -237,6 +249,10 @@ final class WebviewEventQueue<T> {
             }
             if (pending.size() >= MAX_PENDING_EVENTS
                     && !dropOneDisposableEvent()
+                    // Dropping a delta loses that text slice until the stream's end
+                    // snapshot resyncs the transcript. That is the accepted backpressure
+                    // trade: merging or refusing would reorder lifecycle events or wedge
+                    // an already-stalled page.
                     && !dropOneDelta()
                     && !(isLifecycle(call) && dropOneNonLifecycle())) {
                 if (!isCriticalLifecycle(call) && !isMessageSnapshot(call)) {
@@ -397,7 +413,7 @@ final class WebviewEventQueue<T> {
             while (!entry.calls.isEmpty()) {
                 JsCall<T> call = entry.calls.peekFirst();
                 int callChars = call.estimatedChars();
-                if (!batch.isEmpty() && (containsSnapshot && isSnapshotResetBoundary(call)
+                if (!batch.isEmpty() && ((containsSnapshot && isSnapshotResetBoundary(call))
                         || estimatedChars + callChars > MAX_BATCH_ARGUMENT_CHARS)) {
                     return batch;
                 }
@@ -524,7 +540,14 @@ final class WebviewEventQueue<T> {
         if (tail == null || !belongsToSameHistoryPage(call, tail.calls.peekLast())) {
             return false;
         }
+        int before = tail.groupedHistoryChars;
+        int after = before + call.estimatedChars();
         tail.calls.addLast(call);
+        tail.groupedHistoryChars = after;
+        if (before <= MAX_GROUPED_HISTORY_ENTRY_CHARS && after > MAX_GROUPED_HISTORY_ENTRY_CHARS) {
+            LOG.warn("Queued history page has accumulated " + after
+                    + " chars while the webview is not draining it");
+        }
         return true;
     }
 
@@ -628,6 +651,8 @@ final class WebviewEventQueue<T> {
 
     private static final class PendingCalls<T> {
         private final Deque<JsCall<T>> calls = new ArrayDeque<>();
+        /** Estimated chars merged into this entry; grouped history pages are the unbounded case. */
+        private int groupedHistoryChars;
 
         private PendingCalls(JsCall<T> call) {
             this.calls.addLast(call);

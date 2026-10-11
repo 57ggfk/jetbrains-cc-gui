@@ -101,7 +101,7 @@ export function useSubmitHandler({
 
     // Preserve the whole draft instead of sending a partial attachment list and refilling it later.
     if (hasPendingImagePastes?.()) {
-      addToast?.(t('common.loading'), 'info');
+      addToast?.(t('chat.pasteImagePreparing'), 'info');
       return;
     }
 

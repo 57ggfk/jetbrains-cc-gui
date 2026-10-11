@@ -115,6 +115,39 @@ public class ClipboardHandlerTest {
         assertTrue(!handler.offerImagePaste(image()));
     }
 
+    /** An expiration in progress must reject a racing claim before the timer removes its map entry. */
+    @Test
+    public void expiredSnapshotCannotBeClaimedBeforeTimerRemoval() throws Exception {
+        Fixture fixture = new Fixture();
+        ClipboardHandler handler = fixture.handler(() -> {
+            fail("an expired snapshot must not reread the clipboard");
+            return null;
+        });
+        assertTrue(handler.offerImagePaste(image()));
+        String snapshotId = snapshotId(fixture.callback.scripts.get(0));
+        Runnable expiration = fixture.expirationTasks.peek();
+        var offersField = ClipboardHandler.class.getDeclaredField("imageOffers");
+        offersField.setAccessible(true);
+        Object offer = ((java.util.Map<?, ?>) offersField.get(handler)).get(snapshotId);
+        var expiredField = offer.getClass().getDeclaredField("expired");
+        expiredField.setAccessible(true);
+        // The timer marks expiration before removing the entry; model a claim at that boundary.
+        ((java.util.concurrent.atomic.AtomicBoolean) expiredField.get(offer)).set(true);
+        fixture.callback.scripts.clear();
+        handler.handle("paste_image", "{\"requestId\":\"expired-race\",\"snapshotId\":\"" + snapshotId + "\",\"scopeId\":\"draft-a\"}");
+        assertTrue("An expired capture must not enter the encoder", fixture.backgroundTasks.isEmpty());
+        assertTrue(fixture.edtTasks.isEmpty());
+        assertEquals(1, fixture.callback.scripts.size());
+        assertTrue(fixture.callback.scripts.get(0).contains("requestId: \"expired-race\""));
+        assertTrue(fixture.callback.scripts.get(0).contains("base64: null"));
+        expiration.run();
+        assertTrue(handler.offerImagePaste(image()));
+        assertTrue(handler.offerImagePaste(image()));
+        assertTrue("The racing timer and claim must release their shared slot only once", !handler.offerImagePaste(image()));
+        handler.dispose();
+        assertTrue(fixture.expirationTasks.isEmpty());
+    }
+
     /** The macOS hook needs one EDT read before offering its snapshot, without an intervening JS round trip. */
     @Test
     public void capturesHookClipboardBeforeRequestingFrontendOwnership() {
@@ -289,6 +322,31 @@ public class ClipboardHandlerTest {
         fixture.edtTasks.remove().run();
         fixture.backgroundTasks.remove().run();
         assertTrue(fixture.callback.scripts.get(0).contains("base64: null"));
+    }
+
+    /** An Error thrown while encoding must still settle the frontend and free its admission slot. */
+    @Test
+    public void encoderErrorSettlesThePendingRequest() {
+        Fixture fixture = new Fixture();
+        Image failing = new BaseMultiResolutionImage(image()) {
+            @Override
+            public int getWidth(ImageObserver observer) {
+                throw new InternalError("bitmap allocation failed");
+            }
+        };
+        ClipboardHandler handler = fixture.handler(() -> failing);
+        handler.handle("paste_image", "error-encode");
+        fixture.edtTasks.remove().run();
+        assertEquals(1, fixture.backgroundTasks.size());
+        fixture.backgroundTasks.remove().run();
+        assertEquals(1, fixture.callback.scripts.size());
+        assertTrue(fixture.callback.scripts.get(0).contains("requestId: \"error-encode\""));
+        assertTrue(fixture.callback.scripts.get(0).contains("base64: null"));
+        handler.handle("paste_image", "next-paste");
+        fixture.edtTasks.remove().run();
+        fixture.backgroundTasks.remove().run();
+        assertEquals(2, fixture.callback.scripts.size());
+        assertTrue(fixture.callback.scripts.get(1).contains("requestId: \"next-paste\""));
     }
 
     private static String snapshotId(String script) {
@@ -504,6 +562,20 @@ public class ClipboardHandlerTest {
         assertTrue(fixture.callback.scripts.isEmpty());
     }
 
+    /** An offer event that can no longer be delivered must release its snapshot instead of pinning it until expiry. */
+    @Test
+    public void failedOfferDeliveryReleasesTheSnapshotImmediately() {
+        Fixture fixture = new Fixture();
+        ClipboardHandler handler = fixture.handler(ClipboardHandlerTest::image);
+        fixture.callback.beforeDelivery = script -> fixture.callback.page++;
+        assertTrue(!handler.offerImagePaste(image()));
+        assertTrue(fixture.callback.scripts.isEmpty());
+        assertTrue(fixture.expirationTasks.isEmpty());
+        fixture.callback.beforeDelivery = ignored -> { };
+        // The failed offer freed its admission slot, so a later gesture still gets through.
+        assertTrue(handler.offerImagePaste(image()));
+    }
+
     /** Disposal between the native read and the background task must skip image conversion. */
     @Test
     public void disposalBeforeEncodingSkipsImageConversion() {
@@ -595,7 +667,7 @@ public class ClipboardHandlerTest {
         }
 
         @Override
-        public Consumer<String> captureJavaScriptExecutor() {
+        public HandlerContext.JsSender captureJavaScriptExecutor() {
             captures++;
             Object expectedBrowser = browser;
             int expectedPage = page;
@@ -603,7 +675,9 @@ public class ClipboardHandlerTest {
                 beforeDelivery.accept(script);
                 if (browser == expectedBrowser && page == expectedPage) {
                     scripts.add(script);
+                    return true;
                 }
+                return false;
             };
         }
     }

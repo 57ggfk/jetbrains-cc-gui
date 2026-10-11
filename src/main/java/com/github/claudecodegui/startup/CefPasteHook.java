@@ -11,26 +11,23 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.TimeUnit;
 
-import org.cef.CefClient;
 import org.cef.browser.CefBrowser;
-import org.cef.handler.CefKeyboardHandler.CefKeyEvent;
 import org.cef.handler.CefKeyboardHandler.CefKeyEvent.EventType;
 import org.cef.handler.CefKeyboardHandlerAdapter;
 import org.cef.misc.BoolRef;
 import org.cef.misc.EventFlags;
 
 /**
- * macOS 27 CEF remote quirk: Cmd+V keydown never reaches onPreKeyEvent as
- * KEYEVENT_RAWKEYDOWN; only an orphan KEYEVENT_KEYUP (wkc=86) arrives.
+ * macOS 27 CEF remote quirk: Cmd+V keydown never reaches onPreKeyEvent as KEYEVENT_RAWKEYDOWN.
+ * Only an orphan KEYEVENT_KEYUP (wkc=86) arrives.
  * Strategy: on KEYUP for V with Command still held, if no matching RAWKEYDOWN
  * for V was seen within 800ms, treat it as an intercepted Cmd+V and paste the
  * clipboard image.
  *
- * One hook per browser: every ClaudeChatWindow tab gets its own JBCefBrowser
- * (and CefClient), and browsers are replaced on reload, so installation is
- * driven by ClaudeChatWindow.replaceBrowser and deduped per CefClient. A
- * single global install would leave second projects, extra tabs and recreated
- * browsers without the fix.
+ * One hook per browser: installation is driven by ClaudeChatWindow.replaceBrowser
+ * and registered through JBCefClient so it coexists with the platform's keyboard
+ * handler. A single global install would leave second projects, extra tabs and
+ * recreated browsers without the fix.
  */
 public class CefPasteHook extends CefKeyboardHandlerAdapter {
 
@@ -41,27 +38,23 @@ public class CefPasteHook extends CefKeyboardHandlerAdapter {
     private static final int MAX_INSTALL_ATTEMPTS = 8;
     private static final long INSTALL_RETRY_DELAY_MS = 3000;
 
-    /**
-     * Clients that already carry the hook. Weak keys so a disposed browser's
-     * client drops out instead of pinning it (and its window) forever.
-     */
-    private static final Set<CefClient> INSTALLED_CLIENTS = Collections.synchronizedSet(
+    /** Weak keys keep the registry from retaining disposed browsers and their windows. */
+    private static final Set<Object> INSTALLED_BROWSERS = Collections.synchronizedSet(
             Collections.newSetFromMap(new WeakHashMap<>()));
 
     private volatile long lastVRawKeyDown = 0;
     private volatile long lastPasteTrigger = 0;
     private volatile boolean sawVRawKeyDown = false;
 
-    private final ClaudeChatWindow myWindow;
+    private final Runnable captureClipboardPaste;
 
-    CefPasteHook(ClaudeChatWindow window) {
-        this.myWindow = window;
+    CefPasteHook(Runnable captureClipboardPaste) {
+        this.captureClipboardPaste = captureClipboardPaste;
     }
 
     /**
-     * Attach the hook to the window's current browser client, retrying briefly
-     * while the CEF browser is still initializing. Safe to call on every browser
-     * (re)bind: each CefClient gets at most one hook.
+     * Attach the hook to the window's current browser, retrying briefly during initialization.
+     * Safe to call on every browser (re)bind: each CefBrowser gets at most one hook.
      */
     public static void installForWindow(ClaudeChatWindow window) {
         installForWindow(window, 0);
@@ -72,8 +65,8 @@ public class CefPasteHook extends CefKeyboardHandlerAdapter {
             if (window == null || window.isDisposed()) {
                 return;
             }
-            CefClient client = readClient(window);
-            if (client == null) {
+            JBCefBrowser browser = readBrowser(window);
+            if (browser == null) {
                 if (attempt < MAX_INSTALL_ATTEMPTS) {
                     AppExecutorUtil.getAppScheduledExecutorService().schedule(
                             () -> installForWindow(window, attempt + 1),
@@ -84,40 +77,50 @@ public class CefPasteHook extends CefKeyboardHandlerAdapter {
                 }
                 return;
             }
-            install(client, window);
+            install(browser, window);
         } catch (Throwable t) {
             LOG.warn("[paste-fix][CEF] install error", t);
         }
     }
 
     /**
-     * Install one keyboard hook per client so all chat windows can recover intercepted pastes.
+     * Install a browser-scoped keyboard hook alongside the platform's default handler.
      */
-    public static void install(CefClient client, ClaudeChatWindow window) {
+    public static void install(JBCefBrowser browser, ClaudeChatWindow window) {
         try {
-            if (client == null || window == null) {
+            if (browser == null || browser.isDisposed() || window == null || window.isDisposed()) {
                 return;
             }
-            if (!INSTALLED_CLIENTS.add(client)) {
-                return;
+            CefBrowser cefBrowser = browser.getCefBrowser();
+            // Raw CefClient.addKeyboardHandler ignores a second handler. JBCefClient
+            // multiplexes the existing platform handler and removes ours on browser close.
+            if (registerHook(cefBrowser, () -> browser.getJBCefClient().addKeyboardHandler(
+                    new CefPasteHook(window::captureClipboardPaste), cefBrowser))) {
+                LOG.info("[paste-fix][CEF] CefPasteHook installed on browser " + System.identityHashCode(cefBrowser));
             }
-            client.addKeyboardHandler(new CefPasteHook(window));
-            LOG.info("[paste-fix][CEF] CefPasteHook installed on client " + System.identityHashCode(client));
         } catch (Throwable t) {
             LOG.warn("[paste-fix][CEF] install failed", t);
         }
     }
 
-    private static CefClient readClient(ClaudeChatWindow window) {
+    static boolean registerHook(Object browserIdentity, Runnable registration) {
+        // A failed registration must leave the browser eligible for a later retry.
+        synchronized (INSTALLED_BROWSERS) {
+            if (browserIdentity == null || INSTALLED_BROWSERS.contains(browserIdentity)) {
+                return false;
+            }
+            registration.run();
+            INSTALLED_BROWSERS.add(browserIdentity);
+            return true;
+        }
+    }
+
+    private static JBCefBrowser readBrowser(ClaudeChatWindow window) {
         try {
             Field f = ClaudeChatWindow.class.getDeclaredField("browser");
             f.setAccessible(true);
             Object v = f.get(window);
-            if (!(v instanceof JBCefBrowser)) {
-                return null;
-            }
-            CefBrowser cefBrowser = ((JBCefBrowser) v).getCefBrowser();
-            return cefBrowser == null ? null : cefBrowser.getClient();
+            return v instanceof JBCefBrowser ? (JBCefBrowser) v : null;
         } catch (Throwable t) {
             return null;
         }
@@ -161,7 +164,7 @@ public class CefPasteHook extends CefKeyboardHandlerAdapter {
             LOG.info("[paste-fix][CEF] orphan Cmd+V detected, pasting image");
 
             // Capture on the first EDT handoff so a JS round trip cannot substitute newer clipboard contents.
-            this.myWindow.captureClipboardPaste();
+            this.captureClipboardPaste.run();
         } catch (Throwable t) {
             LOG.warn("[paste-fix][CEF] hook error", t);
         }

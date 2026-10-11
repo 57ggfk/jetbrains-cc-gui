@@ -24,6 +24,36 @@ test('counts all native pages including reasoning and tool results without count
   assert.ok(calls.every(call => !['thread/resume', 'thread/start', 'turn/start'].includes(call.method)));
 });
 
+test('id-less native items count once across overlapping pages that repeat their turn', async () => {
+  const legacyTurn = (id) => ({ id, status: 'completed', items: [
+    { type: 'userMessage', content: [{ type: 'text', text: 'inspect' }] },
+    { type: 'agentMessage', text: 'Done' },
+  ] });
+  const count = createNativeHistoryCounter(async (method, params) => {
+    if (method === 'thread/read') return { thread: { id: params.threadId } };
+    return params.cursor === null ? { data: [legacyTurn('new')], nextCursor: 'opaque:old' }
+      : { data: [legacyTurn('new'), legacyTurn('old')], nextCursor: null };
+  });
+  assert.equal(await count({ id: 'thread', updatedAt: 1 }), 4);
+});
+
+test('a repeated turn counts id-less items it gained between page reads', async () => {
+  const legacyTurn = (id, withOutput) => ({ id, status: 'completed', items: [
+    { type: 'userMessage', content: [{ type: 'text', text: 'inspect' }] },
+    { type: 'agentMessage', text: 'Done' },
+    ...(withOutput ? [{ type: 'functionCallOutput', callId: `${id}:call`, output: 'ok' }] : []),
+  ] });
+  const count = createNativeHistoryCounter(async (method, params) => {
+    if (method === 'thread/read') return { thread: { id: params.threadId } };
+    // An output can land between page reads on an active thread, so the
+    // overlapping page repeats the newest turn with one more id-less item.
+    return params.cursor === null ? { data: [legacyTurn('new', false)], nextCursor: 'opaque:old' }
+      : { data: [legacyTurn('new', true), legacyTurn('old', true)], nextCursor: null };
+  });
+  // Turn "new" gains its uuid-less output between page reads: 3 + 3, not 2 + 3.
+  assert.equal(await count({ id: 'thread', updatedAt: 1 }), 6);
+});
+
 test('older native storage uses one full read and an authoritative empty transcript counts as zero', async () => {
   for (const empty of [false, true]) {
     const calls = [];
