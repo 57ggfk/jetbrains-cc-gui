@@ -85,6 +85,7 @@ export function createNativeHistoryCounter(read, { cacheLimit = 128, cacheTtlMs 
       if (cache.get(thread.id) === entry) cache.delete(thread.id);
       throw error;
     }).finally(() => clearTimeout(timer));
+    cache.delete(thread.id);
     cache.set(thread.id, entry);
     if (cache.size > cacheLimit) cache.delete(cache.keys().next().value);
     return await entry.promise;

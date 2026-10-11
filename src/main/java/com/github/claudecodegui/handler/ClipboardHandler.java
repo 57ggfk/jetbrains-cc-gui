@@ -164,10 +164,10 @@ public class ClipboardHandler extends BaseMessageHandler {
     }
 
     private void publishImageScope(String scopeId) {
-        if (this.disposed || (scopeId != null && scopeId.length() > 128)) {
+        if (this.disposed || scopeId.length() > 128) {
             return;
         }
-        this.imageScopeId = scopeId == null || scopeId.isEmpty() ? null : scopeId;
+        this.imageScopeId = scopeId.isEmpty() ? null : scopeId;
         for (Map.Entry<String, ImageOffer> entry : this.imageOffers.entrySet()) {
             if (!entry.getValue().scopeId.equals(this.imageScopeId)) {
                 this.discardOffer(entry.getKey());
@@ -181,13 +181,13 @@ public class ClipboardHandler extends BaseMessageHandler {
 
     private void handlePasteImage(String requestId) {
         // Claims contain only opaque ids; oversized metadata must not allocate a JSON tree or a large JS reply.
-        if (requestId != null && requestId.length() > MAX_IMAGE_REQUEST_LENGTH) {
+        if (requestId.length() > MAX_IMAGE_REQUEST_LENGTH) {
             LOG.warn("Clipboard image request metadata exceeds its limit");
             return;
         }
         // Bind the reply before yielding: encoding may finish after a page reload or browser replacement.
         HandlerContext.JsSender reply = this.context.captureJavaScriptExecutor();
-        if (requestId != null && requestId.startsWith("{")) {
+        if (requestId.startsWith("{")) {
             String ownedId = null;
             ImageOffer claimed = null;
             try {
@@ -335,7 +335,10 @@ public class ClipboardHandler extends BaseMessageHandler {
             boolean delivered = reply.send("window.dispatchEvent(new CustomEvent('java-request-paste-image', "
                     + "{ detail: { snapshotId: " + GSON.toJson(snapshotId)
                     + ", scopeId: " + GSON.toJson(scopeId) + " } }));");
-            if (!delivered) {
+            // publishImageScope's sweep can miss an offer put into the map while it
+            // iterates; a retired scope is never claimed, so free the slot now
+            // instead of pinning it until expiry.
+            if (!delivered || !this.recognizesImageScope(scopeId)) {
                 this.discardOffer(snapshotId);
                 return false;
             }

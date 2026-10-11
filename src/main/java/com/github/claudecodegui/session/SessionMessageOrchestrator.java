@@ -606,14 +606,10 @@ public class SessionMessageOrchestrator {
         if (anchorIndex < 0) {
             return null;
         }
+        // The anchorIndex contract (a lastAlignedHistoryIndex result) guarantees the
+        // anchor row carries a uuid that also exists in the loaded page.
         String anchorUuid = historyMessageUuid(currentMessages.get(anchorIndex));
-        if (anchorUuid == null) {
-            return null;
-        }
         int loadedAnchorIndex = indexOfHistoryUuid(loadedMessages, anchorUuid);
-        if (loadedAnchorIndex < 0) {
-            return null;
-        }
         if (anchorIndex == 0) {
             // No older live prefix exists, so retain the entire page and its original cursor.
             return loadedMessages;

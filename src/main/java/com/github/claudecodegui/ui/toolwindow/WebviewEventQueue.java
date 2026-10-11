@@ -119,7 +119,7 @@ final class WebviewEventQueue<T> {
     HandlerContext.JsSender captureRawSender() {
         T browser = currentBrowser();
         int generation = pageGeneration();
-        return script -> browser != null && script != null && !script.isEmpty()
+        return script -> browser != null
                 && enqueue(new JsCall<T>(browser, generation, null, new String[0], script));
     }
 

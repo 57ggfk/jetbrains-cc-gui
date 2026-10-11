@@ -255,7 +255,7 @@ public class HandlerContext {
      * The queue preserves the original browser/page rather than targeting whichever page is current later.
      */
     public JsSender captureJavaScriptExecutor() {
-        if (this.disposed || this.jsCallback == null) {
+        if (this.disposed) {
             return ignored -> false;
         }
         JsSender reply = this.jsCallback.captureJavaScriptExecutor();

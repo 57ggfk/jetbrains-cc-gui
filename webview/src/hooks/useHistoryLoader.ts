@@ -40,7 +40,8 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
     const countQueue: NativeCountJob[] = [];
     const pendingCounts = new Map<string, { job: NativeCountJob; timer: ReturnType<typeof setTimeout> }>();
     let countRequestSequence = 0;
-    let sendRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let listRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let countRetryTimer: ReturnType<typeof setTimeout> | null = null;
     const countExpirations = new Map<string, number>();
 
     const publishNativeHistory = (previousById: Map<string, HistorySessionSummary>) => {
@@ -74,9 +75,9 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
       for (const pending of pendingCounts.values()) clearTimeout(pending.timer);
       pendingCounts.clear();
       countQueue.length = 0;
-      if (sendRetryTimer !== null) {
-        clearTimeout(sendRetryTimer);
-        sendRetryTimer = null;
+      if (countRetryTimer !== null) {
+        clearTimeout(countRetryTimer);
+        countRetryTimer = null;
       }
     };
 
@@ -103,9 +104,9 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
           clearTimeout(timer);
           pendingCounts.delete(countRequestId);
           countQueue.unshift(job);
-          if (sendRetryTimer === null) {
-            sendRetryTimer = setTimeout(() => {
-              sendRetryTimer = null;
+          if (countRetryTimer === null) {
+            countRetryTimer = setTimeout(() => {
+              countRetryTimer = null;
               dispatchCounts();
             }, BRIDGE_SEND_RETRY_MS);
           }
@@ -234,11 +235,11 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
         const sent = currentProvider === 'codex'
           ? sendBridgeEvent('codex_native_list_threads', JSON.stringify({ requestId }))
           : sendBridgeEvent('load_history_data', currentProvider);
-        if (!sent && sendRetryTimer === null) {
+        if (!sent && listRetryTimer === null) {
           // The bridge refused the send; retry shortly instead of dropping the
           // list request for the rest of the view session, like the count pipeline.
-          sendRetryTimer = setTimeout(() => {
-            sendRetryTimer = null;
+          listRetryTimer = setTimeout(() => {
+            listRetryTimer = null;
             requestHistoryData();
           }, BRIDGE_SEND_RETRY_MS);
         }
@@ -257,6 +258,10 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
     return () => {
       if (currentTimer) {
         clearTimeout(currentTimer);
+      }
+      if (listRetryTimer !== null) {
+        clearTimeout(listRetryTimer);
+        listRetryTimer = null;
       }
       window.removeEventListener('codex-native-data', handleNativeHistory);
       clearCounts();

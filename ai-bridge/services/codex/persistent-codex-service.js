@@ -448,7 +448,6 @@ function waitForOperationThreadId(service, operation, signal) {
     service.on('codex_event', onEvent);
     signal.addEventListener('abort', onAbort, { once: true });
     operation.promise.then(() => finish(operation.threadId), () => finish(null));
-    if (signal.aborted || operation.settled || operation.threadId) finish(operation.threadId);
   });
 }
 
