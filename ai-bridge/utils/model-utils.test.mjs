@@ -10,6 +10,21 @@ import {
 
 // --- resolveSdkModelName --------------------------------------------------
 
+test('cc-switch routes bypass family mappings and reach the SDK verbatim', () => {
+  const env = {
+    ANTHROPIC_MODEL: 'ccs-claude-default--glm-5.3',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'ccs-claude-default--glm-5.3',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'ccs-claude-default--glm-5.3',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'ccs-claude-default--glm-5.3',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: 'ccs-claude-default--glm-5.3',
+  };
+  for (const id of ['ccs-claude-a--claude-sonnet-5', 'ccs-claude-b--claude-opus-5[1m]', 'ccs-claude-haiku--glm-5.3', 'ccs-claude-fable--grok-4.7']) {
+    const resolved = resolveModelFromSettings(id, env);
+    assert.equal(resolved, id);
+    assert.equal(resolveSdkModelName(id, resolved), id);
+  }
+});
+
 test('resolveSdkModelName hands the exact resolved id to the SDK, alias only as fallback', () => {
   // A specific Opus generation must not collapse to the 'opus' alias: the
   // settings override blanks ANTHROPIC_DEFAULT_OPUS_MODEL, so the alias would
