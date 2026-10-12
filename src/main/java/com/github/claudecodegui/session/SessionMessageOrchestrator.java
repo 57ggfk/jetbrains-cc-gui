@@ -313,10 +313,7 @@ public class SessionMessageOrchestrator {
                     if (!ownsHistoryLoad(loadingToken, requestedSessionId, requestedCwd, requestedProvider)) {
                         return;
                     }
-                    state.setSessionId(null);
-                    state.clearMessages();
-                    state.setError(null);
-                    callbackFacade.notifyMessageUpdate(state.getMessagesSnapshot());
+                    this.retireMissingHistory();
                 }
                 LOG.warn("Session history is unavailable; cleared stale session ID: " + e.getMessage());
             } catch (SessionHistoryIncompleteException e) {
@@ -420,6 +417,12 @@ public class SessionMessageOrchestrator {
                         + ", hasMore=" + load.hasMore);
                 return load;
             }
+        } catch (SessionHistoryNotFoundException e) {
+            // A missing transcript is a stale-session signal, not a page
+            // failure: rethrow so the caller clears the session ID instead of
+            // falling back to the full-history read, which would only raise
+            // the same exception after a second bridge round-trip.
+            throw e;
         } catch (Exception e) {
             LOG.warn("Paginated session load failed, falling back to full history: " + e.getMessage());
         }
@@ -440,6 +443,7 @@ public class SessionMessageOrchestrator {
      * replaced, never prepended, or every visible message would duplicate.</p>
      *
      * <p>Any failure notifies the frontend so its loading indicator clears.</p>
+     * <p>Missing history retires the session identity and cached transcript.</p>
      */
     public CompletableFuture<Void> loadEarlierClaudeHistoryPage(String sessionId, String cwd, int beforeTurn) {
         long requestedVersion;
@@ -529,6 +533,17 @@ public class SessionMessageOrchestrator {
                             this.claudeHistoryTotalTurns, this.claudeHistoryHasMore, historyLoad.cursorReset,
                             this.claudeHistorySessionTitle);
                 }
+            } catch (SessionHistoryNotFoundException e) {
+                synchronized (this.state.getMessageStateLock()) {
+                    if (!this.recognizesClaudeHistorySession(sessionId, cwd)
+                            || requestedVersion != this.claudeHistoryVersion) {
+                        return;
+                    }
+                    // Settle the old page before its identity disappears from the frontend.
+                    this.callbackFacade.notifyClaudeHistoryPageError(sessionId, e.getMessage());
+                    this.retireMissingHistory();
+                }
+                LOG.warn("Session history is unavailable; cleared stale session ID: " + e.getMessage());
             } catch (Exception e) {
                 LOG.warn("Failed to load earlier Claude history page: " + e.getMessage(), e);
                 synchronized (this.state.getMessageStateLock()) {
@@ -539,6 +554,15 @@ public class SessionMessageOrchestrator {
                 }
             }
         });
+    }
+
+    /** Called under the message-state lock so identity and transcript retire together. */
+    private void retireMissingHistory() {
+        this.state.setSessionId(null);
+        this.state.clearMessages();
+        this.state.setError(null);
+        this.callbackFacade.notifySessionIdReceived("");
+        this.callbackFacade.notifyMessageUpdate(this.state.getMessagesSnapshot());
     }
 
     private static JsonArray requireClaudeHistoryMessages(JsonObject page) {

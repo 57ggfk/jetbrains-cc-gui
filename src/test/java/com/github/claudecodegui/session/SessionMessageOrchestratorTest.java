@@ -191,6 +191,61 @@ public class SessionMessageOrchestratorTest {
         assertNull(state.getError());
     }
 
+    /**
+     * A missing transcript found by the paginated read must clear the session
+     * ID without a full-history fallback round-trip: the fallback would only
+     * raise the same exception again, and swallowing it left resumed sends
+     * failing with "No conversation found with session ID" on an empty chat.
+     */
+    @Test
+    public void paginatedHistoryMissingClearsSessionIdWithoutFullHistoryFallback() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("expired-session");
+        state.setCwd("/workspace");
+
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade callbackFacade = new SessionCallbackFacade(null);
+        callbackFacade.setCallback(callback);
+
+        SessionMessageOrchestrator.SessionHistoryAccess historyAccess =
+                new SessionMessageOrchestrator.SessionHistoryAccess() {
+            @Override
+            public List<JsonObject> getProviderSessionMessages(String provider, String sessionId, String cwd) {
+                fail("missing transcript must not fall back to the full-history read");
+                return List.of();
+            }
+
+            @Override
+            public JsonObject getLatestClaudeUserMessage(String sessionId, String cwd) {
+                return null;
+            }
+
+            @Override
+            public JsonObject getProviderSessionMessagesPage(String sessionId, String cwd, Integer beforeTurn, int limit) {
+                throw new SessionHistoryNotFoundException(sessionId, cwd);
+            }
+        };
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state,
+                new MessageParser(),
+                callbackFacade,
+                historyAccess,
+                (usedTokens, maxTokens) -> {
+                },
+                0,
+                0
+        );
+
+        orchestrator.loadFromServer().join();
+
+        assertNull(state.getSessionId());
+        assertTrue(state.getMessages().isEmpty());
+        assertFalse(state.isLoading());
+        assertNull(state.getError());
+        assertEquals(List.of(""), callback.sessionIds);
+    }
+
     @Test
     public void loadFromServerDoesNotEraseLiveMessagesWhenHistoryIsEmpty() {
         SessionState state = new SessionState();
@@ -2163,6 +2218,34 @@ public class SessionMessageOrchestratorTest {
         assertTrue(callback.claudeHistoryPageInfos.isEmpty());
     }
 
+    /** Retires a pruned transcript discovered while scrolling through its older turns. */
+    @Test
+    public void missingEarlierClaudeHistoryRetiresTheSessionWithoutAnotherRead() {
+        SessionState state = new SessionState();
+        state.setProvider("claude");
+        state.setSessionId("expired-session");
+        state.setCwd("/workspace");
+        RecordingCallback callback = new RecordingCallback();
+        SessionCallbackFacade facade = new SessionCallbackFacade(null);
+        facade.setCallback(callback);
+        RecordingHistoryAccess access = new RecordingHistoryAccess();
+        access.messagesPage = createHistoryPage(List.of(createProviderMessage("user", "recent question")),
+                2, 3, 3, true, false);
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+                state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
+        orchestrator.loadFromServer().join();
+        access.earlierFailure = new SessionHistoryNotFoundException("expired-session", "/workspace");
+
+        orchestrator.loadEarlierClaudeHistoryPage("expired-session", "/workspace", 2).join();
+
+        assertNull(state.getSessionId());
+        assertTrue(state.getMessages().isEmpty());
+        assertNull(state.getError());
+        assertEquals(List.of(""), callback.sessionIds);
+        assertEquals(1, callback.claudeHistoryPageErrors.size());
+        assertEquals(0, access.providerHistoryRequests.get());
+    }
+
     /** A late earlier-page response belongs to the session that requested it, not its replacement. */
     @Test
     public void earlierClaudePageCannotPrependIntoAReplacementSession() throws Exception {
@@ -2236,7 +2319,7 @@ public class SessionMessageOrchestratorTest {
     /** A retired earlier-page failure cannot clear a newer page's loading state or show an obsolete toast. */
     @Test
     public void earlierClaudeFailureCannotOutliveANewerHistoryCommit() throws Exception {
-        for (boolean throwsFailure : List.of(false, true)) {
+        for (String failure : List.of("response", "exception", "missing")) {
             SessionState state = new SessionState();
             state.setSessionId("session-obsolete-error");
             RecordingCallback callback = new RecordingCallback();
@@ -2250,7 +2333,11 @@ public class SessionMessageOrchestratorTest {
                     state, new MessageParser(), facade, access, (used, max) -> { }, 0, 0);
             orchestrator.loadFromServer().join();
             access.messagesPage = JsonParser.parseString("{\"success\":false,\"error\":\"obsolete failure\"}").getAsJsonObject();
-            access.earlierFailure = throwsFailure ? new IllegalStateException("obsolete failure") : null;
+            access.earlierFailure = switch (failure) {
+                case "exception" -> new IllegalStateException("obsolete failure");
+                case "missing" -> new SessionHistoryNotFoundException("session-obsolete-error", null);
+                default -> null;
+            };
             CountDownLatch readStarted = new CountDownLatch(1);
             CountDownLatch releaseRead = new CountDownLatch(1);
             access.earlierReadStarted = readStarted;
@@ -2268,6 +2355,8 @@ public class SessionMessageOrchestratorTest {
             assertEquals(2, callback.claudeHistoryPageInfos.size());
             assertTrue("the newer commit already retired the failed page", callback.claudeHistoryPageErrors.isEmpty());
             assertEquals("current answer", state.getMessages().get(0).content);
+            assertEquals("session-obsolete-error", state.getSessionId());
+            assertTrue(callback.sessionIds.isEmpty());
         }
     }
 
@@ -2595,6 +2684,7 @@ public class SessionMessageOrchestratorTest {
     }
 
     private static final class RecordingCallback implements ClaudeSession.SessionCallback {
+        private final List<String> sessionIds = new ArrayList<>();
         private final List<List<ClaudeSession.Message>> messageUpdates = new ArrayList<>();
         private final List<String> stateChanges = new ArrayList<>();
         private final List<String> messageUuidPatches = new ArrayList<>();
@@ -2634,6 +2724,7 @@ public class SessionMessageOrchestratorTest {
 
         @Override
         public void onSessionIdReceived(String sessionId) {
+            this.sessionIds.add(sessionId);
         }
 
         @Override
