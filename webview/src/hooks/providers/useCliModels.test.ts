@@ -39,9 +39,42 @@ describe('useCliModels', () => {
     expect(sendBridgeEventMock).toHaveBeenCalledWith('get_cli_models', 'grok');
   });
 
-  it('does not fetch for claude', () => {
+  it('fetches the settings.json model picker for claude', () => {
     renderHook(() => useCliModels('claude'));
-    expect(sendBridgeEventMock).not.toHaveBeenCalled();
+    expect(sendBridgeEventMock).toHaveBeenCalledWith('get_cli_models', 'claude');
+  });
+
+  it('accepts an empty Claude catalog without repeatedly fetching it', () => {
+    const { result } = renderHook(() => useCliModels('claude'));
+    emitCliModels({ success: true, provider: 'claude', models: [], replaceBuiltInOptions: true });
+    expect(result.current.cliModelsReplaceBuiltIns).toBe(true);
+    expect(result.current.cliModels).toEqual([]);
+    expect(result.current.cliModelsLoading).toBe(false);
+    expect(sendBridgeEventMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates Claude routes and replacement mode when the active provider changes', () => {
+    const { result } = renderHook(() => useCliModels('claude'));
+    emitCliModels({ success: true, provider: 'claude', models: [{ id: 'ccs-claude-a--glm-5.3', label: 'GLM（A）' }], replaceBuiltInOptions: true });
+    expect(result.current.cliModelsReplaceBuiltIns).toBe(true);
+    act(() => window.updateActiveProvider?.('{}'));
+    expect(result.current.cliModels).toEqual([]);
+    expect(result.current.cliModelsReplaceBuiltIns).toBe(false);
+    expect(sendBridgeEventMock).toHaveBeenCalledTimes(2);
+    emitCliModels({ success: true, provider: 'claude', models: [] });
+    expect(result.current.cliModelsReplaceBuiltIns).toBe(false);
+  });
+
+  it('reloads a local Claude picker when returning from cc-switch to the IDE', () => {
+    const { result } = renderHook(() => useCliModels('claude'));
+    emitCliModels({ success: true, provider: 'claude', models: [{ id: 'ccs-claude-a--glm', label: 'GLM（A）' }], replaceBuiltInOptions: true });
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(sendBridgeEventMock).toHaveBeenCalledTimes(2);
+    expect(result.current.cliModelsLoading).toBe(true);
+    emitCliModels({ success: true, provider: 'claude', models: [] });
+    expect(result.current.cliModelsLoaded).toBe(true);
+    expect(result.current.cliModelsReplaceBuiltIns).toBe(false);
+    expect(result.current.cliModels).toEqual([]);
   });
 
   it('falls back to the static CODEX_MODELS list before the catalog arrives', () => {

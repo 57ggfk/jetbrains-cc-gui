@@ -54,7 +54,7 @@ const AiFeatureProviderModelPanel = ({
   ) as AiFeatureConfig['availability'];
 
   // Same catalog source as main chat ModelSelect (useCliModels + resolveProviderModels).
-  const { cliModels, cliCatalogHasEntries } = useCliModels(selectedProvider);
+  const { cliModels, cliCatalogHasEntries, cliModelsReplaceBuiltIns } = useCliModels(selectedProvider);
 
   // Shared resolver with chat toolbar — Prompt Enhancer and Commit AI both mount
   // this panel so they stay identical by construction.
@@ -79,8 +79,9 @@ const AiFeatureProviderModelPanel = ({
       claudeCustomModels: claudeCustomModels.map(toModelInfo),
       codexCustomModels: codexCustomModels.map(toModelInfo),
       claudeMapping,
+      claudeReplaceBuiltInOptions: cliModelsReplaceBuiltIns,
     });
-  }, [selectedProvider, claudeCustomModels, codexCustomModels, cliModels, cliCatalogHasEntries]);
+  }, [selectedProvider, claudeCustomModels, codexCustomModels, cliModels, cliCatalogHasEntries, cliModelsReplaceBuiltIns]);
 
   const currentModel = config.models?.[selectedProvider] ?? '';
   const currentModelInList = availableModels.some((m) => m.id === currentModel);
