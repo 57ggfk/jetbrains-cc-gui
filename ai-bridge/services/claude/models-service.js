@@ -34,6 +34,7 @@ export function parseClaudeModelPicker(settings) {
       seen.add(id);
       models.push({
         id,
+        supports1MContext: /\[1m\]$/i.test(option.model.trim()),
         label: typeof option.label === 'string' && option.label.trim() ? option.label.trim() : id,
         ...(typeof option.description === 'string' ? { description: option.description } : {}),
       });

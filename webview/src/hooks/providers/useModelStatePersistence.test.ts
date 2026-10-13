@@ -108,7 +108,7 @@ describe('useModelStatePersistence — boot sync does not clobber the persisted 
     expect(bridgeEventsFor('set_codex_fast_mode')).toHaveLength(1);
   });
 
-  it('restores a cc-switch route before the dynamic model picker has loaded', () => {
+  it('restores a cc-switch route without assuming 1M before the picker has loaded', () => {
     localStorage.setItem('model-selection-state', JSON.stringify({
       provider: 'claude', claudeModel: 'ccs-claude-provider-b--glm-5.3[1M]', longContextEnabled: true,
     }));
@@ -116,7 +116,8 @@ describe('useModelStatePersistence — boot sync does not clobber the persisted 
     renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
     expect(setSelectedClaudeModel).toHaveBeenCalledWith('ccs-claude-provider-b--glm-5.3');
     vi.advanceTimersByTime(200);
-    expect(bridgeEventsFor('set_model')[0]).toContain('ccs-claude-provider-b--glm-5.3[1m]');
+    expect(bridgeEventsFor('set_model')[0]).toContain('ccs-claude-provider-b--glm-5.3');
+    expect(bridgeEventsFor('set_model')[0]).not.toContain('ccs-claude-provider-b--glm-5.3[1m]');
   });
 
   it('migrates a legacy autoEdit mode to acceptEdits during restore', () => {

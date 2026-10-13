@@ -43,7 +43,7 @@ test('reads cc-switch routes, labels, descriptions and the configured default', 
   });
   assert.equal(result.replaceBuiltInOptions, true);
   assert.equal(result.defaultModel, 'ccs-claude-provider-b--glm-5.3');
-  assert.deepEqual(result.models[0], { id: 'ccs-claude-provider-a--grok-4.7', label: 'grok-4.7（供应商 A）', description: 'grok-4.7 · 1M' });
+  assert.deepEqual(result.models[0], { id: 'ccs-claude-provider-a--grok-4.7', label: 'grok-4.7（供应商 A）', description: 'grok-4.7 · 1M', supports1MContext: true });
   assert.equal(result.models.length, 3);
   assert.ok(!JSON.stringify(result).includes('secret'));
 });
@@ -56,8 +56,8 @@ test('keeps different provider routes for the same upstream, dedupes context var
     { model: 'ccs-claude-b--opus', label: '' },
   ] } });
   assert.deepEqual(result.models, [
-    { id: 'ccs-claude-a--opus', label: 'A' },
-    { id: 'ccs-claude-b--opus', label: 'ccs-claude-b--opus' },
+    { id: 'ccs-claude-a--opus', label: 'A', supports1MContext: true },
+    { id: 'ccs-claude-b--opus', label: 'ccs-claude-b--opus', supports1MContext: false },
   ]);
   assert.equal(result.replaceBuiltInOptions, false);
 });
@@ -68,4 +68,14 @@ test('missing or malformed picker keeps built-ins; explicit empty replacement is
   }
   assert.deepEqual(parseClaudeModelPicker({ modelPicker: { replaceBuiltInOptions: true, options: [] } }),
     { models: [], replaceBuiltInOptions: true, defaultModel: null });
+});
+
+test('preserves explicit context capability independently of model and provider names', () => {
+  const models = parseClaudeModelPicker({ modelPicker: { options: [
+    { model: 'ccs-claude-a--glm-flash' },
+    { model: 'ccs-claude-haiku-provider--glm-pro[1m]' },
+    { model: 'ccs-claude-b--gemini[1M]' },
+  ] } }).models;
+  assert.deepEqual(models.map(m => m.supports1MContext), [false, true, true]);
+  assert.ok(models.every(m => !/\[1m\]$/i.test(m.id)));
 });

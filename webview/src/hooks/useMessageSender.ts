@@ -358,13 +358,18 @@ export function useMessageSender({
           },
         } : {}),
       });
+      // Catalog refreshes can change a route's capability without changing its id.
+      // Re-sync at send time so restored or queued messages cannot use stale 1M state.
+      if (currentProvider === 'claude' && selectedModel.startsWith('ccs-claude-')) {
+        if (!sendBridgeEvent('set_model', apply1MContextSuffix(selectedModel, longContextEnabled ?? false))) return false;
+      }
       return sendBridgeEvent(hasAttachments ? 'send_message_with_attachments' : 'send_message', payload);
     } catch {
       // Losing attachments changes the user's task; never retry it as text-only work.
       return false;
     }
   }, [codexApprovalPreset, codexCollaborationMode, codexFastMode, codexNativeAutoReviewAvailable,
-    codexSandboxSelection, currentProvider, dshPreset, selectedModel, reasoningEffort]);
+    codexSandboxSelection, currentProvider, dshPreset, selectedModel, reasoningEffort, longContextEnabled]);
 
   /**
    * Execute message sending (from queue or directly)

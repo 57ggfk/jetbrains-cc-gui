@@ -43,3 +43,20 @@ describe('writeClaudeModelMapping', () => {
     window.removeEventListener('localStorageChange', listener as EventListener);
   });
 });
+
+describe('main and role label precedence', () => {
+  it.each(['haiku', 'sonnet', 'opus', 'fable'])('keeps %s display names scoped to populated role slots', role => {
+    expect(resolveClaudeModelMappingLabel(role, { main: ' global ', [role + 'Name']: 'Alias' })).toBe('global');
+    expect(resolveClaudeModelMappingLabel(role, { main: 'global', [role]: ' ', [role + 'Name']: 'Alias' })).toBe('global');
+    expect(resolveClaudeModelMappingLabel(role, { [role + 'Name']: 'Alias' })).toBeUndefined();
+    expect(resolveClaudeModelMappingLabel(role, { main: 'global', [role]: ' target ', [role + 'Name']: ' Alias ' })).toBe('Alias');
+    expect(resolveClaudeModelMappingLabel(role, { main: 'global', [role]: ' target ', [role + 'Name']: ' ' })).toBe('target');
+  });
+  it('falls back to main for an unknown role and preserves the original entry without a mapping', () => {
+    expect(resolveClaudeModelMappingLabel(undefined, { main: ' global ', opusName: 'Alias' })).toBe('global');
+    expect(resolveClaudeModelMappingLabel('sonnet', { main: ' ' })).toBeUndefined();
+    const original = { id: 'claude-sonnet-5', label: 'Sonnet' };
+    expect(applyClaudeModelMapping(original, { sonnetName: 'orphan' })).toEqual(original);
+    expect(applyClaudeModelMapping(original, { main: 'global', sonnetName: 'orphan' })).toEqual({ ...original, label: 'global' });
+  });
+});

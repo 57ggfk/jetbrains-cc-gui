@@ -1,3 +1,4 @@
+import { updateClaudeModelCapabilities } from '../utils/claudeModelCapabilities';
 import { act, renderHook } from '@testing-library/react';
 import { useMessageSender } from './useMessageSender';
 import type { UseMessageSenderOptions } from './useMessageSender';
@@ -48,8 +49,26 @@ describe('useMessageSender - /context command', () => {
   };
 
   beforeEach(() => {
+    updateClaudeModelCapabilities([]);
     localStorage.clear();
     window.sendToJava = vi.fn();
+  });
+
+  it.each([false, true])('rechecks route capability before sending (attachments: %s)', attachments => {
+    const id = 'ccs-claude-haiku-provider--glm-flash';
+    const { result } = renderHook(() => useMessageSender(createOptions({ selectedModel: id, longContextEnabled: true })));
+    for (const supports1MContext of [true, false]) {
+      window.sendToJava = vi.fn();
+      updateClaudeModelCapabilities([{ id, supports1MContext }]);
+      act(() => result.current.handleSubmit('hello', attachments
+        ? [{ id: 'a', fileName: 'a.txt', mediaType: 'text/plain', data: 'aGk=' }] : undefined));
+      const calls = vi.mocked(window.sendToJava!).mock.calls.map(([message]) => message);
+      const modelCall = calls.findIndex(message => message.startsWith('set_model:'));
+      const sendCall = calls.findIndex(message => message.startsWith('send_message'));
+      expect(calls[modelCall]).toBe('set_model:' + id + (supports1MContext ? '[1m]' : ''));
+      expect(sendCall).toBeGreaterThan(modelCall);
+    }
+    updateClaudeModelCapabilities([]);
   });
 
   it.each(['xhigh', 'max'] as const)('forwards %s in aggregate, route and direct modes', (effort) => {

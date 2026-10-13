@@ -106,6 +106,9 @@ export const resolveModelIdForIcon = (
   modelMapping: Record<string, string | undefined>,
   mappingKeyMap: Record<string, string> = MODEL_ID_TO_MAPPING_KEY,
 ): string => {
+  // Match the upstream model, never the gateway's provider key or transport prefix.
+  const route = /^ccs-claude-.+?--(.+)$/i.exec(modelId);
+  if (route) return route[1].replace(/\[1m\]$/i, '');
   const mappingKey = mappingKeyMap[modelId];
   if (!mappingKey) {
     return modelId;

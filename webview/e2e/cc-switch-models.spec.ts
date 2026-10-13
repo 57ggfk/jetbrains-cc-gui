@@ -1,6 +1,34 @@
 import { expect, test } from '@playwright/test';
 import { APP_VERSION } from '../src/version/version';
-import { parseClaudeModelMapping, parseClaudeModelPicker } from '../../ai-bridge/services/claude/models-service.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const bridgeDir = process.env.CCGUI_E2E_BRIDGE_DIR
+  ?? fileURLToPath(new URL('../../ai-bridge/', import.meta.url));
+
+// Run the same entry point Java invokes, including its dependency imports and
+// disk settings loader. A mocked parser result cannot catch a broken bridge ZIP.
+function readCatalog(settings: unknown) {
+  const homeDir = mkdtempSync(join(tmpdir(), 'cc-switch-e2e-'));
+  try {
+    mkdirSync(join(homeDir, '.claude'));
+    mkdirSync(join(homeDir, '.codemoss'));
+    writeFileSync(join(homeDir, '.claude', 'settings.json'), JSON.stringify(settings));
+    writeFileSync(join(homeDir, '.codemoss', 'config.json'), JSON.stringify({
+      claude: { current: '__local_settings_json__', providers: {} },
+    }));
+    const output = execFileSync(process.execPath, ['channel-manager.js', 'claude', 'listModels'], {
+      cwd: bridgeDir, encoding: 'utf8', timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, CLAUDE_USE_STDIN: 'false' },
+    });
+    return JSON.parse(output.trim().split('\n').at(-1));
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+}
 
 const route = 'ccs-claude-provider-a--glm-pro';
 const fixtures = [
@@ -36,11 +64,8 @@ for (const fixture of fixtures) {
   test(`${fixture.mode}: reads configured names and sends xhigh/max`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    const catalog = {
-      provider: 'claude', success: true,
-      ...parseClaudeModelPicker(fixture.settings),
-      modelMapping: parseClaudeModelMapping(fixture.settings),
-    };
+    const catalog = readCatalog(fixture.settings);
+    expect(catalog.success).toBe(true);
     await page.addInitScript(({ appVersion, selectedModel, catalog }) => {
       localStorage.setItem('language', 'en');
       localStorage.setItem('lastSeenChangelogVersion', appVersion);
