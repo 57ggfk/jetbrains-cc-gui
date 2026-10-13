@@ -1,5 +1,6 @@
 import { AVAILABLE_MODELS, modelSupports1MContext } from './types';
 import type { ModelInfo } from './types';
+import { resolveClaudeModelMappingLabel } from '../../utils/claudeModelMapping';
 
 type Translate = (key: string, options?: { defaultValue?: string } & Record<string, unknown>) => string;
 
@@ -161,7 +162,7 @@ export function resolveModelDisplayLabel(
 
   const mappingKey = MODEL_ID_TO_MAPPING_KEY[model.id];
   if (mappingKey) {
-    const mappedName = resolveMappedModelName(mappingKey, modelMapping);
+    const mappedName = resolveClaudeModelMappingLabel(mappingKey, modelMapping);
     if (mappedName) {
       return append1MContextSuffix(
         mappedName,

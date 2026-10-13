@@ -1,6 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseClaudeModelPicker } from './models-service.js';
+import { parseClaudeModelPicker, parseClaudeModelMapping } from './models-service.js';
+
+test('route mode reads display names separately from client-side model aliases without a picker', () => {
+  const settings = { env: {
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5[1M]', ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: 'GLM Flash',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5[1M]', ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: 'GLM Pro',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: 'claude-fable-5[1M]', ANTHROPIC_DEFAULT_FABLE_MODEL_NAME: 'GLM Pro',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5', ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: 'GLM Flash',
+    ANTHROPIC_AUTH_TOKEN: 'secret', ANTHROPIC_BASE_URL: 'http://example.test',
+  } };
+  assert.deepEqual(parseClaudeModelPicker(settings).models, []);
+  assert.deepEqual(parseClaudeModelMapping(settings), {
+    sonnet: 'claude-sonnet-5[1M]', sonnetName: 'GLM Flash',
+    opus: 'claude-opus-5[1M]', opusName: 'GLM Pro',
+    fable: 'claude-fable-5[1M]', fableName: 'GLM Pro',
+    haiku: 'claude-haiku-4-5', haikuName: 'GLM Flash',
+  });
+});
+
+test('direct mode reads upstream ids and optional names; missing settings clear the mapping', () => {
+  assert.deepEqual(parseClaudeModelMapping({ env: {
+    ANTHROPIC_MODEL: ' glm-pro ', ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-flash',
+    ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: ' Fast model ',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 123, ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: ' ',
+  } }), { main: 'glm-pro', sonnet: 'glm-flash', sonnetName: 'Fast model' });
+  assert.deepEqual(parseClaudeModelMapping(null), {});
+  assert.deepEqual(parseClaudeModelMapping({ env: {} }), {});
+});
 
 test('reads cc-switch routes, labels, descriptions and the configured default', () => {
   const result = parseClaudeModelPicker({

@@ -10,6 +10,16 @@ import {
 
 // --- resolveSdkModelName --------------------------------------------------
 
+test('route and direct requests use model ids, never their display names', () => {
+  for (const id of ['claude-sonnet-5[1M]', 'glm-flash[1M]']) {
+    const env = { ANTHROPIC_DEFAULT_SONNET_MODEL: id, ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: 'Display name only' };
+    const resolved = resolveModelFromSettings('claude-sonnet-5[1m]', env);
+    assert.equal(resolved, id.replace(/\[1m\]$/i, '[1m]'));
+    assert.equal(resolveSdkModelName('claude-sonnet-5[1m]', resolved), resolved);
+    assert.notEqual(resolved, env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME);
+  }
+});
+
 test('cc-switch routes bypass family mappings and reach the SDK verbatim', () => {
   const env = {
     ANTHROPIC_MODEL: 'ccs-claude-default--glm-5.3',

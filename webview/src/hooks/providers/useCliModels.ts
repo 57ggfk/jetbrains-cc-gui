@@ -15,6 +15,7 @@ import {
 } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
 import { subscribeActiveCodexProvider, subscribeActiveProvider } from '../../utils/runtimeProviderCapabilities';
+import { type ClaudeModelMapping, writeClaudeModelMapping } from '../../utils/claudeModelMapping';
 
 type CliModelsByProvider = Record<string, ModelInfo[]>;
 
@@ -155,8 +156,8 @@ export function useCliModels(currentProvider: string) {
   }, [clearPendingLoad]);
 
   useEffect(() => {
-    const handler = (dataOrStr: string | { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown }) => {
-      let payload: { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown } | null = null;
+    const handler = (dataOrStr: string | { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown; modelMapping?: unknown }) => {
+      let payload: { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown; modelMapping?: unknown } | null = null;
       if (typeof dataOrStr === 'string') {
         try {
           payload = JSON.parse(dataOrStr);
@@ -168,6 +169,19 @@ export function useCliModels(currentProvider: string) {
       }
       if (!payload?.provider) return;
       const provider = payload.provider;
+      if (provider === 'claude' && payload.success !== false
+        && payload.modelMapping && typeof payload.modelMapping === 'object' && !Array.isArray(payload.modelMapping)) {
+        const mapping: ClaudeModelMapping = {};
+        const rawMapping = payload.modelMapping as Record<string, unknown>;
+        for (const key of ['main', 'fable', 'haiku', 'sonnet', 'opus', 'fableName', 'haikuName', 'sonnetName', 'opusName']) {
+          if (typeof rawMapping[key] === 'string' && (rawMapping[key] as string).trim()) {
+            mapping[key] = (rawMapping[key] as string).trim();
+          }
+        }
+        // Refresh even without modelPicker: route/direct mode changes update
+        // settings.env and must replace the previous aggregation mapping.
+        writeClaudeModelMapping(mapping);
+      }
       const models = normalizeModels(payload.models);
       const replaceBuiltIns = provider === 'claude' && payload.success !== false && payload.replaceBuiltInOptions === true;
       replaceBuiltInsCache[provider] = replaceBuiltIns;

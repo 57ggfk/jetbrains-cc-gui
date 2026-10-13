@@ -57,4 +57,26 @@ describe('cc-switch aggregation in the chat toolbar', () => {
     emit({ success: false, provider: 'claude', models: [], error: 'Bridge unavailable' });
     expect(onModelSelect).not.toHaveBeenCalled();
   });
+
+  it('refreshes model names across aggregation, route and direct modes without remounting', () => {
+    render(<ButtonArea currentProvider="claude" selectedModel={models[0].id} onModelSelect={vi.fn()} />);
+    emitPicker();
+    expect(screen.getByTestId('models').textContent).toContain('供应商 A');
+    act(() => window.dispatchEvent(new Event('focus')));
+    emit({ success: true, provider: 'claude', models: [], modelMapping: {
+      sonnet: 'claude-sonnet-5[1M]', sonnetName: 'GLM Flash',
+      opus: 'claude-opus-5[1M]', opusName: 'GLM Pro',
+      fable: 'claude-fable-5[1M]', fableName: 'Fable Pro',
+      haiku: 'claude-haiku-4-5', haikuName: 'Fast Model',
+    } });
+    expect(screen.getByTestId('models').textContent).toContain('GLM Flash');
+    expect(screen.getByTestId('models').textContent).toContain('GLM Pro');
+    expect(screen.getByTestId('models').textContent).toContain('Fable Pro');
+    expect(screen.getByTestId('models').textContent).toContain('Fast Model');
+    expect(screen.getByTestId('models').textContent).not.toContain('ccs-claude-');
+    act(() => window.dispatchEvent(new Event('focus')));
+    emit({ success: true, provider: 'claude', models: [], modelMapping: { sonnet: 'direct-flash', opus: 'direct-pro', fable: 'direct-fable', haiku: 'direct-fast' } });
+    expect(screen.getByTestId('models').textContent).toContain('direct-flash');
+    expect(screen.getByTestId('models').textContent).not.toContain('GLM Flash');
+  });
 });

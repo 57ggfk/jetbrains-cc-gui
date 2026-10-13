@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { __resetCliModelsCacheForTests, useCliModels, useOmpRoles } from './useCliModels';
 import { CODEX_MODELS, KIMI_MODELS, OMP_ROLE_MODELS } from '../../components/ChatInputBox/types';
 import { installRuntimeProviderDispatchers } from '../../utils/runtimeProviderCapabilities';
+import { readClaudeModelMapping, writeClaudeModelMapping } from '../../utils/claudeModelMapping';
 
 const sendBridgeEventMock = vi.hoisted(() => vi.fn());
 
@@ -18,6 +19,7 @@ function emitCliModels(payload: unknown) {
 
 describe('useCliModels', () => {
   beforeEach(() => {
+    localStorage.clear();
     sendBridgeEventMock.mockClear();
     __resetCliModelsCacheForTests();
     installRuntimeProviderDispatchers();
@@ -42,6 +44,27 @@ describe('useCliModels', () => {
   it('fetches the settings.json model picker for claude', () => {
     renderHook(() => useCliModels('claude'));
     expect(sendBridgeEventMock).toHaveBeenCalledWith('get_cli_models', 'claude');
+  });
+
+  it('replaces old aggregation mappings with fresh route and direct mappings even without picker entries', () => {
+    writeClaudeModelMapping({ sonnet: 'ccs-claude-provider-a--glm-pro', opus: 'ccs-claude-provider-a--glm-pro' });
+    renderHook(() => useCliModels('claude'));
+    emitCliModels({ success: true, provider: 'claude', models: [], modelMapping: { sonnet: 'claude-sonnet-5', sonnetName: 'GLM Flash', fable: 'claude-fable-5', fableName: 'GLM Pro' } });
+    expect(readClaudeModelMapping()).toEqual({ sonnet: 'claude-sonnet-5', sonnetName: 'GLM Flash', fable: 'claude-fable-5', fableName: 'GLM Pro' });
+    act(() => window.dispatchEvent(new Event('focus')));
+    emitCliModels({ success: true, provider: 'claude', models: [], modelMapping: { sonnet: 'glm-flash', opus: 'glm-pro' } });
+    expect(readClaudeModelMapping()).toEqual({ sonnet: 'glm-flash', opus: 'glm-pro' });
+    emitCliModels({ success: true, provider: 'claude', models: [], modelMapping: {} });
+    expect(readClaudeModelMapping()).toEqual({});
+  });
+
+  it('keeps the last mapping on failed loads and drops unrecognized bridge fields', () => {
+    writeClaudeModelMapping({ sonnet: 'glm-flash' });
+    renderHook(() => useCliModels('claude'));
+    emitCliModels({ success: false, provider: 'claude', models: [], modelMapping: {} });
+    expect(readClaudeModelMapping()).toEqual({ sonnet: 'glm-flash' });
+    emitCliModels({ success: true, provider: 'claude', models: [], modelMapping: { sonnet: 'new-flash', secret: 'do not store', opus: 123 } });
+    expect(readClaudeModelMapping()).toEqual({ sonnet: 'new-flash' });
   });
 
   it('accepts an empty Claude catalog without repeatedly fetching it', () => {
