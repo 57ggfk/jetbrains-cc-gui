@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -31,6 +32,8 @@ public class CodexHistoryReader {
     private final CodexHistoryParser parser;
     private final CodexHistoryIndexService indexService;
     private final CodexHistorySessionService sessionService;
+    private final ThreadLocal<String> privacyThread = new ThreadLocal<>();
+    private final ThreadLocal<Consumer<ByteBuffer>> sourceBytesObserver = new ThreadLocal<>();
 
     private static Path defaultSessionsDir() {
         return Paths.get(NodeDetector.resolveHomeForFileOps(), ".codex", "sessions");
@@ -195,7 +198,14 @@ public class CodexHistoryReader {
 
     public String getSessionMessagesAsJson(String sessionId) {
         logSessionAccessWithoutLocalConfigAuthorization();
-        return sessionService.getSessionMessagesAsJson(sessionId);
+        CodexHistoryPrivacy privacy = new CodexHistoryPrivacy(sessionId);
+        com.google.gson.JsonArray source = this.gson.fromJson(
+                this.sessionService.getSessionMessagesAsJson(sessionId), com.google.gson.JsonArray.class);
+        com.google.gson.JsonArray result = new com.google.gson.JsonArray();
+        for (var entry : source) {
+            result.add(entry.isJsonObject() ? privacy.protect(entry.getAsJsonObject()) : entry);
+        }
+        return this.gson.toJson(result);
     }
 
     /**
@@ -205,9 +215,10 @@ public class CodexHistoryReader {
      */
     public int forEachSessionMessage(String sessionId, Consumer<JsonObject> consumer) throws IOException {
         logSessionAccessWithoutLocalConfigAuthorization();
-        return sessionService.forEachSessionMessage(sessionId, message -> {
-            JsonObject raw = gson.toJsonTree(message).getAsJsonObject();
-            consumer.accept(raw);
+        CodexHistoryPrivacy privacy = new CodexHistoryPrivacy(sessionId);
+        return this.sessionService.forEachSessionMessage(sessionId, message -> {
+            JsonObject raw = this.gson.toJsonTree(message).getAsJsonObject();
+            consumer.accept(privacy.protect(raw));
         });
     }
 
@@ -219,11 +230,58 @@ public class CodexHistoryReader {
         return file.toRealPath();
     }
 
+    /** Streams a bounded byte range while keeping rendered records behind the history privacy filter. */
     public int forEachSessionMessage(Path file, long offset, long end,
                                      java.util.function.BooleanSupplier active,
                                      Consumer<JsonObject> consumer) throws IOException {
-        return sessionService.forEachSessionMessage(file, offset, end, active,
-                message -> consumer.accept(gson.toJsonTree(message).getAsJsonObject()));
+        CodexHistoryPrivacy privacy = new CodexHistoryPrivacy(this.privacyThread.get());
+        Consumer<ByteBuffer> observer = this.sourceBytesObserver.get();
+        // Nested reads started by a record consumer must not feed this read's fingerprint.
+        this.sourceBytesObserver.remove();
+        try {
+            return this.sessionService.forEachSessionMessage(file, offset, end, active, observer,
+                    message -> consumer.accept(privacy.protect(this.gson.toJsonTree(message).getAsJsonObject())));
+        } finally {
+            if (observer != null) {
+                this.sourceBytesObserver.set(observer);
+            }
+        }
+    }
+
+    /** Keeps thread identity available while the existing bounded file-reader extension point runs. */
+    public int forEachSessionMessage(String sessionId, Path file, long offset, long end,
+                                     java.util.function.BooleanSupplier active, Consumer<JsonObject> consumer) throws IOException {
+        String previous = this.privacyThread.get();
+        this.privacyThread.set(sessionId);
+        try {
+            return this.forEachSessionMessage(file, offset, end, active, consumer);
+        } finally {
+            if (previous == null) {
+                this.privacyThread.remove();
+            } else {
+                this.privacyThread.set(previous);
+            }
+        }
+    }
+
+    /**
+     * Observes the bytes used for parsing without bypassing the bounded reader or privacy context.
+     * The observer must consume each read-only buffer before returning because its storage is reused.
+     */
+    public int forEachSessionMessage(String sessionId, Path file, long offset, long end,
+                                     java.util.function.BooleanSupplier active, Consumer<JsonObject> consumer,
+                                     Consumer<ByteBuffer> sourceBytesObserver) throws IOException {
+        Consumer<ByteBuffer> previous = this.sourceBytesObserver.get();
+        this.sourceBytesObserver.set(sourceBytesObserver);
+        try {
+            return this.forEachSessionMessage(sessionId, file, offset, end, active, consumer);
+        } finally {
+            if (previous == null) {
+                this.sourceBytesObserver.remove();
+            } else {
+                this.sourceBytesObserver.set(previous);
+            }
+        }
     }
 
     /**
