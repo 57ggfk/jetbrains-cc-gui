@@ -192,6 +192,15 @@ describe('useMessageSender - /context command', () => {
     expect(payload.reasoningEffort).toBe('high');
   });
 
+  it.each([false, true])('forwards cc-switch reasoning effort with attachments=%s', (withAttachment) => {
+    const { result } = renderHook(() => useMessageSender(createOptions({
+      selectedModel: 'ccs-claude-provider-a--glm-pro', reasoningEffort: 'low',
+    })));
+    act(() => result.current.handleSubmit('hello', withAttachment
+      ? [{ id: 'att-1', fileName: 'note.txt', mediaType: 'text/plain', data: 'aGVsbG8=' }] : undefined));
+    expect(getBridgePayload(withAttachment ? 'send_message_with_attachments' : 'send_message').reasoningEffort).toBe('low');
+  });
+
   it('includes explicit Claude high reasoning effort in attachment message payload', () => {
     const opts = createOptions({
       currentProvider: 'claude',

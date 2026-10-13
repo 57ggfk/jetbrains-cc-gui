@@ -9,6 +9,14 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('ReasoningSelect', () => {
+  it('shows and selects effort for a cc-switch aggregate route', () => {
+    const onChange = vi.fn();
+    render(<ReasoningSelect value="high" onChange={onChange} currentProvider="claude" selectedModel="ccs-claude-provider-a--glm-pro[1M]" />);
+    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByText('Low'));
+    expect(onChange).toHaveBeenCalledWith('low');
+    expect(screen.queryByText('Max')).toBeNull();
+  });
   it('shows and selects max for Codex', () => {
     const onChange = vi.fn();
 

@@ -4,9 +4,9 @@ import { sendBridgeEvent } from '../utils/bridge';
 import { markPendingStreamStart } from '../utils/streamLifecycle';
 import type { ClaudeContentBlock, ClaudeMessage } from '../types';
 import {
-  EFFORT_SUPPORTED_CLAUDE_MODELS,
   apply1MContextSuffix,
 } from '../components/ChatInputBox/types';
+import { claudeModelAllowsEffort } from '../components/ChatInputBox/reasoningUtils';
 import type { Attachment, ChatInputBoxHandle, PermissionMode, ReasoningEffort, SelectedAgent, CodexFastMode } from '../components/ChatInputBox/types';
 import { expandQuoteTokens } from '../components/ChatInputBox/utils/quoteRegistry';
 import type { ViewMode } from './useModelProviderState';
@@ -33,7 +33,7 @@ function shouldSendReasoningEffort(provider: string, model: string): boolean {
   if (provider !== 'claude') {
     return true;
   }
-  return EFFORT_SUPPORTED_CLAUDE_MODELS.has(model);
+  return claudeModelAllowsEffort(model);
 }
 
 export interface UseMessageSenderOptions {

@@ -5,18 +5,40 @@ import {
   REASONING_LEVELS,
   XHIGH_EFFORT_CLAUDE_MODELS,
   codexModelSupportsMaxEffort,
+  strip1MContextSuffix,
   type ReasoningEffort,
   type ReasoningInfo,
 } from './types';
 
+function resolveClaudeEffortModel(selectedModel?: string): { id: string; gateway: boolean } {
+  const id = strip1MContextSuffix(selectedModel?.trim()).toLowerCase();
+  const prefix = 'ccs-claude-';
+  if (id.startsWith(prefix)) {
+    const separator = id.indexOf('--', prefix.length);
+    if (separator > prefix.length && separator + 2 < id.length) {
+      // Decode only for capability checks; the request keeps the full route id.
+      return { id: id.slice(separator + 2), gateway: true };
+    }
+  }
+  return { id, gateway: false };
+}
+
+export function claudeModelAllowsEffort(selectedModel?: string): boolean {
+  const { id, gateway } = resolveClaudeEffortModel(selectedModel);
+  // Gateway models lack capability metadata. Allow basic effort forwarding;
+  // known Claude models retain their existing capability restrictions.
+  return EFFORT_SUPPORTED_CLAUDE_MODELS.has(id) || (gateway && !id.startsWith('claude-'));
+}
+
 export function isReasoningVisible(currentProvider?: string, selectedModel?: string): boolean {
-  return currentProvider !== 'claude' || !selectedModel || EFFORT_SUPPORTED_CLAUDE_MODELS.has(selectedModel);
+  return currentProvider !== 'claude' || !selectedModel || claudeModelAllowsEffort(selectedModel);
 }
 
 export function getAvailableReasoningLevels(
   currentProvider?: string,
   selectedModel?: string,
 ): ReasoningInfo[] {
+  const claudeModel = resolveClaudeEffortModel(selectedModel).id;
   return REASONING_LEVELS.filter((level) => {
     if (currentProvider === 'grok') {
       return level.id === 'low' || level.id === 'medium' || level.id === 'high' || level.id === 'xhigh';
@@ -31,10 +53,10 @@ export function getAvailableReasoningLevels(
       return true;
     }
     if (level.id === 'xhigh') {
-      return XHIGH_EFFORT_CLAUDE_MODELS.has(selectedModel);
+      return XHIGH_EFFORT_CLAUDE_MODELS.has(claudeModel);
     }
     if (level.id === 'max') {
-      return MAX_EFFORT_CLAUDE_MODELS.has(selectedModel);
+      return MAX_EFFORT_CLAUDE_MODELS.has(claudeModel);
     }
     return true;
   });
@@ -45,6 +67,7 @@ export function resolveCurrentReasoningLevel(
   availableLevels: ReasoningInfo[],
 ): ReasoningInfo | undefined {
   return availableLevels.find((level) => level.id === value)
+    || availableLevels.find((level) => level.id === 'high')
     || availableLevels[availableLevels.length - 2]
     || availableLevels[0];
 }
