@@ -1,4 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
+import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
+import { MODEL_ID_TO_MAPPING_KEY } from './modelLabelUtils';
 import {
   EFFORT_SUPPORTED_CLAUDE_MODELS,
   MAX_EFFORT_CLAUDE_MODELS,
@@ -23,11 +25,17 @@ function resolveClaudeEffortModel(selectedModel?: string): { id: string; gateway
   return { id, gateway: false };
 }
 
+function hasConfiguredClaudeMapping(selectedModel?: string): boolean {
+  const mapping = readClaudeModelMapping();
+  const key = MODEL_ID_TO_MAPPING_KEY[strip1MContextSuffix(selectedModel?.trim()).toLowerCase()];
+  return !!((key && mapping[key]?.trim()) || mapping.main?.trim());
+}
+
 export function claudeModelAllowsEffort(selectedModel?: string): boolean {
   const { id, gateway } = resolveClaudeEffortModel(selectedModel);
-  // Gateway models lack capability metadata. Allow basic effort forwarding;
-  // known Claude models retain their existing capability restrictions.
-  return EFFORT_SUPPORTED_CLAUDE_MODELS.has(id) || (gateway && !id.startsWith('claude-'));
+  // cc-switch routes and configured mappings are user-controlled. Forward the
+  // selected effort rather than infer capabilities from a client-side alias.
+  return gateway || hasConfiguredClaudeMapping(selectedModel) || EFFORT_SUPPORTED_CLAUDE_MODELS.has(id);
 }
 
 export function isReasoningVisible(currentProvider?: string, selectedModel?: string): boolean {
@@ -38,7 +46,8 @@ export function getAvailableReasoningLevels(
   currentProvider?: string,
   selectedModel?: string,
 ): ReasoningInfo[] {
-  const claudeModel = resolveClaudeEffortModel(selectedModel).id;
+  const { id: claudeModel, gateway } = resolveClaudeEffortModel(selectedModel);
+  const configuredEffort = gateway || (currentProvider === 'claude' && hasConfiguredClaudeMapping(selectedModel));
   return REASONING_LEVELS.filter((level) => {
     if (currentProvider === 'grok') {
       return level.id === 'low' || level.id === 'medium' || level.id === 'high' || level.id === 'xhigh';
@@ -48,6 +57,9 @@ export function getAvailableReasoningLevels(
     }
     if (currentProvider !== 'claude') {
       return level.id !== 'max';
+    }
+    if (configuredEffort) {
+      return true;
     }
     if (!selectedModel) {
       return true;
@@ -83,10 +95,9 @@ export function useReasoningEffortGuard(
   currentLevel: ReasoningInfo | undefined;
 } {
   const isVisible = isReasoningVisible(currentProvider, selectedModel);
-  const availableLevels = useMemo(
-    () => getAvailableReasoningLevels(currentProvider, selectedModel),
-    [currentProvider, selectedModel],
-  );
+  // Mapping changes can keep the same Sonnet/Opus alias. Re-evaluate on every
+  // render so switching cc-switch modes does not retain an old filtered list.
+  const availableLevels = getAvailableReasoningLevels(currentProvider, selectedModel);
   const currentLevel = resolveCurrentReasoningLevel(value, availableLevels);
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { useMessageSender } from './useMessageSender';
 import type { UseMessageSenderOptions } from './useMessageSender';
+import { writeClaudeModelMapping } from '../utils/claudeModelMapping';
 
 describe('useMessageSender - /context command', () => {
   const t = ((key: string, opts?: any) => opts?.defaultValue ?? key) as any;
@@ -46,7 +47,25 @@ describe('useMessageSender - /context command', () => {
   };
 
   beforeEach(() => {
+    localStorage.clear();
     window.sendToJava = vi.fn();
+  });
+
+  it.each(['xhigh', 'max'] as const)('forwards %s in aggregate, route and direct modes', (effort) => {
+    for (const mode of ['aggregate', 'route', 'direct']) {
+      localStorage.clear();
+      window.sendToJava = vi.fn();
+      if (mode !== 'aggregate') {
+        writeClaudeModelMapping({ sonnet: mode === 'route' ? 'claude-sonnet-5' : 'glm-pro' });
+      }
+      const { result, unmount } = renderHook(() => useMessageSender(createOptions({
+        selectedModel: mode === 'aggregate' ? 'ccs-claude-provider-a--glm-pro' : 'claude-sonnet-5',
+        reasoningEffort: effort,
+      })));
+      act(() => result.current.handleSubmit('hello'));
+      expect(getBridgePayload('send_message').reasoningEffort).toBe(effort);
+      unmount();
+    }
   });
 
   it('sends get_context_usage with base model when longContext is disabled', () => {

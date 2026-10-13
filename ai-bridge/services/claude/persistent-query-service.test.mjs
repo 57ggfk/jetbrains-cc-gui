@@ -149,6 +149,17 @@ test('aggregated routes keep the exact model id and forward the selected effort 
   assert.equal(Object.hasOwn(context.options, 'maxThinkingTokens'), false);
 });
 
+for (const effort of ['xhigh', 'max']) {
+  test(`aggregated routes forward ${effort} to SDK options`, async () => {
+    const context = await __testing.buildRequestContext({
+      sessionId: '', runtimeSessionEpoch: `epoch-aggregate-${effort}`, cwd: process.cwd(),
+      message: 'gateway effort', model: 'ccs-claude-provider-a--glm-pro[1m]', reasoningEffort: effort,
+    }, false);
+    assert.equal(context.options.effort, effort);
+    assert.equal(context.options.model, 'ccs-claude-provider-a--glm-pro[1m]');
+  });
+}
+
 test('fixed thinking tokens remain configured when no reasoningEffort is provided', async () => {
   const context = await __testing.buildRequestContext({
     sessionId: '',

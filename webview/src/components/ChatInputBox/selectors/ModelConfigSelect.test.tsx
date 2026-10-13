@@ -41,6 +41,7 @@ const codexModels = [
 ];
 
 describe('ModelConfigSelect', () => {
+  beforeEach(() => localStorage.clear());
   it('keeps the effort row visible for an aggregated model', () => {
     render(<ModelConfigSelect selectedModel="ccs-claude-provider-a--glm-pro" onModelSelect={vi.fn()}
       models={[{ id: 'ccs-claude-provider-a--glm-pro', label: 'GLM Pro（供应商 A）' }]}
