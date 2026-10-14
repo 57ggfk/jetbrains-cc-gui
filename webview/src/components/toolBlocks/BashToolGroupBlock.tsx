@@ -1,12 +1,10 @@
-import { useState, useMemo, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ToolInput, ToolResultBlock } from '../../types';
 import { stripAnsi } from '../../utils/stripAnsi';
 import { presentCommand } from '../../utils/commandPresentation';
-import {
-  getBashGroupCollapsedByDefault,
-  subscribeBashGroupCollapsePreference,
-} from '../../utils/bashGroupCollapsePreference';
+import { bashGroupCollapsePreference } from '../../utils/bashGroupCollapsePreference';
+import { usePreferredExpanded } from '../../hooks/usePreferredExpanded';
 
 interface BashItem {
   command: string;
@@ -95,16 +93,7 @@ function truncateCommand(command: string, maxLength = 60): string {
 }
 
 const BashToolGroupBlock = ({ items, deniedToolIds }: BashToolGroupBlockProps) => {
-  const collapsedByDefault = useSyncExternalStore(
-    subscribeBashGroupCollapsePreference,
-    getBashGroupCollapsedByDefault,
-  );
-  // Follow the preference until the user explicitly toggles this group.
-  const [expandedOverride, setExpandedOverride] = useState<boolean>();
-  const expanded = expandedOverride ?? !collapsedByDefault;
-  const toggleExpanded = () => {
-    setExpandedOverride(previous => !(previous ?? !collapsedByDefault));
-  };
+  const { expanded, toggleExpanded } = usePreferredExpanded(bashGroupCollapsePreference);
   // Track which item detail is expanded
   const [expandedItemIndex, setExpandedItemIndex] = useState<number | null>(null);
   const { t } = useTranslation();

@@ -24,16 +24,8 @@ import {
   setDetailedOutputEnabled,
   type DetailedOutputEnabledChangedDetail,
 } from '../../../utils/detailedOutputPreference';
-import {
-  getBashGroupCollapsedByDefault,
-  setBashGroupCollapsedByDefault,
-  subscribeBashGroupCollapsePreference,
-} from '../../../utils/bashGroupCollapsePreference';
-import {
-  getEditGroupCollapsedByDefault,
-  setEditGroupCollapsedByDefault,
-  subscribeEditGroupCollapsePreference,
-} from '../../../utils/editGroupCollapsePreference';
+import { bashGroupCollapsePreference } from '../../../utils/bashGroupCollapsePreference';
+import { editGroupCollapsePreference } from '../../../utils/editGroupCollapsePreference';
 
 const sendToJava = (message: string) => {
   if (window.sendToJava) {
@@ -297,12 +289,12 @@ export function useSettingsBasicActions({
 
   // Independent batch command and file edit display preferences (localStorage-only).
   const bashGroupCollapsedByDefault = useSyncExternalStore(
-    subscribeBashGroupCollapsePreference,
-    getBashGroupCollapsedByDefault,
+    bashGroupCollapsePreference.subscribe,
+    bashGroupCollapsePreference.get,
   );
   const editGroupCollapsedByDefault = useSyncExternalStore(
-    subscribeEditGroupCollapsePreference,
-    getEditGroupCollapsedByDefault,
+    editGroupCollapsePreference.subscribe,
+    editGroupCollapsePreference.get,
   );
 
   // History completion toggle configuration
@@ -846,9 +838,9 @@ export function useSettingsBasicActions({
     diffExpandedByDefault,
     setDiffExpandedByDefault,
     bashGroupCollapsedByDefault,
-    handleBashGroupCollapsedByDefaultChange: setBashGroupCollapsedByDefault,
+    handleBashGroupCollapsedByDefaultChange: bashGroupCollapsePreference.set,
     editGroupCollapsedByDefault,
-    handleEditGroupCollapsedByDefaultChange: setEditGroupCollapsedByDefault,
+    handleEditGroupCollapsedByDefaultChange: editGroupCollapsePreference.set,
     historyCompletionEnabled,
     setHistoryCompletionEnabled,
     skipNewSessionConfirm,

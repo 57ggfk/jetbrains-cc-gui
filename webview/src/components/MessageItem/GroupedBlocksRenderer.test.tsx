@@ -7,11 +7,11 @@ import { GroupedBlocksRenderer } from './GroupedBlocksRenderer';
 import { groupBlocks } from './groupBlocks';
 import {
   BASH_GROUP_COLLAPSED_KEY,
-  setBashGroupCollapsedByDefault,
+  bashGroupCollapsePreference,
 } from '../../utils/bashGroupCollapsePreference';
 import {
   EDIT_GROUP_COLLAPSED_KEY,
-  setEditGroupCollapsedByDefault,
+  editGroupCollapsePreference,
 } from '../../utils/editGroupCollapsePreference';
 
 vi.mock('react-i18next', () => ({
@@ -59,7 +59,7 @@ describe('GroupedBlocksRenderer shared CLI collapse preferences', () => {
   const providers = ['claude', 'codex', 'grok', 'kimi', 'opencode', 'pi', 'omp', 'minimax', 'zcode'];
 
   it.each(providers)('uses the command preference for %s command groups', (provider) => {
-    setBashGroupCollapsedByDefault(true);
+    bashGroupCollapsePreference.set(true);
     const blocks: ClaudeContentBlock[] = [
       'Bash', 'run_terminal_cmd', 'exec_command', 'execute_command', 'shell_command',
     ].map((name, index) => ({
@@ -69,12 +69,12 @@ describe('GroupedBlocksRenderer shared CLI collapse preferences', () => {
     expect(container.querySelector('.bash-group-header')?.textContent).toContain('(5)');
     expect(container.querySelector('.bash-group-timeline')).toBeNull();
 
-    act(() => setBashGroupCollapsedByDefault(false));
+    act(() => bashGroupCollapsePreference.set(false));
     expect(container.querySelectorAll('.bash-timeline-item')).toHaveLength(5);
   });
 
   it.each(providers)('uses an independent preference for %s file edit groups', (provider) => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const blocks: ClaudeContentBlock[] = [
       { type: 'tool_use', id: 'bash-1', name: 'Bash', input: { command: 'echo one' } },
       { type: 'tool_use', id: 'bash-2', name: 'Bash', input: { command: 'echo two' } },
@@ -89,7 +89,7 @@ describe('GroupedBlocksRenderer shared CLI collapse preferences', () => {
     expect(container.querySelectorAll('.bash-timeline-item')).toHaveLength(2);
     expect(container.querySelector('.file-list-container')).toBeNull();
 
-    act(() => setEditGroupCollapsedByDefault(false));
+    act(() => editGroupCollapsePreference.set(false));
     expect(container.querySelectorAll('.file-list-item')).toHaveLength(2);
     fireEvent.click(getByText('tools.editBatchTitle').closest('.task-header') as HTMLElement);
     expect(container.querySelector('.file-list-container')).toBeNull();

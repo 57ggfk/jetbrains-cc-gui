@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import BashToolGroupBlock from './BashToolGroupBlock';
 import {
   BASH_GROUP_COLLAPSED_KEY,
-  setBashGroupCollapsedByDefault,
+  bashGroupCollapsePreference,
 } from '../../utils/bashGroupCollapsePreference';
 
 vi.mock('react-i18next', () => ({
@@ -16,7 +16,7 @@ describe('BashToolGroupBlock', () => {
   beforeEach(() => localStorage.removeItem(BASH_GROUP_COLLAPSED_KEY));
 
   it('starts collapsed when configured and preserves manual expansion during updates', () => {
-    setBashGroupCollapsedByDefault(true);
+    bashGroupCollapsePreference.set(true);
     const { container, rerender } = render(
       <BashToolGroupBlock items={[{ toolId: 'bash-1', input: { command: 'npm test' } }]} />,
     );
@@ -36,8 +36,8 @@ describe('BashToolGroupBlock', () => {
     expect(container.querySelectorAll('.bash-timeline-item')).toHaveLength(2);
     expect(container.querySelector('.bash-group-progress')?.textContent).toContain('1/2');
 
-    act(() => setBashGroupCollapsedByDefault(false));
-    act(() => setBashGroupCollapsedByDefault(true));
+    act(() => bashGroupCollapsePreference.set(false));
+    act(() => bashGroupCollapsePreference.set(true));
     expect(container.querySelector('.bash-group-timeline')).toBeTruthy();
 
     fireEvent.click(container.querySelector('.bash-group-header') as HTMLElement);
@@ -50,15 +50,15 @@ describe('BashToolGroupBlock', () => {
     );
     expect(container.querySelector('.bash-group-timeline')).toBeTruthy();
 
-    act(() => setBashGroupCollapsedByDefault(true));
+    act(() => bashGroupCollapsePreference.set(true));
     expect(container.querySelector('.bash-group-timeline')).toBeNull();
 
-    act(() => setBashGroupCollapsedByDefault(false));
+    act(() => bashGroupCollapsePreference.set(false));
     expect(container.querySelector('.bash-group-timeline')).toBeTruthy();
 
     fireEvent.click(container.querySelector('.bash-group-header') as HTMLElement);
-    act(() => setBashGroupCollapsedByDefault(true));
-    act(() => setBashGroupCollapsedByDefault(false));
+    act(() => bashGroupCollapsePreference.set(true));
+    act(() => bashGroupCollapsePreference.set(false));
     expect(container.querySelector('.bash-group-timeline')).toBeNull();
   });
 
@@ -79,7 +79,7 @@ describe('BashToolGroupBlock', () => {
   });
 
   it.each(['Enter', ' '])('allows keyboard expansion and collapse with %j', (key) => {
-    setBashGroupCollapsedByDefault(true);
+    bashGroupCollapsePreference.set(true);
     const { container, getByRole } = render(
       <BashToolGroupBlock items={[
         { toolId: 'bash-1', input: { command: 'npm test' } },
@@ -95,7 +95,7 @@ describe('BashToolGroupBlock', () => {
     expect(header.getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('.bash-group-timeline')).toBeNull();
 
-    act(() => setBashGroupCollapsedByDefault(false));
+    act(() => bashGroupCollapsePreference.set(false));
     expect(header.getAttribute('aria-expanded')).toBe('false');
   });
 

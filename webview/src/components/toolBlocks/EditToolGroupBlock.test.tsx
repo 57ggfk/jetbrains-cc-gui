@@ -6,11 +6,11 @@ import EditToolGroupBlock from './EditToolGroupBlock';
 import { openFile, refreshFile, showDiff } from '../../utils/bridge';
 import {
   EDIT_GROUP_COLLAPSED_KEY,
-  setEditGroupCollapsedByDefault,
+  editGroupCollapsePreference,
 } from '../../utils/editGroupCollapsePreference';
 import {
   BASH_GROUP_COLLAPSED_KEY,
-  setBashGroupCollapsedByDefault,
+  bashGroupCollapsePreference,
 } from '../../utils/bashGroupCollapsePreference';
 
 vi.mock('react-i18next', () => ({
@@ -103,7 +103,7 @@ describe('EditToolGroupBlock collapse preference', () => {
   afterEach(cleanup);
 
   it('keeps native patch previews available after expansion without reporting unknown outcomes as successful', () => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const { container, getByRole } = render(<EditToolGroupBlock items={[
       { name: 'apply_patch', input: { patch, status: 'unknown' }, result: success, toolId: 'patch' },
     ]} />);
@@ -119,14 +119,14 @@ describe('EditToolGroupBlock collapse preference', () => {
   });
 
   it('keeps the file list expanded by default regardless of the command preference', () => {
-    setBashGroupCollapsedByDefault(true);
+    bashGroupCollapsePreference.set(true);
     const { container } = render(<EditToolGroupBlock items={items} />);
     expect(container.querySelectorAll('.file-list-item')).toHaveLength(2);
     expect(container.querySelector('.task-header')?.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('starts collapsed while retaining the edit count and change totals', () => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const { container } = render(<EditToolGroupBlock items={items} />);
     expect(container.querySelector('.file-list-container')).toBeNull();
     const header = container.querySelector('.task-header');
@@ -137,7 +137,7 @@ describe('EditToolGroupBlock collapse preference', () => {
   });
 
   it('keeps pending, failed, and successful result summaries visible while collapsed', () => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const { container, getByRole, rerender } = render(<EditToolGroupBlock items={items} />);
     expect(getByRole('status').textContent).toContain('0/2 finished');
 
@@ -165,8 +165,27 @@ describe('EditToolGroupBlock collapse preference', () => {
     expect(container.querySelector('.file-list-container')).toBeNull();
   });
 
+  it('counts a denied edit as failed in the collapsed group summary', () => {
+    editGroupCollapsePreference.set(true);
+    const { getByRole, rerender } = render(<EditToolGroupBlock items={items.map((item, index) => ({
+      ...item, result: { type: 'tool_result' as const, content: 'done' }, toolId: `edit-${index}`,
+    }))} />);
+    expect(getByRole('status').textContent).toContain('tools.editGroupAllCompleted');
+
+    window.__deniedToolIds = new Set(['edit-0']);
+    try {
+      rerender(<EditToolGroupBlock items={items.map((item, index) => ({
+        ...item, result: { type: 'tool_result' as const, content: 'done' }, toolId: `edit-${index}`,
+      }))} />);
+      expect(getByRole('status').textContent).toContain('Failed: 1');
+      expect(getByRole('status').textContent).not.toContain('tools.editGroupAllCompleted');
+    } finally {
+      window.__deniedToolIds = undefined;
+    }
+  });
+
   it.each(['Enter', ' '])('allows keyboard expansion and collapse with %j', (key) => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const { container, getByRole } = render(<EditToolGroupBlock items={items} />);
     const header = getByRole('button', { expanded: false });
     expect(header.tabIndex).toBe(0);
@@ -177,12 +196,12 @@ describe('EditToolGroupBlock collapse preference', () => {
     expect(header.getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('.file-list-container')).toBeNull();
 
-    act(() => setEditGroupCollapsedByDefault(false));
+    act(() => editGroupCollapsePreference.set(false));
     expect(header.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('counts edit operations when several entries target the same file', () => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const repeatedEdits = [items[0], items[0], items[0]];
     const { container } = render(<EditToolGroupBlock items={repeatedEdits} />);
     expect(container.querySelector('.tool-title-summary')?.textContent).toBe('(3)');
@@ -190,19 +209,19 @@ describe('EditToolGroupBlock collapse preference', () => {
 
   it('applies live changes until the user manually toggles the group', () => {
     const { container } = render(<EditToolGroupBlock items={items} />);
-    act(() => setEditGroupCollapsedByDefault(true));
+    act(() => editGroupCollapsePreference.set(true));
     expect(container.querySelector('.file-list-container')).toBeNull();
-    act(() => setEditGroupCollapsedByDefault(false));
+    act(() => editGroupCollapsePreference.set(false));
     expect(container.querySelector('.file-list-container')).toBeTruthy();
 
     fireEvent.click(container.querySelector('.task-header') as HTMLElement);
-    act(() => setEditGroupCollapsedByDefault(true));
-    act(() => setEditGroupCollapsedByDefault(false));
+    act(() => editGroupCollapsePreference.set(true));
+    act(() => editGroupCollapsePreference.set(false));
     expect(container.querySelector('.file-list-container')).toBeNull();
   });
 
   it('preserves manual expansion as edits stream in and complete', () => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const { container, rerender } = render(<EditToolGroupBlock items={items} />);
     fireEvent.click(container.querySelector('.task-header') as HTMLElement);
     rerender(<EditToolGroupBlock items={[
@@ -212,13 +231,13 @@ describe('EditToolGroupBlock collapse preference', () => {
     ]} />);
     expect(container.querySelectorAll('.file-list-item')).toHaveLength(3);
     expect(container.querySelector('.tool-status-indicator.completed')).toBeTruthy();
-    act(() => setEditGroupCollapsedByDefault(false));
-    act(() => setEditGroupCollapsedByDefault(true));
+    act(() => editGroupCollapsePreference.set(false));
+    act(() => editGroupCollapsePreference.set(true));
     expect(container.querySelectorAll('.file-list-item')).toHaveLength(3);
   });
 
   it('still refreshes successful edits while the list is collapsed', () => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const completedItems: typeof items = [
       { ...items[0], result: { type: 'tool_result', content: 'done' } },
       { ...items[1], result: { type: 'tool_result', content: 'failed', is_error: true } },
@@ -231,7 +250,7 @@ describe('EditToolGroupBlock collapse preference', () => {
   });
 
   it('keeps file opening and diff actions available after expanding', () => {
-    setEditGroupCollapsedByDefault(true);
+    editGroupCollapsePreference.set(true);
     const { container, getAllByTitle } = render(<EditToolGroupBlock items={items} />);
     fireEvent.click(container.querySelector('.task-header') as HTMLElement);
     fireEvent.click(container.querySelector('.clickable-file') as HTMLElement);

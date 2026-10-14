@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useSyncExternalStore } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { openFile, showDiff, refreshFile } from '../../utils/bridge';
 import { getFileIcon } from '../../utils/fileIcons';
@@ -8,10 +8,8 @@ import { useResolvedFileLinkTooltip } from '../../hooks/useResolvedFileLinkToolt
 import { useIsToolDenied } from '../../hooks/useIsToolDenied';
 import { readPatchFiles, readPatchOutcome } from '../../utils/codexPatch';
 import { PATCH_TOOL_NAMES, isToolName } from '../../utils/toolConstants';
-import {
-  getEditGroupCollapsedByDefault,
-  subscribeEditGroupCollapsePreference,
-} from '../../utils/editGroupCollapsePreference';
+import { editGroupCollapsePreference } from '../../utils/editGroupCollapsePreference';
+import { usePreferredExpanded } from '../../hooks/usePreferredExpanded';
 import EditDiffView, { type DiffResult } from './EditDiffView';
 import GenericToolBlock from './GenericToolBlock';
 import ToolDetailsAccordion from './ToolDetailsAccordion';
@@ -347,16 +345,7 @@ const EditFileItem = ({ item, onFileClick, onShowDiff, onRefresh, t, previewExpa
 };
 
 const EditToolGroupBlock = ({ items }: EditToolGroupBlockProps) => {
-  const collapsedByDefault = useSyncExternalStore(
-    subscribeEditGroupCollapsePreference,
-    getEditGroupCollapsedByDefault,
-  );
-  // Follow the preference until the user explicitly toggles this group.
-  const [expandedOverride, setExpandedOverride] = useState<boolean>();
-  const expanded = expandedOverride ?? !collapsedByDefault;
-  const toggleExpanded = () => {
-    setExpandedOverride(previous => !(previous ?? !collapsedByDefault));
-  };
+  const { expanded, toggleExpanded } = usePreferredExpanded(editGroupCollapsePreference);
   const [previewItem, setPreviewItem] = useState<EditItem | null>(null);
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
@@ -389,7 +378,9 @@ const EditToolGroupBlock = ({ items }: EditToolGroupBlockProps) => {
   const totalAdditions = editItems.reduce((sum, item) => sum + item.additions, 0);
   const totalDeletions = editItems.reduce((sum, item) => sum + item.deletions, 0);
   const completedCount = editItems.filter(item => item.isCompleted).length;
-  const errorCount = editItems.filter(item => item.isError).length;
+  // Match EditFileItem's error semantics: a denied tool counts as failed.
+  const errorCount = editItems.filter(item => item.isError
+    || (item.toolId ? window.__deniedToolIds?.has(item.toolId) ?? false : false)).length;
   const allSucceeded = completedCount === editItems.length && errorCount === 0
     && editItems.every(item => !item.isUnknown);
 
