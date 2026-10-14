@@ -17,8 +17,6 @@
  *   [COMMIT_ERROR]<msg>          — failure
  */
 
-import { pathToFileURL } from 'node:url';
-
 import {
   loadClaudeSdk,
   isClaudeSdkAvailable,

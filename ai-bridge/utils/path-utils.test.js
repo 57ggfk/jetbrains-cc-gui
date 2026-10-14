@@ -171,9 +171,12 @@ test('getClaudeProjectSessionFilePath rejects path-like session IDs', () => {
 });
 
 test('isMainEntryModule returns false for non-entry imports', () => {
-  // In this process argv[1] is the test file itself, while the function's
-  // import.meta.url is path-utils.js - not the entry, so it must be false.
-  assert.equal(isMainEntryModule(), false);
+  // Under node --test, argv[1] is this test file, so this file's own
+  // import.meta.url would be the entry. Pass the URL of another loaded
+  // module (path-utils.js itself) to exercise the realpath comparison
+  // and prove a non-entry module is rejected.
+  const nonEntryUrl = pathToFileURL(resolve(BRIDGE_DIR, 'utils', 'path-utils.js')).href;
+  assert.equal(isMainEntryModule(nonEntryUrl), false);
 });
 
 test('isMainEntryModule survives a junctioned entry path', (t) => {
