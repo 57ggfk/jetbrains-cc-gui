@@ -41,6 +41,16 @@ const codexModels = [
 ];
 
 describe('ModelConfigSelect', () => {
+  beforeEach(() => localStorage.clear());
+  it('keeps the effort row visible for an aggregated model', () => {
+    render(<ModelConfigSelect selectedModel="ccs-claude-provider-a--glm-pro" onModelSelect={vi.fn()}
+      models={[{ id: 'ccs-claude-provider-a--glm-pro', label: 'GLM Pro（供应商 A）' }]}
+      currentProvider="claude" reasoningEffort="high" onReasoningChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('model-config-trigger'));
+    expect(screen.getByTestId('model-config-option-effort').textContent).toContain('High');
+    fireEvent.click(screen.getByTestId('model-config-option-effort'));
+    expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
+  });
   it('shows cc-switch names in the trigger and list and selects another provider route', () => {
     const onModelSelect = vi.fn();
     localStorage.setItem(STORAGE_KEYS.CLAUDE_MODEL_MAPPING, JSON.stringify({

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { sendBridgeEvent } from '../../utils/bridge';
+import { updateClaudeModelCapabilities } from '../../utils/claudeModelCapabilities';
 import type { ModelInfo } from '../../components/ChatInputBox/types';
 import {
   CODEX_MODELS,
@@ -15,6 +16,7 @@ import {
 } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
 import { subscribeActiveCodexProvider, subscribeActiveProvider } from '../../utils/runtimeProviderCapabilities';
+import { type ClaudeModelMapping, writeClaudeModelMapping } from '../../utils/claudeModelMapping';
 
 type CliModelsByProvider = Record<string, ModelInfo[]>;
 
@@ -54,6 +56,7 @@ function subscribeRoles(listener: () => void): () => void {
 
 /** Test-only: clear module caches between cases. */
 export function __resetCliModelsCacheForTests() {
+  updateClaudeModelCapabilities([]);
   for (const key of Object.keys(modelsCache)) delete modelsCache[key];
   for (const key of Object.keys(defaultModelCache)) delete defaultModelCache[key];
   for (const key of Object.keys(catalogHasEntriesCache)) delete catalogHasEntriesCache[key];
@@ -102,6 +105,7 @@ function normalizeModels(raw: unknown): ModelInfo[] {
       ? row.supportedReasoningEfforts.filter((effort): effort is string => typeof effort === 'string')
       : undefined;
     const model: ModelInfo = { id, label };
+    if (typeof row.supports1MContext === 'boolean') model.supports1MContext = row.supports1MContext;
     if (description !== undefined) model.description = description;
     if (supportedReasoningEfforts && supportedReasoningEfforts.length > 0) {
       model.supportedReasoningEfforts = supportedReasoningEfforts;
@@ -172,8 +176,8 @@ export function useCliModels(currentProvider: string) {
   }, [clearPendingLoad]);
 
   useEffect(() => {
-    const handler = (dataOrStr: string | { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown }) => {
-      let payload: { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown } | null = null;
+    const handler = (dataOrStr: string | { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown; modelMapping?: unknown }) => {
+      let payload: { provider?: string; models?: unknown; roles?: unknown; success?: boolean; error?: string; defaultModel?: unknown; replaceBuiltInOptions?: unknown; modelMapping?: unknown } | null = null;
       if (typeof dataOrStr === 'string') {
         try {
           payload = JSON.parse(dataOrStr);
@@ -185,7 +189,21 @@ export function useCliModels(currentProvider: string) {
       }
       if (!payload?.provider) return;
       const provider = payload.provider;
+      if (provider === 'claude' && payload.success !== false
+        && payload.modelMapping && typeof payload.modelMapping === 'object' && !Array.isArray(payload.modelMapping)) {
+        const mapping: ClaudeModelMapping = {};
+        const rawMapping = payload.modelMapping as Record<string, unknown>;
+        for (const key of ['main', 'fable', 'haiku', 'sonnet', 'opus', 'fableName', 'haikuName', 'sonnetName', 'opusName']) {
+          if (typeof rawMapping[key] === 'string' && (rawMapping[key] as string).trim()) {
+            mapping[key] = (rawMapping[key] as string).trim();
+          }
+        }
+        // Refresh even without modelPicker: route/direct mode changes update
+        // settings.env and must replace the previous aggregation mapping.
+        writeClaudeModelMapping(mapping);
+      }
       const models = normalizeModels(payload.models);
+      if (provider === 'claude') updateClaudeModelCapabilities(payload.success === false ? [] : models);
       const replaceBuiltIns = provider === 'claude' && payload.success !== false && payload.replaceBuiltInOptions === true;
       replaceBuiltInsCache[provider] = replaceBuiltIns;
       setReplaceBuiltInsByProvider((prev) => ({ ...prev, [provider]: replaceBuiltIns }));
@@ -304,6 +322,8 @@ export function useCliModels(currentProvider: string) {
   // Switching Claude providers changes settings.json, including cc-switch's
   // modelPicker. Invalidate even an empty catalog so routes cannot linger.
   useEffect(() => subscribeActiveProvider(() => {
+    // Revoke old route capabilities before loading the new provider's catalog.
+    updateClaudeModelCapabilities([]);
     delete modelsCache.claude;
     delete defaultModelCache.claude;
     delete catalogHasEntriesCache.claude;

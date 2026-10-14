@@ -2,6 +2,24 @@ import { loadClaudeSettings } from '../../config/api-config.js';
 
 const baseId = (id) => id.trim().replace(/\[1m\]$/i, '');
 
+/** Only model ids and display names cross the bridge; never credentials. */
+export function parseClaudeModelMapping(settings) {
+  const env = settings?.env;
+  const mapping = {};
+  const copy = (key, envKey) => {
+    if (typeof env?.[envKey] === 'string' && env[envKey].trim()) {
+      mapping[key] = env[envKey].trim();
+    }
+  };
+  copy('main', 'ANTHROPIC_MODEL');
+  for (const role of ['sonnet', 'opus', 'fable', 'haiku']) {
+    const envKey = `ANTHROPIC_DEFAULT_${role.toUpperCase()}_MODEL`;
+    copy(role, envKey);
+    copy(`${role}Name`, `${envKey}_NAME`);
+  }
+  return mapping;
+}
+
 /** Read the same settings.json model picker used by Claude Code / cc-switch. */
 export function parseClaudeModelPicker(settings) {
   const picker = settings?.modelPicker;
@@ -16,6 +34,7 @@ export function parseClaudeModelPicker(settings) {
       seen.add(id);
       models.push({
         id,
+        supports1MContext: /\[1m\]$/i.test(option.model.trim()),
         label: typeof option.label === 'string' && option.label.trim() ? option.label.trim() : id,
         ...(typeof option.description === 'string' ? { description: option.description } : {}),
       });
@@ -33,5 +52,11 @@ export function parseClaudeModelPicker(settings) {
 }
 
 export function listModels() {
-  console.log(JSON.stringify({ success: true, provider: 'claude', ...parseClaudeModelPicker(loadClaudeSettings()) }));
+  const settings = loadClaudeSettings();
+  console.log(JSON.stringify({
+    success: true,
+    provider: 'claude',
+    ...parseClaudeModelPicker(settings),
+    modelMapping: parseClaudeModelMapping(settings),
+  }));
 }
