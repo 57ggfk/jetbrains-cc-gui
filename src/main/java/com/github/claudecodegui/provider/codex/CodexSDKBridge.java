@@ -576,6 +576,8 @@ public class CodexSDKBridge extends BaseSDKBridge {
             StringBuilder assistantContent = new StringBuilder();
             AtomicReference<String> lastNodeError = new AtomicReference<>();
             AtomicBoolean hadSendError = new AtomicBoolean(false);
+            boolean claimedThreadForSend = false;
+            boolean daemonDispatchAttempted = false;
             try {
                 String accessMode = CodemossSettingsService.CODEX_RUNTIME_ACCESS_INACTIVE;
                 try {
@@ -610,6 +612,7 @@ public class CodexSDKBridge extends BaseSDKBridge {
                         callback.onError(error);
                         return streamedResult;
                     }
+                    claimedThreadForSend = true;
                 }
                 JsonArray attachmentArray = buildCodexAttachments(attachments);
                 JsonObject params = CodexAppServerRequestExecutor.buildSendParams(
@@ -635,6 +638,7 @@ public class CodexSDKBridge extends BaseSDKBridge {
                 this.activeCallbacks.put(safeChannelId, callback);
                 this.callbackSubscriptions.put(safeChannelId, callback);
 
+                daemonDispatchAttempted = true;
                 CompletableFuture<SDKResult> resultFuture = this.appServerRequestExecutor.sendMessageViaDaemon(
                         daemon,
                         params,
@@ -666,6 +670,9 @@ public class CodexSDKBridge extends BaseSDKBridge {
                 }
                 return result;
             } catch (Exception e) {
+                if (claimedThreadForSend && !daemonDispatchAttempted) {
+                    CodexThreadOwnerRegistry.release(this.ownerScope, threadId, this.bridgeOwnerId);
+                }
                 Throwable cause = e.getCause() != null ? e.getCause() : e;
                 String error = cause.getMessage() == null ? cause.toString() : cause.getMessage();
                 streamedResult.success = false;
