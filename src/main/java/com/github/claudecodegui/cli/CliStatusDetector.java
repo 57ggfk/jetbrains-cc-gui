@@ -138,8 +138,9 @@ public final class CliStatusDetector {
                 }
             }
             if (tool == CliToolId.ZCODE) {
-                // No PATH binary: resolve the app-server entry inside the desktop app bundle.
-                return detectZcodeAppBundle(tool);
+                // The PATH entry may launch the desktop app; resolve the bundled Node entry instead.
+                String platform = PlatformUtils.isWindows() ? "win32" : PlatformUtils.isMac() ? "darwin" : "linux";
+                return detectZcodeAppBundle(platform, System.getenv());
             }
             for (String candidate : candidatesFor(tool)) {
                 ProbeResult probe = probe(candidate);
@@ -416,47 +417,44 @@ public final class CliStatusDetector {
         };
     }
     /**
-     * ZCode ships no PATH binary: the app-server entry ({@code zcode.cjs}) is bundled
-     * inside the desktop client, so detection means locating that file at the
-     * well-known install locations (env override first). The resolved file path
-     * plays the role of the "binary" in the status payload.
+     * Locate the bundled {@code zcode.cjs}, since the desktop launcher on PATH cannot run under Node.
+     * Keep candidates aligned with ai-bridge's zcode-config.js so detection matches runtime discovery.
      */
-    private static CliToolStatus detectZcodeAppBundle(CliToolId tool) {
-        for (String candidate : zcodeAppBundleCandidates()) {
+    static CliToolStatus detectZcodeAppBundle(String platform, Map<String, String> env) {
+        for (String candidate : zcodeAppBundleCandidates(platform, env)) {
             File file = new File(candidate);
             if (file.isFile()) {
-                return CliToolStatus.installed(tool, "unknown", file.getAbsolutePath());
+                return CliToolStatus.installed(CliToolId.ZCODE, "unknown", file.getAbsolutePath());
             }
         }
-        return CliToolStatus.notInstalled(tool);
+        return CliToolStatus.notInstalled(CliToolId.ZCODE);
     }
 
-    private static List<String> zcodeAppBundleCandidates() {
+    static List<String> zcodeAppBundleCandidates(String platform, Map<String, String> env) {
         List<String> candidates = new ArrayList<>();
-        // 1. Explicit env overrides (point directly at zcode.cjs)
         for (String envKey : envKeysFor(CliToolId.ZCODE)) {
-            String value = firstNonBlank(System.getenv(envKey));
+            String value = firstNonBlank(env.get(envKey));
             if (value != null) {
-                candidates.add(value.trim());
+                candidates.add(value);
             }
         }
-        // 2. Desktop app bundle locations (mirrors ai-bridge zcode-config.js)
-        if (PlatformUtils.isWindows()) {
-            String localAppData = System.getenv("LOCALAPPDATA");
+        if ("win32".equals(platform)) {
+            String localAppData = env.get("LOCALAPPDATA");
             if (localAppData != null && !localAppData.isBlank()) {
                 candidates.add(join(localAppData, "Programs", "ZCode", "resources", "glm", "zcode.cjs"));
             }
-            String programFiles = System.getenv("ProgramFiles");
+            String programFiles = env.get("ProgramFiles");
             if (programFiles != null && !programFiles.isBlank()) {
                 candidates.add(join(programFiles, "ZCode", "resources", "glm", "zcode.cjs"));
             }
-            String programFilesX86 = System.getenv("ProgramFiles(x86)");
+            String programFilesX86 = env.get("ProgramFiles(x86)");
             if (programFilesX86 != null && !programFilesX86.isBlank()) {
                 candidates.add(join(programFilesX86, "ZCode", "resources", "glm", "zcode.cjs"));
             }
-        } else if (PlatformUtils.isMac()) {
+        } else if ("darwin".equals(platform)) {
             candidates.add("/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs");
         } else {
+            candidates.add("/opt/ZCode/resources/glm/zcode.cjs");
             candidates.add("/opt/ZCode/app/resources/glm/zcode.cjs");
         }
         return candidates;
