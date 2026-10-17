@@ -2622,10 +2622,9 @@
       "reason": "The plugin starts \"codex app-server\" from the Codex CLI found on your machine. A half-installed copy - for example a global npm install whose platform binary is missing - exits with code 1 and takes the turn down with it.",
       "solutions": {
         "reinstallCodexCli": {
-          "title": "Option 1: Remove the broken install and reinstall the official CLI",
-          "step0": "1. Remove the stale global install (having two copies is the most common cause):",
-          "step1": "2. Install the official CLI again, from the official npm registry rather than a mirror:",
-          "step2": "3. Check that the CLI answers before sending again:"
+          "title": "Option 1: Install or update the CLI using the official instructions",
+          "step0": "1. Open the official instructions and choose the standalone installer, npm, or Homebrew for your runtime environment. Update through the original installation channel; do not use npm uninstall for a standalone installation:",
+          "step1": "2. Check the version in a new terminal, refresh Provider Management → CLI, then send again:"
         },
         "pointCodexBin": {
           "title": "Option 2: Point the plugin at a working binary",

@@ -1034,6 +1034,8 @@ test('exhausted candidates settle the turn with every CLI attempt and the fix hi
     assert.match(result.error, /second-cli: codex app-server exited/);
     assert.match(result.error, /spawn vendor\/codex ENOENT/);
     assert.match(result.error, /Codex CLI check/);
+    assert.ok(result.error.includes('https://learn.chatgpt.com/docs/codex/cli#getting-started'));
+    assert.ok(!result.error.includes('npm install'));
   } finally { await service.resetRuntime(); }
 });
 

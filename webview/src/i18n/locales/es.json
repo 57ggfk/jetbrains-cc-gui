@@ -2062,10 +2062,9 @@
       "reason": "El plugin inicia \"codex app-server\" desde el Codex CLI detectado en tu equipo. Una copia a medio instalar -por ejemplo una instalación global de npm sin el binario de plataforma- termina con código 1 y hace fallar también ese turno.",
       "solutions": {
         "reinstallCodexCli": {
-          "title": "Opción 1: eliminar la instalación rota y reinstalar el CLI oficial",
-          "step0": "1. Elimina primero la instalación global obsoleta (tener dos copias es la causa más habitual):",
-          "step1": "2. Vuelve a instalar el CLI oficial, desde el registro oficial de npm y no desde un espejo:",
-          "step2": "3. Comprueba que el CLI responde antes de volver a enviar:"
+          "title": "Opción 1: instalar o actualizar el CLI con las instrucciones oficiales",
+          "step0": "1. Abre las instrucciones oficiales y elige el instalador independiente, npm o Homebrew según tu entorno de ejecución. Actualiza siempre por el canal de instalación original; no ejecutes npm uninstall en una instalación independiente:",
+          "step1": "2. Comprueba la versión en una terminal nueva, actualiza Gestión de proveedores → CLI y vuelve a enviar:"
         },
         "pointCodexBin": {
           "title": "Opción 2: apuntar el plugin a un binario que funcione",

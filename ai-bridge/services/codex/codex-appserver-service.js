@@ -422,8 +422,8 @@ export class CodexAppServerService extends EventEmitter {
       base,
       '',
       ...details,
-      '- Codex CLI check: run "codex --version"; reinstall the CLI with'
-        + ' "npm install -g @openai/codex@latest" after removing a stale global install,'
+      '- Codex CLI check: run "codex --version"; install or update the CLI using'
+        + ' https://learn.chatgpt.com/docs/codex/cli#getting-started,'
         + ' or point CODEX_BIN at a working binary (Settings > Provider Management > CLI).',
     ].join('\n');
   }

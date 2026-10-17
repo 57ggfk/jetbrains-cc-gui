@@ -15,20 +15,37 @@
  */
 
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { listCliCandidates, resolveCliPath, stripOuterQuotes } from '../../utils/cli-path.js';
 
 export const CODEX_CLI_ENV_KEYS = ['CODEX_BIN', 'CODEX_PATH', 'CODEX_CLI_PATH'];
 
-/** Home install locations of the official CLI / npm global prefix. */
-const CODEX_HOME_CANDIDATES = [
-  '{home}/.local/bin/{bin}', '{home}/.cargo/bin/{bin}',
-  '{home}/.codex/bin/{bin}',
-];
+/** Mirrors the official standalone installer layout, covering entries the GUI process may not see on PATH. */
+export function codexHomeCandidates({ home = homedir(), platform = process.platform, env = process.env } = {}) {
+  const dirs = [];
+  const installDir = env.CODEX_INSTALL_DIR?.trim();
+  if (installDir) dirs.push(installDir);
+  if (platform === 'win32') {
+    const localAppData = env.LOCALAPPDATA?.trim() || join(home, 'AppData', 'Local');
+    dirs.push(join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin'));
+  }
+  dirs.push(join(home, '.local', 'bin'));
+  const codexHome = env.CODEX_HOME?.trim() || join(home, '.codex');
+  const current = join(codexHome, 'packages', 'standalone', 'current');
+  // Follow only the version the installer selected; older standalone packages
+  // place the binary directly under current.
+  dirs.push(join(current, 'bin'), current, join(home, '.cargo', 'bin'), join(home, '.codex', 'bin'));
+  return dirs.map((dir) => join(dir, '{bin}'));
+}
 
-/** Uses the same PATH, home and login-shell discovery as OpenCode. */
+/** Env overrides first, then PATH, installer locations and the login shell. */
 export function discoverCodexCli() {
-  const path = resolveCliPath({ binaryName: 'codex', homeCandidates: CODEX_HOME_CANDIDATES });
+  const path = resolveCliPath({
+    binaryName: 'codex',
+    envKeys: CODEX_CLI_ENV_KEYS,
+    homeCandidates: codexHomeCandidates(),
+  });
   return path === 'codex' ? null : path;
 }
 
@@ -43,7 +60,7 @@ export function discoverCodexCliCandidates() {
   return listCliCandidates({
     binaryName: 'codex',
     envKeys: CODEX_CLI_ENV_KEYS,
-    homeCandidates: CODEX_HOME_CANDIDATES,
+    homeCandidates: codexHomeCandidates(),
   });
 }
 
