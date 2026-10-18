@@ -55,7 +55,14 @@ const injectCompressedModuleBootstrap = (html) => {
         } finally {
           URL.revokeObjectURL(objectUrl);
         }
-      })().catch((error) => console.error('[CC GUI] Webview bootstrap failed', error));
+      })().catch((error) => {
+        console.error('[CC GUI] Webview bootstrap failed', error);
+        // A blank chat tab is indistinguishable from a slow one; surface the failure.
+        const fallback = document.createElement('p');
+        fallback.style.cssText = 'padding:16px;font-family:sans-serif';
+        fallback.textContent = '聊天界面资源加载失败，请关闭此标签页后重试。';
+        document.body.appendChild(fallback);
+      });
     </script>`;
   return html.replace(moduleScriptPattern, bootstrap);
 };
