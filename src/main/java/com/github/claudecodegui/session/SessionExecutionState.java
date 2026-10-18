@@ -263,7 +263,7 @@ public final class SessionExecutionState {
         }
         boolean waiting = phase == Phase.WAITING_USER;
         return new Snapshot(bindingEpoch, currentTurn == null ? "" : currentTurn.turnId(), phase,
-                waiting ? pending.reason() : WaitReason.NONE, waiting ? pending.id() : "", interactions.size(),
+                waiting ? pending.reason() : WaitReason.NONE, waiting ? pending.id() : "", waiting ? interactions.size() : 0,
                 outcome, terminalEventId, startedAt, completedAt, revision);
     }
 

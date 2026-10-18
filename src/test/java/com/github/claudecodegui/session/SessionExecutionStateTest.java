@@ -158,8 +158,10 @@ public class SessionExecutionStateTest {
         }
         assertNull(state.beginInteraction(turn, SessionExecutionState.WaitReason.PERMISSION));
         assertEquals(SessionExecutionState.Phase.UNKNOWN, state.snapshot().phase());
-        assertEquals(16, state.snapshot().pendingInteractionCount());
-        state.endInteraction(first);
+        assertEquals(0, state.snapshot().pendingInteractionCount());
+        assertEquals(SessionExecutionState.WaitReason.NONE, state.snapshot().waitReason());
+        assertEquals("", state.snapshot().pendingInteractionId());
+        assertTrue(state.endInteraction(first));
         state.activity(turn, SessionExecutionState.Phase.RUNNING);
         assertEquals(SessionExecutionState.Phase.UNKNOWN, state.snapshot().phase());
         state.beginTurn();
