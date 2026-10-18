@@ -73,6 +73,18 @@
     "context": "Context",
     "usage": "Usage",
     "usagePercentage": "Usage: {{percentage}}",
+    "planUsage": {
+      "title": "Claude plan usage",
+      "loading": "Loading usage…",
+      "unavailable": "Usage unavailable",
+      "dash": "Usage —",
+      "tooltipWindow": "{{period}} · {{percent}} used",
+      "tooltipReset": "Resets: {{value}} (local time)",
+      "clickToSwitch": "Click period label to switch window",
+      "worstHint": "Dot shows worst window ({{color}})",
+      "paceColors": { "green": "green", "yellow": "yellow", "red": "red", "neutral": "unknown" },
+      "stale": "Data may be outdated (refresh failed)"
+    },
     "noMatchingFiles": "No matching files",
     "noMatchingCommands": "No matching commands",
     "noMatchingHistory": "No matching history",
