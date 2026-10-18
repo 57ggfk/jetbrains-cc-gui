@@ -1,3 +1,55 @@
+##### **2026年10月18日（v0.6.0）**
+
+English:
+
+✨ Features
+- **Migrate the Codex runtime to a persistent app-server**: instead of spawning a fresh `codex exec` process per turn, the plugin now keeps a long-lived Codex app-server per session and talks JSON-RPC to it — operations are FIFO-queued, each send/control claims its own turn before waiting (so a control wait never clears a live send's waiting state, and callbacks stay isolated by turn ownership), a failed send setup releases the writer claim instead of leaking it, and startup falls back to the next detected Codex CLI install when the chosen one cannot start (by @gadfly3173, @GGMGG, @zhukunpenglinyutong)
+- **Answer Grok's `ask_user_question` in the IDE dialog**: ACP question requests now surface in the native permission/question dialog instead of stalling the session, with failed questions filtered and asynchronous retries deduplicated (by @toxeh)
+- **Show tool calls and thinking in the OpenCode process stream**: part-typed streaming events are rendered as tool/thinking blocks, with cumulative-suffix deduplication so repeated snapshots never double-print (by @57ggfk)
+- **Configure default collapse for batch tool groups**: edit/read batch groups share a collapse-preference factory, and denied edits count as failed in the group summary (by @GGMGG)
+- **Support the cc-switch aggregation model picker for Claude**: aggregated model routes keep their full effort-level sets and route/direct model mappings were refreshed, while provider settings and cc-switch model capabilities are isolated from each other (by @IcarusAegis)
+
+🔧 Improvements
+- **Codex history pagination on a fingerprint-validated page index**: session rollout files are fingerprinted (metadata plus sampled content) so equal-metadata rewrites, truncated tails and same-inode replacements invalidate cached pages instead of serving stale history, and message counts come from a native tally pipeline (by @GGMGG, @zhukunpenglinyutong)
+- **Harden the clipboard image paste lifecycle**: pasted images stay with their draft until attachments commit, the paste scope handshake retries instead of dropping images, and the same image delivered twice is attached only once (by @gadfly3173)
+- **Improve CLI detection**: the standalone-installed Codex is discovered without relying on PATH and only proven versions are trusted, ZCode detection finds the bundled app-server, Windows junction-based installs no longer silently exit from a broken ESM entry guard, and Codex users are pointed to Settings → Provider Management → CLI when no CLI is found (by @gadfly3173, @zxc1213)
+- **Resolve CLIs against a pristine environment snapshot**: Codex CLI discovery — status checks, the text service and app-server launches — now uses the daemon's frozen startup environment instead of the live `process.env`, so request-scoped variables injected by an untrusted session can no longer hijack which `codex` binary gets executed (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- **Render native Codex diffs before file approval**: file-approval dialogs show the native unified diff for the proposed changes, and a release-failed writer claim no longer wedges the session (by @jianhong-li)
+- **Retire stale Codex and Claude session ids**: sessions whose rollout file or transcript was pruned by the CLI are dropped from the resume list instead of restoring into an empty chat, new threads are named mid-turn while reload batches stay intact, and auxiliary title work retires on turn abort (by @gadfly3173, @zhukunpenglinyutong)
+- **Accept the highlighted slash command on Enter**: when the slash-command menu has a highlighted row, Enter selects it instead of sending the raw text (by @toxeh)
+- **Preserve chat scroll intent across layout changes**: the message list no longer jumps when the layout resizes mid-stream, and history reload guards accept complete streamed replies and anchor paginated reloads past uuid-less live tail rows (by @gadfly3173)
+- **Launch node-script Grok CLIs through node on Windows**: a Grok CLI resolved to a `.js`/`.mjs` script is spawned via the current node executable instead of failing CreateProcess (by @toxeh)
+- **Settle Codex turns and history reads that end without a terminal**: `turn/aborted` now releases its FIFO operation, idles the thread and ignores late terminals, so the operation queue can no longer stall waiting for a `turn/completed` that never arrives; a wedged app-server's history read timeout falls back to the persisted rollout instead of failing the page, and the fingerprint page index keeps a fully indexed entry when a stale page request is cancelled mid-read instead of evicting it (by @zhukunpenglinyutong)
+- **Harden paste, permission and edit-group edge cases**: an IDE image paste made before the input publishes its scope is queued (latest gesture only, with expiry) and delivered when the scope registers instead of being dropped, and the webview's scope handshake stops polling after 30 retries and re-arms on the bridge-ready event; a permission dialog whose timeout decision cannot be sent re-arms its countdown instead of deadlocking, and leaving bypassPermissions no longer strips a `danger-full-access` sandbox that came from the user's own Codex config; edit-group inline diff previews track a stable row key so streaming updates no longer close them, denied rows count as settled in the header progress, and Grok `.cmd`/`.bat` shims launch through `cmd.exe /d /s /c` on Windows instead of failing with ENOENT (by @zhukunpenglinyutong)
+
+中文：
+
+✨ 新功能
+- **Codex 运行时迁移到常驻 app-server**：不再每个回合临时拉起 `codex exec` 进程，插件现在为每个会话维持一个长生命周期的 Codex app-server 并通过 JSON-RPC 通信——操作按 FIFO 排队，每次发送/控制在等待前先声明自己的回合归属（控制等待不会清除进行中发送的等待状态，回调按回合归属相互隔离），发送准备失败会释放写锁而不是泄漏，所选 Codex CLI 无法启动时自动回退到下一个检测到的安装（by @gadfly3173、@GGMGG、@zhukunpenglinyutong）
+- **Grok 的 `ask_user_question` 在 IDE 弹窗中回答**：ACP 提问请求现在弹出原生权限/问题对话框，不再让会话干等；失败的提问会被过滤，异步重试做了去重（by @toxeh）
+- **OpenCode 过程流展示工具调用与思考过程**：分部分类型的流式事件渲染为工具/思考块，累计后缀去重保证重复快照不会重复输出（by @57ggfk）
+- **批量工具组支持配置默认折叠**：编辑/读取批量组共享折叠偏好工厂，被拒绝的编辑在组摘要中计为失败（by @GGMGG）
+- **Claude 支持 cc-switch 聚合模型选择器**：聚合模型路由保留完整推理强度集合，路由与直连模型映射已刷新，Provider 设置与 cc-switch 模型能力相互隔离（by @IcarusAegis）
+
+🔧 优化
+- **Codex 历史分页改用指纹校验的页面索引**：会话 rollout 文件带指纹（元数据 + 内容采样），等元数据重写、截断尾部与同 inode 替换都会让缓存页失效而不是提供过期历史，消息计数改走原生统计管线（by @GGMGG、@zhukunpenglinyutong）
+- **剪贴板图片粘贴全生命周期加固**：粘贴的图片在附件提交前始终跟随草稿，粘贴作用域握手改为重试而不是丢图，同一图片重复投递只挂载一次（by @gadfly3173）
+- **CLI 检测改进**：独立安装的 Codex 不依赖 PATH 即可发现且只信任经过验证的版本，ZCode 检测能找到内置 app-server，Windows junction 安装不再因 ESM 入口守卫失效而静默退出，找不到 CLI 时引导 Codex 用户前往 设置 → Provider Management → CLI（by @gadfly3173、@zxc1213）
+- **CLI 解析改用纯净环境快照**：Codex CLI 发现——状态检查、文本服务与 app-server 启动——统一使用守护进程启动时冻结的环境，而不是实时的 `process.env`，不可信会话注入的请求级变量再也无法劫持实际执行的 `codex` 二进制（by @zhukunpenglinyutong）
+
+🐛 修复
+- **Codex 文件审批前渲染原生 diff**：文件审批对话框展示提议变更的原生 unified diff，发布失败的写锁声明不再卡死会话（by @jianhong-li）
+- **清理过期的 Codex 与 Claude 会话 ID**：rollout 文件或会话记录已被 CLI 裁剪的会话会从恢复列表移除，不再恢复成空聊天；新会话在回合中即可命名且重载批次保持完整，回合中止时辅助标题任务同步退场（by @gadfly3173、@zhukunpenglinyutong）
+- **斜杠命令菜单高亮时回车选中命令**：菜单存在高亮行时 Enter 选中该命令，而不是把原文直接发送（by @toxeh）
+- **布局变化时保持聊天滚动意图**：流式输出中布局变化不再导致消息列表跳动；历史重载守卫接受完整的流式回复，并把分页重载锚定在无 uuid 的实时尾部行之后（by @gadfly3173）
+- **Windows 上通过 node 启动 node 脚本形态的 Grok CLI**：解析为 `.js`/`.mjs` 脚本的 Grok CLI 改由当前 node 可执行文件拉起，不再 CreateProcess 失败（by @toxeh）
+- **没有终态通知的 Codex 回合与历史读取也能正常收场**：`turn/aborted` 现在会释放其 FIFO 操作、让线程回到空闲并忽略迟到的终态，操作队列不会再干等一个永远不会到来的 `turn/completed`；卡死的 app-server 历史读取超时后回退到本地持久化的 rollout，而不是整页失败；指纹页面索引在过期分页请求中途取消时保留已完整索引的条目，不再误删（by @zhukunpenglinyutong）
+- **粘贴、权限与编辑组边界情况加固**：输入框发布粘贴作用域之前的 IDE 图片粘贴改为排队（只保留最后一次手势，带过期时间），作用域注册后再投递，不再直接丢图；webview 的作用域握手重试 30 次后停止轮询，并监听 bridge-ready 事件重新武装；权限弹窗的超时决定发送失败时倒计时会重新武装而不是死锁，退出 bypassPermissions 不再剥离用户自己 Codex 配置里的 `danger-full-access` 沙箱；编辑组内联 diff 预览改用稳定行键，流式更新不再把它顶掉，被拒绝的行计入头部进度，Grok `.cmd`/`.bat`  shim 在 Windows 上改经 `cmd.exe /d /s /c` 启动，不再 ENOENT（by @zhukunpenglinyutong）
+
+---
+
 ##### **2026年9月30日（v0.5.9）**
 
 English:
