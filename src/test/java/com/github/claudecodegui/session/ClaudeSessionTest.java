@@ -178,6 +178,9 @@ public class ClaudeSessionTest {
         session.setCodexControlWaiting(true);
         MessageCallback control = session.createCodexControlCallback();
         session.getState().rotateRuntimeSessionEpoch();
+        assertFalse(session.isBusy());
+        assertFalse(session.isLoading());
+        session.getState().beginTurn();
         session.getState().setError("restored-state");
 
         control.onError("old-control-error");
