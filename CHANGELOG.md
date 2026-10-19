@@ -1,3 +1,27 @@
+##### **2026年10月19日（v0.6.1）**
+
+English:
+
+🔧 Improvements
+- **Load chat tabs faster on Remote JCEF**: the webview no longer ships as a ~10 MB single-file HTML sent to every tab; hashed, gzipped assets are served from a stable origin and cached across chat tabs, and a visible fallback message replaces the blank page if the compressed bootstrap ever fails to load (by @Jefung)
+
+🐛 Fixes
+- **Stop subagents from silently falling back to built-in model names**: every model tier configured in settings.json (opus / sonnet / haiku / small-fast / subagent) now reaches the CLI environment, so a subagent declaring e.g. `model: opus` resolves to the configured third-party model instead of an unrecognized built-in name that endpoints silently reroute; tiers no longer present in the settings are cleared, so switching providers cannot leave stale model names behind (by @8p98h2fgnd-max)
+- **Keep Codex Full Auto and the effective sandbox in sync**: Full Auto now maps to danger-full-access on every platform; a wiped or pre-scope snapshot re-derives its access scope from the permission mode without ever overriding an explicit user choice; Settings > Permissions shows only the runtime-confirmed sandbox ("not confirmed yet" until the app-server echoes it) instead of presenting the requested value as effective (by @zhukunpenglinyutong)
+- **Refine the Claude plan usage indicator**: the compact summary no longer crams reset dates into one line; full per-window reset times (local time), the plan level and a stale-data warning move into a keyboard-accessible tooltip (Arrow/PageUp/PageDown/Home/End scroll, Escape closes) that follows the input box while it is dragged and always stays inside the viewport (by @GGMGG)
+
+中文：
+
+🔧 优化
+- **远程 JCEF 下聊天标签页加载更快**：webview 不再以约 10 MB 的单文件 HTML 逐标签页传输；带内容哈希的 gzip 资源通过固定域名供给并跨标签页缓存，压缩引导加载失败时显示明确的错误提示，不再白屏（by @Jefung）
+
+🐛 修复
+- **堵住子智能体静默回退到内置模型名**：settings.json 中配置的所有模型档位（opus / sonnet / haiku / small-fast / subagent）现在都会同步到 CLI 环境变量，子智能体声明 `model: opus` 等档位时可正确解析到配置的第三方模型，不再回退为端点无法识别而被静默改路由的内置模型名；设置中已删除的档位会被同步清除，避免切换供应商后残留旧模型名（by @8p98h2fgnd-max）
+- **Codex Full Auto 与实际生效沙箱保持同步**：Full Auto 在所有平台都映射为 danger-full-access；本地快照被清空或不含沙箱字段时，访问范围会跟随权限模式重新推导，且绝不覆盖用户显式做出的选择；「设置 > 权限」仅显示运行时确认的沙箱（确认前显示「尚未确认」），不再把请求值当作已生效值展示（by @zhukunpenglinyutong）
+- **优化 Claude 额度指示器**：紧凑摘要不再把重置日期挤在一行内；各窗口的完整重置时间（本地时间）、套餐等级与数据过期警示移至支持键盘操作的浮窗（方向键 / PageUp / PageDown / Home / End 滚动，Escape 关闭），浮窗跟随输入框拖拽移动并始终保持在可视区域内（by @GGMGG）
+
+---
+
 ##### **2026年10月18日（v0.6.0）**
 
 English:
