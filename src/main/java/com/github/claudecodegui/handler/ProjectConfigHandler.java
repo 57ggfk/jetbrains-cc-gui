@@ -163,14 +163,15 @@ public class ProjectConfigHandler {
         }
     }
 
+    /** Saves an explicit directory choice and retargets the active Codex thread at its next turn. */
     public void handleSetWorkingDirectory(String content) {
         try {
-            String projectPath = context.getProject().getBasePath();
+            String projectPath = this.context.getProject().getBasePath();
             if (projectPath == null) {
                 showError("Unable to resolve project path");
                 return;
             }
-            JsonObject json = gson.fromJson(content, JsonObject.class);
+            JsonObject json = this.gson.fromJson(content, JsonObject.class);
             String customWorkingDir = readString(json, "customWorkingDir", null);
             if (customWorkingDir != null && !customWorkingDir.trim().isEmpty()) {
                 java.io.File workingDirFile = new java.io.File(customWorkingDir);
@@ -182,7 +183,15 @@ public class ProjectConfigHandler {
                     return;
                 }
             }
-            settingsService.setCustomWorkingDirectory(projectPath, customWorkingDir);
+            this.settingsService.setCustomWorkingDirectory(projectPath, customWorkingDir);
+            if (this.context.getSession() != null && "codex".equals(this.context.getSession().getProvider())) {
+                this.context.getSession().setCwd(this.settingsService.getEffectiveWorkingDirectory(projectPath));
+                this.context.getSession().getState().setCodexCwdExplicit(true);
+            }
+            JsonObject response = new JsonObject();
+            response.addProperty("projectPath", projectPath);
+            response.addProperty("customWorkingDir", customWorkingDir == null ? "" : customWorkingDir);
+            this.pushJson("window.updateWorkingDirectory", response);
             LOG.info("[ProjectConfigHandler] Set custom working directory: " + customWorkingDir);
             showSuccess("Working directory config saved");
         } catch (Exception e) {
@@ -211,8 +220,13 @@ public class ProjectConfigHandler {
 
     public void handleGetCodexSandboxMode() {
         respondWithJson("window.updateCodexSandboxMode",
-            () -> jsonOf("sandboxMode", settingsService.getCodexSandboxMode(context.getProject().getBasePath())),
-            jsonOf("sandboxMode", "workspace-write"),
+            () ->
+                // Legacy project-level record only. It never takes part in a turn,
+                // so it must not be reported as the desired or effective policy:
+                // the live scope travels with each send, and the app-server echoes
+                // the confirmed policy back through thread/settings/updated.
+                sandboxPayload(settingsService.getCodexSandboxMode(context.getProject().getBasePath()), "legacy"),
+            sandboxPayload("workspace-write", "default"),
             "Failed to get Codex sandbox mode");
     }
 
@@ -225,13 +239,19 @@ public class ProjectConfigHandler {
             LOG.info("[ProjectConfigHandler] Set Codex sandbox mode: " + sandboxMode);
             ApplicationManager.getApplication().invokeLater(() -> {
                 context.callJavaScript("window.updateCodexSandboxMode",
-                    context.escapeJs(gson.toJson(jsonOf("sandboxMode", sandboxMode))));
+                    context.escapeJs(gson.toJson(sandboxPayload(sandboxMode, "user"))));
                 context.callJavaScript("window.showSuccessI18n", "toast.saveSuccess");
             });
         } catch (Exception e) {
             LOG.error("[ProjectConfigHandler] Failed to set Codex sandbox mode: " + e.getMessage(), e);
             showError("Failed to save Codex sandbox mode: " + e.getMessage());
         }
+    }
+
+    private static JsonObject sandboxPayload(String mode, String source) {
+        JsonObject result = jsonOf("sandboxMode", mode);
+        result.addProperty("sandboxSource", source);
+        return result;
     }
 
     public void handleGetAutoOpenFileEnabled() {
