@@ -4,6 +4,7 @@ import org.junit.Assume;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -71,6 +72,10 @@ public class HtmlLoaderTest {
         assertTrue(html.substring(bodyStart, bodyEnd).contains("style=\"background-color:"));
         assertTrue("per-tab HTML must not inline the frontend bundle", html.length() < 32_768);
         assertTrue(html.contains("https://cc-gui-webview.local/assets/"));
-        assertTrue(html.contains("DecompressionStream('gzip')"));
+        assertTrue("entry must share its canonical module URL with lazy chunks",
+                Pattern.compile("import\\(\"https://cc-gui-webview\\.local/assets/[^\"/]+\\.js\"\\)")
+                        .matcher(html).find());
+        assertFalse("blob entry URLs would create a second module identity",
+                html.contains("URL.createObjectURL"));
     }
 }
