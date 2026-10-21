@@ -33,29 +33,19 @@ const rewriteRelativeModuleImports = async (source) => {
   return rewritten;
 };
 
-const injectCompressedModuleBootstrap = (html) => {
+const injectModuleBootstrap = (html) => {
   const moduleScriptPattern = /<script type="module" crossorigin src="([^"]+)"><\/script>/;
   const match = html.match(moduleScriptPattern);
   if (!match) {
     throw new Error('Unable to find the Vite entry module');
   }
 
-  const compressedModuleUrl = `${match[1]}.gz`;
+  // Use the same URL as imports from lazy chunks so the browser evaluates the
+  // entry (and its React instance) exactly once. A blob URL creates a second
+  // module identity when a lazy chunk imports the canonical entry URL.
+  // The JCEF asset handler decompresses the stored .js.gz for this .js URL.
   const bootstrap = `<script type="module">
-      (async () => {
-        const response = await fetch(${JSON.stringify(compressedModuleUrl)});
-        if (!response.ok || !response.body) {
-          throw new Error(\`Failed to load compressed webview module: \${response.status}\`);
-        }
-        const sourceStream = response.body.pipeThrough(new DecompressionStream('gzip'));
-        const source = await new Response(sourceStream).text();
-        const objectUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
-        try {
-          await import(objectUrl);
-        } finally {
-          URL.revokeObjectURL(objectUrl);
-        }
-      })().catch((error) => {
+      import(${JSON.stringify(match[1])}).catch((error) => {
         console.error('[CC GUI] Webview bootstrap failed', error);
         // A blank chat tab is indistinguishable from a slow one; surface the failure.
         const fallback = document.createElement('p');
@@ -89,7 +79,7 @@ const copyAsset = async (fileName) => {
 };
 
 const main = async () => {
-  const html = injectCompressedModuleBootstrap(await readFile(distFile, 'utf-8'));
+  const html = injectModuleBootstrap(await readFile(distFile, 'utf-8'));
   await mkdir(path.dirname(targetFile), { recursive: true });
   await writeFile(targetFile, html, 'utf-8');
 
