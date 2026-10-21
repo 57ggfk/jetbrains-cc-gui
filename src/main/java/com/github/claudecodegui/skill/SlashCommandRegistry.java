@@ -371,17 +371,29 @@ public final class SlashCommandRegistry {
             return List.of();
         }
 
-        File[] entries = dir.listFiles();
-        if (entries == null) {
-            return List.of();
+        // A plugin manifest may declare each skill directory individually, e.g.
+        //   "skills": ["./skills/engineering/ask-matt", "./skills/engineering/tdd"]
+        // instead of one parent "skills" directory. In that case dirPath *is* a skill
+        // directory; listing its entries only yields SKILL.md and asset folders, so
+        // nothing parses as a skill and the whole array silently yields zero commands.
+        // Detect that shape and treat dirPath itself as the single skill to scan.
+        List<File> skillDirs = new ArrayList<>();
+        if (SkillFrontmatterParser.parse(dir.toPath()) != null) {
+            skillDirs.add(dir);
+        } else {
+            File[] entries = dir.listFiles();
+            if (entries == null) {
+                return List.of();
+            }
+            for (File entry : entries) {
+                if (entry.isDirectory() && !entry.getName().startsWith(".")) {
+                    skillDirs.add(entry);
+                }
+            }
         }
 
         List<SlashCommand> commands = new ArrayList<>();
-        for (File entry : entries) {
-            if (!entry.isDirectory() || entry.getName().startsWith(".")) {
-                continue;
-            }
-
+        for (File entry : skillDirs) {
             SkillFrontmatterParser.SkillMetadata metadata =
                     SkillFrontmatterParser.parse(entry.toPath());
             if (metadata == null) {
