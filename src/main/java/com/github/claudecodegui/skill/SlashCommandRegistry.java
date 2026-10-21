@@ -376,21 +376,25 @@ public final class SlashCommandRegistry {
         // instead of one parent "skills" directory. In that case dirPath *is* a skill
         // directory; listing its entries only yields SKILL.md and asset folders, so
         // nothing parses as a skill and the whole array silently yields zero commands.
-        // Detect that shape and treat dirPath itself as the single skill to scan.
+        // Detect that shape and treat dirPath itself as a skill to scan. Child
+        // directories are still scanned as well: asset folders contain no SKILL.md
+        // and are skipped by parse, while a genuinely mixed directory (root SKILL.md
+        // plus child skills) yields both instead of silently dropping the children.
         List<File> skillDirs = new ArrayList<>();
         SkillFrontmatterParser.SkillMetadata selfMeta = SkillFrontmatterParser.parse(dir.toPath());
         if (selfMeta != null) {
             skillDirs.add(dir);
-        } else {
-            File[] entries = dir.listFiles();
-            if (entries == null) {
-                return List.of();
-            }
+        }
+        File[] entries = dir.listFiles();
+        if (entries != null) {
             for (File entry : entries) {
                 if (entry.isDirectory() && !entry.getName().startsWith(".")) {
                     skillDirs.add(entry);
                 }
             }
+        }
+        if (skillDirs.isEmpty()) {
+            return List.of();
         }
 
         List<SlashCommand> commands = new ArrayList<>();

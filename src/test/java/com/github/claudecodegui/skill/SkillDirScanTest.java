@@ -55,6 +55,20 @@ public class SkillDirScanTest {
     }
 
     @Test
+    public void rootSkillPlusChildSkillsYieldsBoth() throws Exception {
+        Path root = tmp.newFolder("ccgui-mixed").toPath();
+        writeSkill(root, "root-skill");
+        writeSkill(root.resolve("child-skill"), "child-skill");
+
+        List<SlashCommandRegistry.SlashCommand> cmds = SlashCommandRegistry.scanSkillsAsCommands(
+                root.toString(), "user", null, null);
+
+        assertEquals(2, cmds.size());
+        assertTrue(cmds.stream().anyMatch(c -> c.name().equals("/root-skill")));
+        assertTrue(cmds.stream().anyMatch(c -> c.name().equals("/child-skill")));
+    }
+
+    @Test
     public void plainDirectoryWithNoSkillYieldsNothing() throws Exception {
         Path root = tmp.newFolder("ccgui-empty").toPath();
         Files.createDirectory(root.resolve("assets"));
