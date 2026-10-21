@@ -121,6 +121,13 @@ const injectCompressedModuleBootstrap = async (html) => {
         }
         const objectUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
         try {
+          // Lazy chunks import the canonical entry URL. Remap it to this blob so the
+          // entry (and its React instance) keeps a single module identity instead of
+          // being evaluated a second time under the canonical URL.
+          const importMap = document.createElement('script');
+          importMap.type = 'importmap';
+          importMap.textContent = JSON.stringify({ imports: { [${JSON.stringify(match[1])}]: objectUrl } });
+          document.head.appendChild(importMap);
           await import(objectUrl);
         } finally {
           URL.revokeObjectURL(objectUrl);
