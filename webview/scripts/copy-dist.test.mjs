@@ -19,6 +19,7 @@ const fixture = async (t, html) => {
   const assets = path.join(cwd, 'dist/assets');
   const resources = path.join(root, 'src/main/resources');
   await mkdir(assets, { recursive: true });
+  await writeFile(path.join(assets, 'index-style.css'), 'body {}');
   await writeFile(path.join(cwd, 'dist/index.html'), html);
   return { cwd, assets, resources };
 };
