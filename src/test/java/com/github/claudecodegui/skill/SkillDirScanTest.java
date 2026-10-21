@@ -1,6 +1,8 @@
 package com.github.claudecodegui.skill;
 
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,6 +19,9 @@ import static org.junit.Assert.assertTrue;
  */
 public class SkillDirScanTest {
 
+    @Rule
+    public final TemporaryFolder tmp = new TemporaryFolder();
+
     private static void writeSkill(Path dir, String name) throws Exception {
         Files.createDirectories(dir);
         String md = "---\nname: " + name + "\ndescription: " + name + " skill\n---\n\nbody\n";
@@ -25,7 +30,7 @@ public class SkillDirScanTest {
 
     @Test
     public void declaredSkillDirectoryItselfIsScanned() throws Exception {
-        Path root = Files.createTempDirectory("ccgui-skill-");
+        Path root = tmp.newFolder("ccgui-skill").toPath();
         Path skill = root.resolve("ask-matt");
         writeSkill(skill, "ask-matt");
 
@@ -38,7 +43,7 @@ public class SkillDirScanTest {
 
     @Test
     public void parentSkillsDirectoryStillScansChildren() throws Exception {
-        Path root = Files.createTempDirectory("ccgui-skills-");
+        Path root = tmp.newFolder("ccgui-skills").toPath();
         writeSkill(root.resolve("ask-matt"), "ask-matt");
         writeSkill(root.resolve("tdd"), "tdd");
 
@@ -51,7 +56,7 @@ public class SkillDirScanTest {
 
     @Test
     public void plainDirectoryWithNoSkillYieldsNothing() throws Exception {
-        Path root = Files.createTempDirectory("ccgui-empty-");
+        Path root = tmp.newFolder("ccgui-empty").toPath();
         Files.createDirectory(root.resolve("assets"));
 
         assertTrue(SlashCommandRegistry.scanSkillsAsCommands(

@@ -378,7 +378,8 @@ public final class SlashCommandRegistry {
         // nothing parses as a skill and the whole array silently yields zero commands.
         // Detect that shape and treat dirPath itself as the single skill to scan.
         List<File> skillDirs = new ArrayList<>();
-        if (SkillFrontmatterParser.parse(dir.toPath()) != null) {
+        SkillFrontmatterParser.SkillMetadata selfMeta = SkillFrontmatterParser.parse(dir.toPath());
+        if (selfMeta != null) {
             skillDirs.add(dir);
         } else {
             File[] entries = dir.listFiles();
@@ -395,7 +396,7 @@ public final class SlashCommandRegistry {
         List<SlashCommand> commands = new ArrayList<>();
         for (File entry : skillDirs) {
             SkillFrontmatterParser.SkillMetadata metadata =
-                    SkillFrontmatterParser.parse(entry.toPath());
+                    entry.equals(dir) ? selfMeta : SkillFrontmatterParser.parse(entry.toPath());
             if (metadata == null) {
                 LOG.debug("Skipping skill directory with invalid metadata: " + entry.getName());
                 continue;
