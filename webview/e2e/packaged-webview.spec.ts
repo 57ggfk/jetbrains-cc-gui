@@ -20,8 +20,8 @@ test('packaged chat tabs bootstrap compressed assets and preserve input and lazy
   const loadedAssets: string[] = [];
   const startupMs: number[] = [];
 
-  // Mirror JCEF's binary resource handler: .gz is fetched as-is, while lazy modules
-  // and styles are decompressed by Java before reaching Chromium.
+  // Mirror JCEF's binary resource handler: modules and styles are stored as
+  // gzip and decompressed by Java before reaching Chromium at their stable URL.
   await context.route('https://cc-gui-webview.local/assets/**', async (route) => {
     const fileName = path.posix.basename(new URL(route.request().url()).pathname);
     const compressed = fileName.endsWith('.js') || fileName.endsWith('.css');
@@ -55,8 +55,18 @@ test('packaged chat tabs bootstrap compressed assets and preserve input and lazy
     }));
     const bridge = window as PackagedWindow;
     bridge.__packagedBridgeEvents = [];
+    localStorage.setItem('language', 'en');
     bridge.sendToJava = (message) => {
       bridge.__packagedBridgeEvents.push(message);
+      if (message.startsWith('tt_ensure_server:') || message.startsWith('tt_proxy:')) {
+        const request = JSON.parse(message.slice(message.indexOf(':') + 1));
+        const data = message.startsWith('tt_ensure_server:')
+          ? { running: true, port: 7680 }
+          : { body: JSON.stringify({ data: [], totals: {}, projects: [], token: 'fixture' }) };
+        setTimeout(() => window.onTokenTrackerResponse?.(JSON.stringify({
+          requestId: request.requestId, ok: true, data,
+        })), 0);
+      }
       if (message.startsWith('get_dependency_status:')) {
         setTimeout(() => {
           const callback = (window as unknown as Record<string, unknown>).updateDependencyStatus;
@@ -112,12 +122,29 @@ test('packaged chat tabs bootstrap compressed assets and preserve input and lazy
     await expect(input).toBeEmpty();
 
     if (tab === 1) {
+      // This lazy chunk imports React from the entry module. Reopening it must
+      // reuse the running app rather than evaluate a second entry/React copy.
+      for (let visit = 0; visit < 2; visit++) {
+        await page.locator('.header button:has(.codicon-settings-gear)').click();
+        await page.locator('.codicon-graph').click();
+        await expect(page.locator('.tt-dashboard')).toBeVisible();
+        await expect(page.locator('.tt-dashboard')).toContainText('Daily Breakdown');
+        await expect(page.locator('.tt-dashboard').getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+        await expect.poll(() => page.evaluate(() => (window as PackagedWindow).__packagedBridgeEvents
+          .filter((event) => event.startsWith('frontend_ready:')).length)).toBe(1);
+        if (visit === 0) {
+          await page.screenshot({ path: testInfo.outputPath('packaged-usage.png') });
+        }
+        await page.locator('button:has(.codicon-arrow-left)').click();
+        await expect(input).toBeVisible();
+      }
       await page.screenshot({ path: testInfo.outputPath('packaged-chat.png') });
     }
     await page.close();
   }
 
-  expect(loadedAssets.some((name) => /^index-.*\.js\.gz$/.test(name))).toBe(true);
+  expect(loadedAssets.some((name) => /^index-.*\.js$/.test(name))).toBe(true);
+  expect(loadedAssets.some((name) => name.endsWith('.js.gz'))).toBe(false);
   expect(loadedAssets.some((name) => /^flowDiagram-.*\.js$/.test(name))).toBe(true);
   expect(errors).toEqual([]);
   await testInfo.attach('startup-metrics', {

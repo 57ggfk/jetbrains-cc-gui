@@ -52,9 +52,8 @@ test('packages a small bootstrap and lossless compressed assets with valid modul
   assert.equal(result.status, 0, result.stderr);
   const bootstrap = await readFile(path.join(resources, 'html/claude-chat.html'), 'utf8');
   assert.ok(Buffer.byteLength(bootstrap) < 32_768, 'per-tab HTML must not inline the bundle');
-  assert.ok(bootstrap.includes(`${origin}/assets/index-entry.js.gz`));
-  assert.ok(bootstrap.includes("DecompressionStream('gzip')"));
-  assert.ok(bootstrap.includes('URL.revokeObjectURL(objectUrl)'));
+  assert.ok(bootstrap.includes(`import("${origin}/assets/index-entry.js")`));
+  assert.ok(!bootstrap.includes('createObjectURL'), 'entry and lazy imports must share one module URL');
 
   const packaged = path.join(resources, 'webview/assets');
   const compressed = await readFile(path.join(packaged, 'index-entry.js.gz'));
