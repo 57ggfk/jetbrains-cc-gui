@@ -528,7 +528,7 @@ public class CodexSDKBridge extends BaseSDKBridge {
      * @param serviceTier selected service tier
      * @param callback streaming callback
      * @param clientMessageId stable optimistic-message identity
-     * @param nativeSettings filtered native collaboration/policy settings
+     * @param nativeSettings filtered native collaboration/policy settings with per-turn editor context
      * @return future completed at the native turn terminal
      */
     public CompletableFuture<SDKResult> sendMessage(

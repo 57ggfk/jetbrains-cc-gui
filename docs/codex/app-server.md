@@ -40,6 +40,18 @@
 
 示例 NDJSON 可由 Node fixture（`persistent-codex-service.test.js`）与 Java fixture 共同解析。
 
+### IDE 上下文与用户正文
+
+`codex.send.message` 只携带用户输入；活动文件与选区行号、最多 20 个其他打开文件路径、工作区信息分别通过 `additionalContext` 的 `ide_context`、`open_tabs`、`workspace_context` 片段传递，显式文件/终端引用分别使用带序号的 `referenced_files_<index>` / `terminal_context_<index>` 片段。每片段为 `{kind:"application", value:"..."}`，随本次 operation 冻结；各片段分别使用原生长度预算，长标签列表不会截掉活动文件或挤占显式引用。片段描述编辑器状态，不断言活动文件就是问题主题，也不内联文件正文或所选代码。角色与项目模块仍使用原来的 `developerInstructions`，编辑器变化不参与运行时 fingerprint 或持久设置 revision。
+
+仅在发送包含非空上下文时，当前 client 使用同一已解析 CLI 命令和环境执行一次 `app-server generate-json-schema --out <temp> --experimental`，读取 `v2/TurnStartParams.json` 的 `additionalContext` 字段；五秒超时、命令失败或 schema 不支持均回退。结果只缓存于当前 client，替换 CLI/重启 child 后重新探测，临时 schema 在探测结束时删除。探测不创建 thread 或 turn；绝不通过失败后重发 `turn/start` 来判断兼容性。
+
+支持该实验字段时，原生 `turn/start.input` 保留原始用户正文与图片，另传 `additionalContext`。Codex 将 application 片段作为模型可见的 developer 上下文，独立于可见的 `userMessage` item；它仍可能写入原生历史，并受原生每片段约 1,000 token 的截断和相邻状态去重约束。片段更新追加到上下文，不能删除历史中已发送的旧内容。
+
+不支持时采用官方 CLI/桌面端的文本约定：`# Context from my IDE setup:` 开头放上下文，再以 `## My request for Codex:` 引出用户输入。图片相对顺序不变，text element 偏移按 UTF-8 字节调整。此回退仍把上下文存入原始用户正文，支持该约定的客户端在展示时隐藏；插件的 `UserMessageSanitizer` 同步剥离此包装，保留旧版追加上下文的历史清理能力。兼容性由目标客户端版本决定，不承诺任意旧客户端都隐藏包装。
+
+`codex-ide-context.test.js` 覆盖 schema 探测/失败回退、临时文件清理、多片段回退与媒体/UTF-8 偏移；`codex-appserver-service.test.js` 和 `persistent-codex-service.test.js` 验证逐轮冻结、单次派发、原始用户正文及运行时复用。已取消的 operation 在能力探测前退出，探测期间取消也不会创建 thread/turn。Java 定向测试验证独立上下文预算、daemon 载荷拷贝和历史显示清理。
+
 ## 持久 service 运行时状态与恢复
 
 `CodexAppServerService`（`ai-bridge/services/codex/codex-appserver-service.js`）是每个聊天宿主一实例的常驻编排层。状态与恢复语义：

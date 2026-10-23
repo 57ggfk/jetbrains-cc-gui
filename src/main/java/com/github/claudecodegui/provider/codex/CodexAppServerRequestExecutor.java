@@ -434,6 +434,9 @@ class CodexAppServerRequestExecutor {
             if (nativeSettings.has("skills") && nativeSettings.get("skills").isJsonArray()) {
                 params.add("skills", nativeSettings.getAsJsonArray("skills").deepCopy());
             }
+            if (nativeSettings.has("additionalContext") && nativeSettings.get("additionalContext").isJsonObject()) {
+                params.add("additionalContext", nativeSettings.getAsJsonObject("additionalContext").deepCopy());
+            }
         }
         return params;
     }
