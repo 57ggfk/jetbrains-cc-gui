@@ -199,6 +199,22 @@ public class SessionExecutionAdapterTest {
         assertEquals(current, state.getExecutionSnapshot());
     }
 
+    @Test
+    public void asynchronousNativeQuestionsDoNotMarkARunningTurnAsBlocked() {
+        SessionState state = new SessionState();
+        state.setProvider("codex");
+        state.beginTurn();
+        CodexMessageHandler handler = new CodexMessageHandler(state, new CallbackHandler());
+        SessionExecutionState.Snapshot running = state.getExecutionSnapshot();
+        handler.onMessage("codex_runtime_event", """
+                {"kind":"interactionRequested","interactionKey":"async-question",
+                 "payload":{"method":"item/agentMessage/requestUserInput","params":{"isBlocking":false}}}
+                """);
+        assertEquals(running, state.getExecutionSnapshot());
+        handler.onMessage("codex_runtime_event", "{\"kind\":\"interactionResolved\",\"interactionKey\":\"async-question\"}");
+        assertEquals(running, state.getExecutionSnapshot());
+    }
+
     private static ClaudeMessageHandler claude(SessionState state) {
         return new ClaudeMessageHandler(null, state, new CallbackHandler(), new MessageParser(), new MessageMerger(), new Gson());
     }

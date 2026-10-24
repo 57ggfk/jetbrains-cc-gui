@@ -327,7 +327,7 @@ public class CodexMessageHandler implements MessageCallback {
         executionInteractions.clear();
     }
 
-    /** Native registry events refer to actual pending app-server RPC requests. */
+    /** Blocking native requests contribute to the execution wait state; async questions do not. */
     private void observeNativeInteraction(JsonObject event) {
         String key = stringProperty(event, "interactionKey");
         String kind = stringProperty(event, "kind");
@@ -341,6 +341,13 @@ public class CodexMessageHandler implements MessageCallback {
             JsonObject payload = event.getAsJsonObject("payload");
             String method = stringProperty(payload, "method");
             if (method == null || method.isBlank()) {
+                return;
+            }
+            JsonObject params = payload.has("params") && payload.get("params").isJsonObject()
+                    ? payload.getAsJsonObject("params") : null;
+            if (params != null && params.has("isBlocking") && params.get("isBlocking").isJsonPrimitive()
+                    && params.get("isBlocking").getAsJsonPrimitive().isBoolean()
+                    && !params.get("isBlocking").getAsBoolean()) {
                 return;
             }
             SessionExecutionState.WaitReason reason = method.endsWith("requestUserInput")
