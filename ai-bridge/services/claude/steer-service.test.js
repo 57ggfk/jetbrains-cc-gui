@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { __testing } from './persistent-query-service.js';
-import { createTurnSink } from './runtime-lifecycle.js';
+import { createTurnSink, registerRuntimeSession } from './runtime-lifecycle.js';
 import {
   STEER_MIN_CLI_VERSION,
   STEER_REJECT,
@@ -449,4 +449,174 @@ test('recordClaudeCodeVersionFromInit reads system/init.claude_code_version', ()
     claude_code_version: '2.1.220',
   }), true);
   assert.equal(runtime.claudeCodeVersion, '2.1.220');
+});
+
+test('missing queued_turn_count is treated as no queued turn (fold, never hang)', async () => {
+  const runtime = capableRuntime({
+    query: {
+      cancelAsyncMessage: async () => ({ cancelled: false }),
+    },
+  });
+  runtime.pendingSteers.set('uuid-1', { steerId: 'steer-1', prompt: 'later' });
+  // queued_turn_count is optional on the SDK result; undefined must not be
+  // read as "another turn is queued" (that parks executeTurn on take()).
+  const { text, result } = await captureStdout(() => handleSteerResultAndMaybeContinue(runtime, {
+    type: 'result',
+    is_error: false,
+    user_message_uuids: [],
+  }));
+  assert.equal(result, true);
+  assert.deepEqual(parseTags(text, '[STEER_FOLDED]'), [{
+    steerId: 'steer-1',
+    uuid: 'uuid-1',
+    prompt: 'later',
+  }]);
+  assert.equal(runtime.pendingSteers.size, 0);
+});
+
+test('steer lands on the runtime of its own session, not the active pointer', async () => {
+  await __testing.resetState();
+  const runtimeA = capableRuntime({ sessionId: 'sess-a', runtimeSessionEpoch: 'epoch-a' });
+  const runtimeB = capableRuntime({ sessionId: 'sess-b', runtimeSessionEpoch: 'epoch-b' });
+  registerRuntimeSession(runtimeB, 'sess-b', {});
+  // A holds the process-wide active pointer; the steer targets B's session.
+  __testing.setActiveTurnRuntime(runtimeA);
+  const result = await steerMessagePersistent(
+    { steerId: 's-b', message: 'for B', sessionId: 'sess-b', runtimeSessionEpoch: 'epoch-b' },
+    { buildUserMessage },
+  );
+  assert.deepEqual(result, { delivered: true });
+  assert.equal(runtimeB.__enqueued.length, 1);
+  assert.equal(runtimeA.__enqueued.length, 0);
+});
+
+test('steer rejects when the epoch does not match the session runtime', async () => {
+  await __testing.resetState();
+  const runtimeB = capableRuntime({ sessionId: 'sess-b', runtimeSessionEpoch: 'epoch-b' });
+  registerRuntimeSession(runtimeB, 'sess-b', {});
+  const result = await steerMessagePersistent(
+    { steerId: 's-b', message: 'for B', sessionId: 'sess-b', runtimeSessionEpoch: 'epoch-stale' },
+    { buildUserMessage },
+  );
+  assert.deepEqual(result, { delivered: false, reason: STEER_REJECT.SESSION_MISMATCH });
+  assert.equal(runtimeB.__enqueued.length, 0);
+});
+
+test('blank sessionId on the runtime side never matches a known sessionId', async () => {
+  await __testing.resetState();
+  // Anonymous runtime (session id not landed yet) holding the active pointer.
+  const runtime = capableRuntime({ sessionId: '', runtimeSessionEpoch: 'epoch-new' });
+  __testing.setActiveTurnRuntime(runtime);
+  const result = await steerMessagePersistent(
+    { steerId: 's1', message: 'hi', sessionId: 'sess-known', runtimeSessionEpoch: 'epoch-new' },
+    { buildUserMessage },
+  );
+  assert.deepEqual(result, { delivered: false, reason: STEER_REJECT.SESSION_MISMATCH });
+  assert.equal(runtime.__enqueued.length, 0);
+});
+
+test('unrelated CLI queued_command flows through when no steer is pending', () => {
+  const runtime = capableRuntime();
+  // CLI's own queue (peer/channel injects, SendMessage, TUI input) shares
+  // commandMode 'prompt'; with no pending steer it must reach [MESSAGE].
+  const consumed = tryEmitSteerFolded(runtime, {
+    type: 'attachment',
+    attachment: { type: 'queued_command', commandMode: 'prompt', prompt: 'cli queue item' },
+  });
+  assert.equal(consumed, false);
+});
+
+test('executeTurn settles pending steers as undelivered when the turn errors', async () => {
+  await __testing.resetState();
+  const runtime = capableRuntime({ turnSink: null });
+  runtime.activeTurnCount = 0;
+  runtime.cliTurnInFlight = false;
+  runtime.readerProgress = 0;
+  __testing.setActiveTurnRuntime(runtime);
+
+  const turnPromise = __testing.executeTurn(runtime, {
+    requestedSessionId: 'sess-1',
+    runtimeSessionEpoch: 'epoch-1',
+    options: { cwd: '/tmp' },
+    permissionMode: 'default',
+    streamingEnabled: false,
+    userMessage: { type: 'user', message: { role: 'user', content: 'hi' } },
+  });
+
+  while (!runtime.turnSink) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  const steer = await steerMessagePersistent(
+    { steerId: 'steer-err', message: 'inject', sessionId: 'sess-1', runtimeSessionEpoch: 'epoch-1' },
+    { buildUserMessage },
+  );
+  assert.equal(steer.delivered, true);
+
+  const { text } = await captureStdout(async () => {
+    runtime.turnSink.push({ type: 'result', is_error: true, errors: ['boom'] });
+    await assert.rejects(turnPromise, /boom/);
+  });
+
+  assert.deepEqual(parseTags(text, '[STEER_UNDELIVERED]'), [{ steerId: 'steer-err' }]);
+  assert.equal(runtime.pendingSteers.size, 0);
+});
+
+test('executeTurn holds back an intermediate result while a steer keeps reading', async () => {
+  await __testing.resetState();
+  const runtime = capableRuntime({
+    turnSink: null,
+    query: { cancelAsyncMessage: async () => ({ cancelled: false }) },
+  });
+  runtime.activeTurnCount = 0;
+  runtime.cliTurnInFlight = false;
+  runtime.readerProgress = 0;
+  __testing.setActiveTurnRuntime(runtime);
+
+  const turnPromise = __testing.executeTurn(runtime, {
+    requestedSessionId: 'sess-1',
+    runtimeSessionEpoch: 'epoch-1',
+    options: { cwd: '/tmp' },
+    permissionMode: 'default',
+    streamingEnabled: false,
+    userMessage: { type: 'user', message: { role: 'user', content: 'hi' } },
+  });
+
+  while (!runtime.turnSink) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  const steer = await steerMessagePersistent(
+    { steerId: 'steer-mid', message: 'inject', sessionId: 'sess-1', runtimeSessionEpoch: 'epoch-1' },
+    { buildUserMessage },
+  );
+  assert.equal(steer.delivered, true);
+  // executeTurn also enqueues the turn's own user message; find the steer by
+  // its priority marker instead of assuming an index.
+  const uuid = runtime.__enqueued.find((m) => m.priority === 'next')?.uuid;
+  assert.equal(typeof uuid, 'string');
+
+  const { text } = await captureStdout(async () => {
+    // Sub-turn result: cancel refused and the CLI queued another turn.
+    runtime.turnSink.push({ type: 'result', is_error: false, user_message_uuids: [], queued_turn_count: 1 });
+    // The steered message folds at the next tool boundary.
+    runtime.turnSink.push({
+      type: 'user',
+      uuid,
+      parent_tool_use_id: null,
+      message: { role: 'user', content: [{ type: 'text', text: 'inject' }] },
+    });
+    // Final result ends the request.
+    runtime.turnSink.push({ type: 'result', is_error: false, user_message_uuids: [uuid], queued_turn_count: 0 });
+    await turnPromise;
+  });
+
+  const resultMessages = text.split('\n')
+    .filter((line) => line.startsWith('[MESSAGE] '))
+    .map((line) => JSON.parse(line.slice('[MESSAGE] '.length)))
+    .filter((m) => m.type === 'result');
+  // Only the final result reaches Java; the sub-turn result must not trigger
+  // turn finalization (loading, footer, usage) mid-request.
+  assert.equal(resultMessages.length, 1);
+  assert.deepEqual(resultMessages[0].user_message_uuids, [uuid]);
 });

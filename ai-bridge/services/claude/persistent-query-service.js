@@ -422,6 +422,17 @@ _runtimeCleanupTimer.unref();
         continue;
       }
 
+      // A non-error result may only close a steer sub-turn: decide whether to
+      // keep reading BEFORE emitting anything. Emitting the result first would
+      // let Java finalize the whole turn (loading, footer, usage) while more
+      // content and a second result are still coming on this request.
+      if (msg?.type === 'result' && !msg.is_error) {
+        const shouldBreak = await handleSteerResultAndMaybeContinue(runtime, msg);
+        if (!shouldBreak) {
+          continue;
+        }
+      }
+
       // Preserve all existing message processing logic
       if (shouldOutputMessage(msg, turnState)) {
         console.log('[MESSAGE]', JSON.stringify(msg));
@@ -454,10 +465,8 @@ _runtimeCleanupTimer.unref();
         }
         // A result belongs to the active user turn unless the SDK explicitly marks
         // it as a background task follow-up above. Result-only turns are valid.
-        const shouldBreak = await handleSteerResultAndMaybeContinue(runtime, msg);
-        if (!shouldBreak) {
-          continue;
-        }
+        // The steer keep-reading decision already ran before the emit pipeline;
+        // reaching here means this result ends the request.
         break;
       }
     }
@@ -503,6 +512,13 @@ _runtimeCleanupTimer.unref();
       }
     }
   } finally {
+    // A turn that ends abnormally (SDK error / stream cut / sink failure)
+    // never reaches handleSteerResultAndMaybeContinue: the CLI queue entries
+    // can no longer be folded, so settle them here. Otherwise the frontend
+    // bubble stays pending forever and the stale uuid would poison the next
+    // turn's cancelAsyncMessage. No-op on the normal/abort paths where the
+    // map is already empty.
+    dumpPendingSteersAsUndelivered(runtime);
     endRuntimeTurn(runtime);
     // Clear turnSink after endRuntimeTurn (reverse of creation order)
     runtime.turnSink = null;

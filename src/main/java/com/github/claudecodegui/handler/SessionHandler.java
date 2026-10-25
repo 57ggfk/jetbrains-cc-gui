@@ -470,13 +470,21 @@ public class SessionHandler extends BaseMessageHandler {
             final java.util.List<ClaudeSession.Attachment> finalAtts = atts.isEmpty() ? null : atts;
 
             CompletableFuture.runAsync(() -> {
-                context.getSession().steer(
-                        finalSteerId,
-                        finalText,
-                        finalAtts,
-                        finalAgentPrompt,
-                        finalRequestedReasoningEffort
-                );
+                try {
+                    context.getSession().steer(
+                            finalSteerId,
+                            finalText,
+                            finalAtts,
+                            finalAgentPrompt,
+                            finalRequestedReasoningEffort
+                    );
+                } catch (Throwable t) {
+                    // The pool would swallow this silently and no receipt would
+                    // ever reach the webview: the bubble stays pending and the
+                    // queue row stays hidden. Always settle as rejected.
+                    LOG.error("[SessionHandler] steer dispatch failed: " + t.getMessage(), t);
+                    notifySteerRejected(finalSteerId);
+                }
             });
         } catch (Exception e) {
             LOG.error("[SessionHandler] Failed to parse steer_message: " + e.getMessage(), e);

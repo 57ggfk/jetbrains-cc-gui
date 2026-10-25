@@ -7,9 +7,9 @@
  * - rejected    → retract it and put the queue row back;
  * - undelivered → retract it and requeue the item at the head.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { TFunction } from 'i18next';
-import { registerSteerCallbacks } from '../registerCallbacks/steerCallbacks';
+import { armSteerReceiptTimeout, registerSteerCallbacks } from '../registerCallbacks/steerCallbacks';
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
 import type { ClaudeMessage } from '../../../types';
 import { buildSteeredUserMessage } from '../../../utils/steerMessages';
@@ -182,5 +182,41 @@ describe('steerCallbacks', () => {
     expect(messages).toHaveLength(3);
     expect(messages[1]).toMatchObject({ type: 'user', steered: true });
     expect(messages[2]).toMatchObject({ type: 'assistant', isStreaming: true });
+  });
+
+  it('settles as rejected when no receipt arrives within the backstop window', () => {
+    vi.useFakeTimers();
+    try {
+      const { calls, getMessages } = createHarness([streamingAssistant, optimisticBubble()]);
+
+      armSteerReceiptTimeout(STEER_ID);
+      vi.advanceTimersByTime(15_000);
+
+      // The bubble is retracted and the queue row restored, as if Java had
+      // answered rejected — the steer can no longer strand in `steering`.
+      expect(getMessages()).toHaveLength(1);
+      expect(calls.restore).toHaveLength(1);
+      expect(calls.restore[0][0]).toBe(STEER_ID);
+      expect(calls.toasts).toEqual(['chat.steerRejected.timeout']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a real receipt disarms the backstop', () => {
+    vi.useFakeTimers();
+    try {
+      const { calls } = createHarness([streamingAssistant, optimisticBubble()]);
+
+      armSteerReceiptTimeout(STEER_ID);
+      window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'accepted' }));
+      vi.advanceTimersByTime(60_000);
+
+      expect(calls.markSteering).toEqual([STEER_ID]);
+      expect(calls.restore).toHaveLength(0);
+      expect(calls.toasts).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

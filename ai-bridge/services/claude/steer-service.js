@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { getActiveTurnRuntime } from './runtime-registry.js';
+import { getActiveTurnRuntime, getRuntimeForSession } from './runtime-registry.js';
 
 /** Minimum Claude Code CLI version that supports async-message steer. */
 export const STEER_MIN_CLI_VERSION = '2.1.220';
@@ -126,8 +126,11 @@ export function recordClaudeCodeVersionFromInit(runtime, msg) {
 function idsMatch(left, right) {
   const a = typeof left === 'string' ? left.trim() : '';
   const b = typeof right === 'string' ? right.trim() : '';
+  // A blank id on either side is never a match: several tool windows share
+  // this daemon, and a loose match could inject the message into another
+  // session's live turn running in another project directory.
   if (!a || !b) {
-    return true;
+    return false;
   }
   return a === b;
 }
@@ -237,10 +240,26 @@ export function tryEmitSteerFolded(runtime, msg) {
   // replay cannot leak a second row into [MESSAGE].
   const attachment = getQueuedCommandAttachment(msg);
   if (attachment && FOLD_COMMAND_MODES.has(attachment.commandMode)) {
-    if (runtime.pendingSteers.size === 0) {
+    if (runtime.pendingSteers.size > 0) {
+      return foldOldestPendingSteer(runtime, attachment.prompt);
+    }
+    // Nothing pending: commandMode 'prompt' is not ours alone — the CLI's own
+    // queue (peer/channel injects, SendMessage, TUI input) uses it too. Only
+    // swallow carriers confirmed as replays of an already-folded steer (uuid
+    // or prompt hit in foldedSteers); anything else must flow to [MESSAGE].
+    const attachmentUuid = typeof attachment.uuid === 'string' ? attachment.uuid.trim() : '';
+    if (attachmentUuid && runtime.foldedSteers.has(attachmentUuid)) {
       return true;
     }
-    return foldOldestPendingSteer(runtime, attachment.prompt);
+    const attachmentPrompt = normalizePromptText(attachment.prompt);
+    if (attachmentPrompt) {
+      for (const record of runtime.foldedSteers.values()) {
+        if (normalizePromptText(record.prompt) === attachmentPrompt) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   if (msg?.type !== 'user' || isToolResultUserMessage(msg)) {
@@ -337,7 +356,10 @@ export async function handleSteerResultAndMaybeContinue(runtime, resultMsg) {
     keepReading = true;
   }
 
-  if (keepReading && resultMsg?.queued_turn_count !== 0) {
+  // queued_turn_count is optional on the SDK result: treat "unknown" as "no
+  // queued turn" so a missing field can never park this request on
+  // turnSink.take() forever.
+  if (keepReading && (resultMsg?.queued_turn_count ?? 0) !== 0) {
     return false;
   }
 
@@ -371,7 +393,14 @@ export function dumpPendingSteersAsUndelivered(runtime) {
  */
 export async function steerMessagePersistent(params = {}, deps = {}) {
   const buildUserMessage = deps.buildUserMessage;
-  const runtime = getActiveTurnRuntime();
+  // Several tool windows share this daemon and activeTurnRuntime is a
+  // process-wide pointer overwritten by every executeTurn. Locate the runtime
+  // by the caller's sessionId first; only an anonymous request (no sessionId
+  // yet) falls back to the active pointer.
+  const requestedSessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
+  const runtime = requestedSessionId
+    ? (getRuntimeForSession(requestedSessionId) || getActiveTurnRuntime())
+    : getActiveTurnRuntime();
   if (!runtime) {
     return { delivered: false, reason: STEER_REJECT.NO_ACTIVE_TURN };
   }
@@ -381,7 +410,10 @@ export async function steerMessagePersistent(params = {}, deps = {}) {
   if (!runtime.turnSink) {
     return { delivered: false, reason: STEER_REJECT.NO_ACTIVE_TURN };
   }
-  if (!idsMatch(params.sessionId, runtime.sessionId)
+  // sessionId is the primary key when the caller knows it; the exact epoch
+  // must always match and carries the anonymous case (new session before
+  // [SESSION_ID] lands). Blank ids never count as a match.
+  if ((requestedSessionId && !idsMatch(requestedSessionId, runtime.sessionId))
       || !idsMatch(params.runtimeSessionEpoch, runtime.runtimeSessionEpoch)) {
     return { delivered: false, reason: STEER_REJECT.SESSION_MISMATCH };
   }
@@ -397,10 +429,7 @@ export async function steerMessagePersistent(params = {}, deps = {}) {
 
   ensureSteerMaps(runtime);
   const hasAttachments = Array.isArray(params.attachments) && params.attachments.length > 0;
-  const requestedSessionId = (typeof params.sessionId === 'string' && params.sessionId.trim() !== '')
-    ? params.sessionId.trim()
-    : (runtime.sessionId || '');
-  const userMessage = await buildUserMessage(params, hasAttachments, requestedSessionId);
+  const userMessage = await buildUserMessage(params, hasAttachments, requestedSessionId || runtime.sessionId || '');
   const uuid = randomUUID();
   userMessage.priority = 'next';
   userMessage.uuid = uuid;

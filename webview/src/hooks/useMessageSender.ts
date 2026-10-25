@@ -2,6 +2,7 @@ import { useCallback, type RefObject } from 'react';
 import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
 import { buildSteeredUserMessage } from '../utils/steerMessages';
+import { armSteerReceiptTimeout } from './windowCallbacks/registerCallbacks/steerCallbacks';
 import type { ClaudeContentBlock, ClaudeMessage } from '../types';
 import type { QueuedMessage } from './useMessageQueue';
 import {
@@ -494,6 +495,9 @@ export function useMessageSender({
       steerId: item.id,
     });
     sendBridgeEvent('steer_message', payload);
+    // Backstop: if no accepted/rejected receipt arrives (e.g. Java swallowed a
+    // dispatch failure), settle the steer as rejected after the daemon timeout.
+    armSteerReceiptTimeout(item.id);
     return true;
   }, [
     selectedAgent,

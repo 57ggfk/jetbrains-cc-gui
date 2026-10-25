@@ -29,6 +29,43 @@ interface SteerFoldedPayload {
 }
 
 /**
+ * Backstop for a steer receipt that never arrives: the daemon steer command
+ * times out after 10s (ClaudeSDKBridge.steerLive), so if no accepted/rejected
+ * receipt reached this window 15s after dispatch, settle the steer as
+ * rejected (reason 'timeout') through the normal receipt path. Without this,
+ * a dispatch exception swallowed before the daemon call (e.g. session not
+ * built yet) would strand the bubble in `steering` and keep the queue row
+ * hidden forever.
+ */
+const STEER_RECEIPT_TIMEOUT_MS = 15_000;
+/** Pending backstop timer handle (number in the DOM build, Timeout under Node types). */
+type SteerReceiptTimer = ReturnType<typeof setTimeout>;
+const steerReceiptTimers = new Map<string, SteerReceiptTimer>();
+
+function disarmSteerReceiptTimeout(steerId: string): void {
+  const timer = steerReceiptTimers.get(steerId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    steerReceiptTimers.delete(steerId);
+  }
+}
+
+/**
+ * Start the receipt backstop for a freshly dispatched steer.
+ *
+ * @param steerId frontend correlation id
+ */
+export function armSteerReceiptTimeout(steerId: string): void {
+  if (!steerId) return;
+  disarmSteerReceiptTimeout(steerId);
+  steerReceiptTimers.set(steerId, setTimeout(() => {
+    steerReceiptTimers.delete(steerId);
+    console.error(`[Steer] no receipt within ${STEER_RECEIPT_TIMEOUT_MS}ms steerId=${steerId}`);
+    window.onSteerResult?.(JSON.stringify({ steerId, status: 'rejected', reason: 'timeout' }));
+  }, STEER_RECEIPT_TIMEOUT_MS));
+}
+
+/**
  * Convert the Java fold payload into a frontend user message.
  *
  * @param payload folded steer payload
@@ -70,6 +107,7 @@ export function registerSteerCallbacks(
       const api = options.messageQueueSteerRef?.current;
       const steerId = payload.steerId;
       if (!api || !steerId) return;
+      disarmSteerReceiptTimeout(steerId);
       if (payload.status === 'accepted') {
         api.markSteering(steerId);
         return;
@@ -128,6 +166,9 @@ export function registerSteerCallbacks(
       const payload = JSON.parse(json) as SteerFoldedPayload;
       const api = options.messageQueueSteerRef?.current;
       const steerId = payload.steerId;
+      if (steerId) {
+        disarmSteerReceiptTimeout(steerId);
+      }
       if (api && steerId) {
         api.dequeue(steerId);
       }
