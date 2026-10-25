@@ -230,6 +230,27 @@ public class McpConfigLossGuardTest {
         }
     }
 
+    /**
+     * A corrupt primary must fail the update instead of being replaced by a
+     * document rebuilt from scratch (review item 1).
+     */
+    @Test
+    public void corruptPrimaryIsNotOverwrittenByUpsert() throws Exception {
+        String torn = "{\"mcpServers\":{\"srv-a\":{\"comm";
+        Files.writeString(claudeJsonPath, torn, StandardCharsets.UTF_8);
+
+        try {
+            manager.upsertMcpServer(buildServer("srv-b", "uvx"));
+            fail("an unreadable primary must fail the update");
+        } catch (IOException expected) {
+            assertTrue("the failure must be reported, not swallowed",
+                    expected.getMessage().contains("Failed to update"));
+        }
+
+        assertEquals("the unreadable primary must be left for the user to inspect", torn,
+                Files.readString(claudeJsonPath, StandardCharsets.UTF_8));
+    }
+
     /** Deleting a server keeps the other servers. */
     @Test
     public void deleteRemovesOnlyTargetServer() throws Exception {
