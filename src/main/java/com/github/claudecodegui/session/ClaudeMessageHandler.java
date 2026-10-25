@@ -1,7 +1,6 @@
 package com.github.claudecodegui.session;
 
 import com.github.claudecodegui.session.ClaudeSession.Message;
-import com.github.claudecodegui.handler.SettingsHandler;
 import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.common.MessageCallback;
@@ -427,7 +426,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                 if (messageObj.has("usage") && messageObj.get("usage").isJsonObject()) {
                     JsonObject usage = messageObj.getAsJsonObject("usage");
                     int usedTokens = TokenUsageUtils.extractContextTokens(usage, state.getProvider());
-                    int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
+                    int maxTokens = ModelProviderHandler.getClaudeContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
                     LOG.debug("Updated token usage from assistant message: " + usedTokens);
@@ -728,7 +727,7 @@ public class ClaudeMessageHandler implements MessageCallback {
                         msg.add("usage", usageJson);
                     }
                     int usedTokens = TokenUsageUtils.extractContextTokens(usageJson, state.getProvider());
-                    int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
+                    int maxTokens = ModelProviderHandler.getClaudeContextLimit(state.getModel());
                     ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
                     callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);
                     LOG.debug("Fallback: updated token usage from result message: " + usedTokens);
@@ -1122,7 +1121,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         try {
             JsonObject usageJson = gson.fromJson(content, JsonObject.class);
             int usedTokens = TokenUsageUtils.extractContextTokens(usageJson, state.getProvider());
-            int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
+            int maxTokens = ModelProviderHandler.getClaudeContextLimit(state.getModel());
             ClaudeNotifier.setTokenUsage(project, usedTokens, maxTokens);
             // Notify webview of usage update
             callbackHandler.notifyUsageUpdate(usedTokens, maxTokens);

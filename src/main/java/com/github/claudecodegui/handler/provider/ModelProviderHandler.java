@@ -6,6 +6,7 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 import com.github.claudecodegui.session.SessionSendService;
 import com.github.claudecodegui.session.SessionState;
 import com.github.claudecodegui.skill.SlashCommandRegistry;
+import com.github.claudecodegui.provider.ClaudeContextWindowOverrideProvider;
 import com.github.claudecodegui.provider.CustomModelContextWindowProvider;
 import com.github.claudecodegui.util.EditorFileUtils;
 import com.github.claudecodegui.util.TokenUsageUtils;
@@ -122,17 +123,25 @@ public class ModelProviderHandler {
                     + " (was: " + previousModel + ")");
             context.setCurrentModel(model);
 
+            String provider = context.getCurrentProvider();
+            boolean isCodex = "codex".equalsIgnoreCase(provider);
+
             if (context.getSession() != null) {
                 // Explicit user pick from the webview: store verbatim so a custom
                 // model id is never rewritten by the retired-model migration.
                 context.getSession().setModelVerbatim(model);
-                if (modelChanged) {
+                // Codex usage snapshots embed the previous model's
+                // model_context_window, so they must be dropped on a model switch.
+                // Claude snapshots only carry token counts and the transcript is
+                // unchanged, so the current context survives the switch and only
+                // the capacity denominator needs recalculation.
+                if (modelChanged && isCodex) {
                     clearSessionUsage();
                 }
                 LOG.info("[ModelProviderHandler] Updated session model to canonical ID: " + model);
             }
 
-            if (modelChanged) {
+            if (modelChanged && isCodex) {
                 usagePushService.clearUsageDisplay();
             }
 
@@ -140,12 +149,10 @@ public class ModelProviderHandler {
                 com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
             }
 
-            String provider = context.getCurrentProvider();
-            boolean isCodex = "codex".equalsIgnoreCase(provider);
             String resolvedModelForUsage = isCodex ? model : resolveConfiguredClaudeModelFromSettings(model);
             int newMaxTokens = isCodex
                     ? getModelContextLimit(provider, model)
-                    : getModelContextLimit(resolvedModelForUsage);
+                    : getClaudeContextLimit(resolvedModelForUsage);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
                     + ", resolved model: " + resolvedModelForUsage);
@@ -432,24 +439,35 @@ public class ModelProviderHandler {
         }
 
         String mainModel = readConfiguredEnvValue(env, "ANTHROPIC_MODEL");
+        String mappedModel = null;
         if (lowerBaseModel.contains("fable")) {
-            String mappedFable = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_FABLE_MODEL");
-            return mappedFable != null ? mappedFable : mainModel != null ? mainModel : baseModel;
-        }
-        if (lowerBaseModel.contains("opus")) {
-            String mappedOpus = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_OPUS_MODEL");
-            return mappedOpus != null ? mappedOpus : mainModel != null ? mainModel : baseModel;
-        }
-        if (lowerBaseModel.contains("haiku")) {
-            String mappedHaiku = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_HAIKU_MODEL");
-            return mappedHaiku != null ? mappedHaiku : mainModel != null ? mainModel : baseModel;
-        }
-        if (lowerBaseModel.contains("sonnet")) {
-            String mappedSonnet = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_SONNET_MODEL");
-            return mappedSonnet != null ? mappedSonnet : mainModel != null ? mainModel : baseModel;
+            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_FABLE_MODEL");
+        } else if (lowerBaseModel.contains("opus")) {
+            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_OPUS_MODEL");
+        } else if (lowerBaseModel.contains("haiku")) {
+            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_HAIKU_MODEL");
+        } else if (lowerBaseModel.contains("sonnet")) {
+            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_SONNET_MODEL");
         }
 
-        return baseModel;
+        if (mappedModel == null) {
+            mappedModel = mainModel != null ? mainModel : baseModel;
+        }
+
+        return preserveRequested1MContext(baseModel, mappedModel);
+    }
+
+    /**
+     * A settings mapping replaces the model name but not the user's 1M choice.
+     * The bridge appends {@code [1m]} back before spawning the CLI, so the Java
+     * context-window calculation must see the same suffix.
+     */
+    static String preserveRequested1MContext(String requestedModel, String mappedModel) {
+        if (mappedModel == null || requestedModel == null
+                || !requestedModel.toLowerCase().endsWith("[1m]")) {
+            return mappedModel;
+        }
+        return mappedModel.toLowerCase().endsWith("[1m]") ? mappedModel : mappedModel + "[1m]";
     }
 
     private static String readConfiguredEnvValue(JsonObject env, String key) {
@@ -471,6 +489,23 @@ public class ModelProviderHandler {
             return 200_000;
         }
 
+        Integer suffixLimit = parseCapacitySuffix(model);
+        if (suffixLimit != null) {
+            return suffixLimit;
+        }
+
+        return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
+    }
+
+    /**
+     * Parses an explicit capacity suffix such as {@code [1m]} or {@code [500k]}.
+     *
+     * @return the capacity in tokens, or null when the model id carries no suffix
+     */
+    static Integer parseCapacitySuffix(String model) {
+        if (model == null) {
+            return null;
+        }
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\s*\\[([0-9.]+)([kKmM])\\]\\s*$");
         java.util.regex.Matcher matcher = pattern.matcher(model);
 
@@ -488,14 +523,41 @@ public class ModelProviderHandler {
                 LOG.error("Failed to parse capacity from model name: " + model);
             }
         }
-
-        return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
+        return null;
     }
 
     public static int getModelContextLimit(String provider, String model) {
         return CustomModelContextWindowProvider.getInstance()
                 .getContextWindow(provider, model)
                 .orElseGet(() -> getModelContextLimit(model));
+    }
+
+    /**
+     * Context window for a Claude model.
+     *
+     * <p>Capacity suffixes chosen in the UI ({@code [1m]}, {@code [500k]}) are
+     * per-model and win over the global {@code CLAUDE_CODE_MAX_CONTEXT_TOKENS}
+     * override, matching the CLI's own accounting. The override then wins over the
+     * static model table.</p>
+     */
+    public static int getClaudeContextLimit(String model) {
+        Integer suffixLimit = parseCapacitySuffix(model);
+        if (suffixLimit != null) {
+            return suffixLimit;
+        }
+        return ClaudeContextWindowOverrideProvider.getInstance()
+                .getOverride()
+                .orElseGet(() -> getModelContextLimit(model));
+    }
+
+    /**
+     * Provider-aware context window used by usage display fallbacks.
+     */
+    public static int resolveContextLimit(String provider, String model) {
+        if ("claude".equalsIgnoreCase(provider)) {
+            return getClaudeContextLimit(model);
+        }
+        return getModelContextLimit(provider, model);
     }
 
     private void clearSessionUsage() {

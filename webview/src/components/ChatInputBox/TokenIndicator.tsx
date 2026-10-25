@@ -31,8 +31,12 @@ export const TokenIndicator = ({
 
   const formatTokens = (value?: number) => {
     if (typeof value !== 'number' || !isFinite(value)) return undefined;
-    // Always display capacity in k (thousands) units
-    // e.g.: 1,000,000 -> 1000k, 500,000 -> 500k
+    // Use the largest readable unit, matching the context usage dialog
+    // e.g.: 1,000,000 -> 1M, 500,000 -> 500k
+    if (value >= 1_000_000) {
+      const mValue = value / 1_000_000;
+      return Number.isInteger(mValue) ? `${mValue}M` : `${mValue.toFixed(1)}M`;
+    }
     if (value >= 1_000) {
       const kValue = value / 1_000;
       // If it's a whole number, don't show decimal point

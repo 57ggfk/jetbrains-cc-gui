@@ -17,4 +17,10 @@ describe('TokenIndicator', () => {
     expect(progressCircle?.getAttribute('stroke-dashoffset')).toBe('0');
     expect(screen.getByText(/2.9k \/ 2k/)).toBeTruthy();
   });
+
+  it('formats million-token capacities with an M unit', () => {
+    render(<TokenIndicator percentage={3} usedTokens={37600} maxTokens={1000000} />);
+
+    expect(screen.getByText(/37.6k \/ 1M/)).toBeTruthy();
+  });
 });

@@ -2,6 +2,7 @@ package com.github.claudecodegui.handler.provider;
 
 import com.github.claudecodegui.handler.UsagePushService;
 import com.github.claudecodegui.handler.core.HandlerContext;
+import com.github.claudecodegui.provider.ClaudeContextWindowOverrideProvider;
 import com.github.claudecodegui.provider.CustomModelContextWindowProvider;
 import com.github.claudecodegui.session.ClaudeSession;
 import com.google.gson.JsonObject;
@@ -87,6 +88,33 @@ public class ModelProviderHandlerTest {
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit(resolved));
     }
 
+    /**
+     * A family mapping replaces the model name, not the UI's 1M choice. The bridge
+     * sends {@code <mapped>[1m]} to the CLI, so the Java window calculation must
+     * keep the suffix too.
+     */
+    @Test
+    public void shouldPreserveRequested1MSuffixWhenResolvingMappedModel() {
+        JsonObject env = new JsonObject();
+        env.addProperty("ANTHROPIC_DEFAULT_SONNET_MODEL", "deepseek-v4.1-flash");
+
+        assertEquals("deepseek-v4.1-flash[1m]",
+                ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-5[1m]", env));
+        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit(
+                ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-5[1m]", env)));
+        assertEquals("deepseek-v4.1-flash",
+                ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-5", env));
+    }
+
+    @Test
+    public void shouldNotDuplicateExisting1MSuffixFromMapping() {
+        JsonObject env = new JsonObject();
+        env.addProperty("ANTHROPIC_DEFAULT_SONNET_MODEL", "deepseek-v4-pro[1M]");
+
+        assertEquals("deepseek-v4-pro[1M]",
+                ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-5[1m]", env));
+    }
+
     @Test
     public void shouldKeepExpectedContextLimitsForVisibleCodexModels() {
         assertEquals(258_000, ModelProviderHandler.getModelContextLimit("gpt-5.3-codex"));
@@ -165,6 +193,40 @@ public class ModelProviderHandlerTest {
         }
     }
 
+    /**
+     * The CLI reports {@code CLAUDE_CODE_MAX_CONTEXT_TOKENS} in /context, so the
+     * input-box indicator must resolve the same override instead of using the
+     * 200k fallback for unknown custom models.
+     */
+    @Test
+    public void shouldPreferClaudeMaxContextTokensOverrideFromSettings() throws Exception {
+        Path settings = Files.createTempFile("claude-settings", ".json");
+        Files.writeString(settings, """
+                {
+                  "env": {
+                    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "512000"
+                  }
+                }
+                """);
+        ClaudeContextWindowOverrideProvider.setInstanceForTests(
+                ClaudeContextWindowOverrideProvider.createForTests(settings)
+        );
+
+        try {
+            assertEquals(512_000,
+                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash"));
+            assertEquals(512_000,
+                    ModelProviderHandler.resolveContextLimit("claude", "deepseek-v4.1-flash"));
+            // The UI's [1m] choice is per-model and wins over the global override.
+            assertEquals(1_000_000,
+                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash[1m]"));
+            assertEquals(500_000,
+                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash[500k]"));
+        } finally {
+            ClaudeContextWindowOverrideProvider.setInstanceForTests(null);
+        }
+    }
+
     @Test
     public void shouldIgnoreConfiguredCustomContextForClaude() throws Exception {
         Path config = Files.createTempFile("model-context-limit", ".json");
@@ -237,6 +299,61 @@ public class ModelProviderHandlerTest {
         assertTrue(raw.has("usage"));
         assertFalse(usagePushService.cleared);
         assertFalse(usagePushService.recalculated);
+    }
+
+    /**
+     * Switching models inside the Claude provider keeps the transcript, so the
+     * current context snapshot stays valid; only the capacity denominator changes.
+     */
+    @Test
+    public void handleSetModelKeepsClaudeContextUsageWhenSwitchingModel() {
+        HandlerContext context = createHandlerContext();
+        ClaudeSession session = new ClaudeSession(null, null, null, null);
+        session.setProvider("claude");
+        session.setModel("deepseek-v4.1-flash");
+        JsonObject raw = new JsonObject();
+        JsonObject usage = new JsonObject();
+        usage.addProperty("input_tokens", 37800);
+        usage.addProperty("cache_read_input_tokens", 1200);
+        raw.add("usage", usage);
+        session.getState().addMessage(new ClaudeSession.Message(
+                ClaudeSession.Message.Type.ASSISTANT, "restored", raw));
+        context.setSession(session);
+        context.setCurrentProvider("claude");
+        context.setCurrentModel("deepseek-v4.1-flash");
+        RecordingUsagePushService usagePushService = new RecordingUsagePushService(context);
+
+        new ModelProviderHandler(context, usagePushService).handleSetModel("deepseek-v4.1-pro");
+
+        assertTrue(raw.has("usage"));
+        assertFalse(usagePushService.cleared);
+        assertTrue(usagePushService.recalculated);
+    }
+
+    /**
+     * Codex snapshots embed the previous model's model_context_window, so they
+     * still have to be dropped when the selected model changes.
+     */
+    @Test
+    public void handleSetModelClearsCodexContextUsageWhenSwitchingModel() {
+        HandlerContext context = createHandlerContext();
+        ClaudeSession session = new ClaudeSession(null, null, null, null);
+        session.setProvider("codex");
+        session.setModel("gpt-5.3-codex");
+        JsonObject raw = new JsonObject();
+        raw.add("usage", createUsage(49300, 258400));
+        session.getState().addMessage(new ClaudeSession.Message(
+                ClaudeSession.Message.Type.ASSISTANT, "restored", raw));
+        context.setSession(session);
+        context.setCurrentProvider("codex");
+        context.setCurrentModel("gpt-5.3-codex");
+        RecordingUsagePushService usagePushService = new RecordingUsagePushService(context);
+
+        new ModelProviderHandler(context, usagePushService).handleSetModel("gpt-5.6-sol");
+
+        assertFalse(raw.has("usage"));
+        assertTrue(usagePushService.cleared);
+        assertTrue(usagePushService.recalculated);
     }
 
     /**

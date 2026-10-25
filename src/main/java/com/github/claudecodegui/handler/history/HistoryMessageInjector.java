@@ -2,9 +2,9 @@ package com.github.claudecodegui.handler.history;
 
 import com.github.claudecodegui.bridge.NodeDetector;
 import com.github.claudecodegui.handler.CodexMessageConverter;
-import com.github.claudecodegui.handler.SettingsHandler;
 import com.github.claudecodegui.handler.UsagePushService;
 import com.github.claudecodegui.handler.core.HandlerContext;
+import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexNativeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
@@ -449,7 +449,7 @@ public class HistoryMessageInjector {
         if (session == null) {
             return;
         }
-        int fallbackMaxTokens = SettingsHandler.getModelContextLimit(
+        int fallbackMaxTokens = ModelProviderHandler.resolveContextLimit(
                 session.getProvider(), session.getModel());
         new UsagePushService(context).pushCurrentUsageIfAvailable(fallbackMaxTokens);
     }
