@@ -78,7 +78,7 @@ beforeEach(() => {
 
 describe('HistoryView native message counts', () => {
   const actions = { currentProvider: 'codex', onLoadSession: vi.fn(), onDeleteSession: vi.fn(),
-    onDeleteSessions: vi.fn(), onExportSession: vi.fn(), onToggleFavorite: vi.fn(), onUpdateTitle: vi.fn(), onConvertToCliSession: vi.fn() };
+    onDeleteSessions: vi.fn(), onExportSession: vi.fn(), onToggleFavorite: vi.fn(), onUpdateTitle: vi.fn(), onConvertToCliSession: vi.fn(), onForkSession: vi.fn() };
 
   it('distinguishes unknown counts from zero and shows a message total only when known', () => {
     const data: HistoryData = { ...historyData, source: 'native', total: undefined,
@@ -132,6 +132,7 @@ describe('HistoryView multi-select', () => {
         onToggleFavorite={vi.fn()}
         onUpdateTitle={vi.fn()}
         onConvertToCliSession={vi.fn()}
+        onForkSession={vi.fn()}
       />,
     );
 
@@ -181,6 +182,7 @@ describe('HistoryView conversion', () => {
         onToggleFavorite={vi.fn()}
         onUpdateTitle={vi.fn()}
         onConvertToCliSession={onConvertToCliSession}
+        onForkSession={vi.fn()}
       />,
     );
 
@@ -218,6 +220,7 @@ describe('HistoryView conversion', () => {
         onToggleFavorite={vi.fn()}
         onUpdateTitle={vi.fn()}
         onConvertToCliSession={vi.fn()}
+        onForkSession={vi.fn()}
       />,
     );
 
@@ -244,6 +247,7 @@ describe('HistoryView conversion', () => {
         onToggleFavorite={vi.fn()}
         onUpdateTitle={vi.fn()}
         onConvertToCliSession={vi.fn()}
+        onForkSession={vi.fn()}
       />,
     );
 
@@ -262,6 +266,7 @@ describe('HistoryView conversion', () => {
         onToggleFavorite={vi.fn()}
         onUpdateTitle={vi.fn()}
         onConvertToCliSession={vi.fn()}
+        onForkSession={vi.fn()}
       />,
     );
 
@@ -285,10 +290,56 @@ describe('HistoryView conversion', () => {
         onToggleFavorite={vi.fn()}
         onUpdateTitle={vi.fn()}
         onConvertToCliSession={vi.fn()}
+        onForkSession={vi.fn()}
       />,
     );
 
     expect(screen.getByRole('button', { name: 'Deep Search' })).toHaveProperty('disabled', false);
+  });
+});
+
+describe('HistoryView fork', () => {
+  it('offers fork for claude sessions and passes the session id through', () => {
+    const onForkSession = vi.fn();
+
+    render(
+      <HistoryView
+        historyData={historyData}
+        currentProvider="claude"
+        onLoadSession={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onDeleteSessions={vi.fn()}
+        onExportSession={vi.fn()}
+        onToggleFavorite={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        onConvertToCliSession={vi.fn()}
+        onForkSession={onForkSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'history.forkSession' }));
+
+    expect(onForkSession).toHaveBeenCalledTimes(1);
+    expect(onForkSession).toHaveBeenCalledWith('session-one');
+  });
+
+  it('hides the fork button for non-claude sessions', () => {
+    render(
+      <HistoryView
+        historyData={{ ...historyData, sessions: [historyData.sessions![1]] }}
+        currentProvider="codex"
+        onLoadSession={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onDeleteSessions={vi.fn()}
+        onExportSession={vi.fn()}
+        onToggleFavorite={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        onConvertToCliSession={vi.fn()}
+        onForkSession={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'history.forkSession' })).toBeNull();
   });
 });
 
@@ -315,6 +366,7 @@ describe('HistoryView favorite visibility', () => {
         onToggleFavorite={vi.fn()}
         onUpdateTitle={vi.fn()}
         onConvertToCliSession={vi.fn()}
+        onForkSession={vi.fn()}
       />,
     );
 

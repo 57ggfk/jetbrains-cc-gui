@@ -76,6 +76,7 @@ const App = () => {
     handleOpenRewindSelectDialog, handleNavigateToProviderSettings, wrappedHandleProviderSelect,
     createNewSession, loadHistorySession, deleteHistorySession, deleteHistorySessions,
     exportHistorySession, toggleFavoriteSession, updateHistoryTitle, convertToCliSession,
+    forkHistorySession,
     showNewSessionConfirm, handleConfirmNewSession, handleCancelNewSession,
     showInterruptConfirm, handleConfirmInterrupt, handleCancelInterrupt,
     handleRewindSelect, handleRewindSelectCancel, handleRewindConfirm, handleRewindCancel,
@@ -193,6 +194,7 @@ const App = () => {
           onToggleFavorite={toggleFavoriteSession}
           onUpdateTitle={updateHistoryTitle}
           onConvertToCliSession={convertToCliSession}
+          onForkSession={forkHistorySession}
         />
       )}
 

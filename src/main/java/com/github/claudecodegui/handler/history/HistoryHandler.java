@@ -28,7 +28,8 @@ public class HistoryHandler extends BaseMessageHandler {
             "deep_search_history", // Deep search (clear cache and reload)
             "load_subagent_session", // Load Claude Code sidechain Agent process log
             "load_subagent_statuses", // Load lightweight Codex subagent statuses
-            "convert_to_cli_session" // Convert sidechain session to CLI-recognizable session
+            "convert_to_cli_session", // Convert sidechain session to CLI-recognizable session
+            "fork_session" // Fork (duplicate) a session into a new independent session
     };
 
     // Session load callback interface
@@ -49,6 +50,7 @@ public class HistoryHandler extends BaseMessageHandler {
     private final HistoryMetadataService historyMetadataService;
     private final SubagentHistoryService subagentHistoryService;
     private final SessionConversionService sessionConversionService;
+    private final SessionForkService sessionForkService;
 
     public HistoryHandler(HandlerContext context) {
         super(context);
@@ -60,6 +62,7 @@ public class HistoryHandler extends BaseMessageHandler {
         this.historyMetadataService = new HistoryMetadataService(context, nodeJsServiceCaller);
         this.subagentHistoryService = new SubagentHistoryService(context);
         this.sessionConversionService = new SessionConversionService(context);
+        this.sessionForkService = new SessionForkService(context, nodeJsServiceCaller);
     }
 
     public void setSessionLoadCallback(SessionLoadCallback callback) {
@@ -133,6 +136,12 @@ public class HistoryHandler extends BaseMessageHandler {
                 String conversionProjectPath = this.context.getProject() != null
                         ? this.context.getProject().getBasePath() : null;
                 this.sessionConversionService.convertSdkSession(content, conversionProjectPath);
+                return true;
+            case "fork_session":
+                LOG.info("[HistoryHandler] 处理: fork_session");
+                String forkProjectPath = this.context.getProject() != null
+                        ? this.context.getProject().getBasePath() : null;
+                this.sessionForkService.forkSession(content, forkProjectPath);
                 return true;
             default:
                 return false;

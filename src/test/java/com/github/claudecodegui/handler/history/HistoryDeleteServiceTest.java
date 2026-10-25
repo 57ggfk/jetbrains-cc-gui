@@ -178,6 +178,21 @@ public class HistoryDeleteServiceTest {
     }
 
     @Test
+    public void deleteSessionPayloadProviderOverridesStalePanelState() throws Exception {
+        // The panel's currentProvider can be stale after switching chat providers
+        // without reopening the history list; the payload provider must win so a
+        // Claude session is not routed into the Codex delete branch.
+        HandlerContext context = new HandlerContext(null, null, null, null, null);
+        RecordingHistoryLoadService historyLoadService = new RecordingHistoryLoadService(context);
+        HistoryDeleteService service = new HistoryDeleteService(context, null, historyLoadService);
+
+        service.handleDeleteSession("{\"sessionId\":\"session-1\",\"provider\":\"claude\"}", "codex");
+
+        assertTrue(historyLoadService.awaitReload());
+        assertEquals("claude", historyLoadService.provider);
+    }
+
+    @Test
     public void abortedDeletionReloadsHistoryAfterOptimisticFrontendRemoval() throws Exception {
         HandlerContext context = new HandlerContext(null, null, null, null, null);
         context.setSession(new RecordingClaudeSession("session-1", "codex") {

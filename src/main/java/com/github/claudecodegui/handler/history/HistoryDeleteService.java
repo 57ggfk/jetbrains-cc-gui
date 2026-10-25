@@ -64,7 +64,18 @@ class HistoryDeleteService {
      * Delete session history files.
      * Deletes the .jsonl file for the specified sessionId and related agent-xxx.jsonl files.
      */
-    void handleDeleteSession(String sessionId, String currentProvider) {
+    void handleDeleteSession(String content, String currentProvider) {
+        // The frontend sends either a bare session id (legacy) or
+        // {sessionId, provider}; the payload provider wins because the panel's
+        // currentProvider can be stale (e.g. after switching chat providers
+        // without reopening the history list), which would route a Claude
+        // session into the Codex delete branch and silently delete nothing.
+        JsonObject request = parseRequestObject(content);
+        String sessionId = request != null && request.has("sessionId") && request.get("sessionId").isJsonPrimitive()
+                ? request.get("sessionId").getAsString() : content;
+        String provider = request != null && request.has("provider") && request.get("provider").isJsonPrimitive()
+                ? request.get("provider").getAsString() : currentProvider;
+
         if (!isValidSessionId(sessionId)) {
             LOG.warn("[HistoryHandler] Delete session rejected: invalid sessionId");
             return;
@@ -83,10 +94,10 @@ class HistoryDeleteService {
                         if (result.mainDeleted) {
                             cleanupSessionMetadata(sessionId);
                         }
-                        cleanupCache(currentProvider);
+                        cleanupCache(provider);
 
                         LOG.info("[HistoryHandler] Reloading history data...");
-                        historyLoadService.handleLoadHistoryData(currentProvider);
+                        historyLoadService.handleLoadHistoryData(provider);
 
                     } catch (Exception e) {
                         LOG.error("[HistoryHandler] Delete session failed: " + e.getMessage(), e);
@@ -101,6 +112,9 @@ class HistoryDeleteService {
      * Batch delete session history files in one backend request.
      */
     void handleDeleteSessions(String content, String currentProvider) {
+        JsonObject request = parseRequestObject(content);
+        final String effectiveProvider = request != null && request.has("provider") && request.get("provider").isJsonPrimitive()
+                ? request.get("provider").getAsString() : currentProvider;
         List<String> sessionIds = parseSessionIds(content);
         if (sessionIds.isEmpty()) {
             LOG.warn("[HistoryHandler] Batch delete failed: empty sessionIds");
@@ -111,12 +125,12 @@ class HistoryDeleteService {
                 .thenRunAsync(() -> {
                     try {
                         LOG.info("[HistoryHandler] ========== Batch delete sessions start ==========");
-                        LOG.info("[HistoryHandler] SessionIds: " + GSON.toJson(sessionIds) + ", Provider: " + currentProvider);
+                        LOG.info("[HistoryHandler] SessionIds: " + GSON.toJson(sessionIds) + ", Provider: " + effectiveProvider);
 
                         int mainDeletedCount = 0;
                         int agentFilesDeletedCount = 0;
 
-                        if ("codex".equals(currentProvider)) {
+                        if ("codex".equals(effectiveProvider)) {
                             CodexBatchDeleteResult result = deleteCodexSessions(sessionIds);
                             mainDeletedCount = result.deletedSessionIds.size();
                             for (String sessionId : result.deletedSessionIds) {
@@ -126,7 +140,7 @@ class HistoryDeleteService {
                         } else {
                             for (String sessionId : sessionIds) {
                                 try {
-                                    DeleteResult result = deleteSessionFiles(sessionId, currentProvider);
+                                    DeleteResult result = deleteSessionFiles(sessionId, effectiveProvider);
                                     if (result.mainDeleted) {
                                         mainDeletedCount++;
                                         cleanupSessionMetadata(sessionId);
@@ -148,7 +162,7 @@ class HistoryDeleteService {
                         LOG.error("[HistoryHandler] Batch delete sessions failed: " + e.getMessage(), e);
                     }
                 }).exceptionally(ex -> {
-                    handleQuiesceFailure("batch deletion", currentProvider, ex);
+                    handleQuiesceFailure("batch deletion", effectiveProvider, ex);
                     return null;
                 });
     }
@@ -179,6 +193,22 @@ class HistoryDeleteService {
             return CompletableFuture.completedFuture(null);
         }
         return session.interrupt();
+    }
+
+    /**
+     * Parse a JSON object payload, or return null when the content is not a JSON
+     * object (bare session id / bare array payloads keep their legacy paths).
+     */
+    static JsonObject parseRequestObject(String content) {
+        if (content == null || content.isEmpty() || !content.trim().startsWith("{")) {
+            return null;
+        }
+        try {
+            JsonObject parsed = JsonParser.parseString(content).getAsJsonObject();
+            return parsed.isJsonObject() ? parsed : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     static List<String> parseSessionIds(String content) {

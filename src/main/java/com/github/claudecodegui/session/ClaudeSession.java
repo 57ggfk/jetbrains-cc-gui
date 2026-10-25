@@ -8,6 +8,7 @@ import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.zcode.ZcodeSDKBridge;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -151,6 +152,9 @@ public class ClaudeSession {
         default void onUsageUpdate(int usedTokens, int maxTokens) {
         }
 
+        default void onAssistantMessageUuidPatched(String content, String uuid) {
+        }
+
         default void onUserMessageUuidPatched(String content, String uuid) {
         }
 
@@ -273,6 +277,11 @@ public class ClaudeSession {
                     @Override
                     public JsonObject getLatestClaudeUserMessage(String sessionId, String cwd) {
                         return claudeSDKBridge.getLatestClaudeUserMessage(sessionId, cwd);
+                    }
+
+                    @Override
+                    public JsonArray getRecentClaudeAssistantMessages(String sessionId, String cwd, int limit) {
+                        return claudeSDKBridge.getRecentClaudeAssistantMessages(sessionId, cwd, limit);
                     }
 
                     @Override
@@ -837,7 +846,8 @@ public class ClaudeSession {
                             clientMessageId,
                             nativeCodexSettings
                     )
-            ).thenCompose(v -> syncUserMessageUuidsAfterSend());
+            ).thenCompose(v -> syncUserMessageUuidsAfterSend())
+                    .thenCompose(v -> syncAssistantMessageUuidsAfterSend());
         }).exceptionally(ex -> {
             synchronized (state.getMessageStateLock()) {
                 if (state.isCurrentTurn(turnOwner)) {
@@ -853,6 +863,10 @@ public class ClaudeSession {
 
     private CompletableFuture<Void> syncUserMessageUuidsAfterSend() {
         return messageOrchestrator.syncUserMessageUuidsAfterSend();
+    }
+
+    private CompletableFuture<Void> syncAssistantMessageUuidsAfterSend() {
+        return messageOrchestrator.syncAssistantMessageUuidsAfterSend();
     }
 
     /**
