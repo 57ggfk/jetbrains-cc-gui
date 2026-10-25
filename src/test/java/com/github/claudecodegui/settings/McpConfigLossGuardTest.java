@@ -1,7 +1,9 @@
 package com.github.claudecodegui.settings;
 
 import com.github.claudecodegui.util.PlatformUtils;
+import com.github.claudecodegui.util.SafeJsonFileOps;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.After;
@@ -9,17 +11,22 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Tests for the shared-file discipline in {@link McpServerManager} and
@@ -27,12 +34,16 @@ import static org.junit.Assert.assertTrue;
  * silently vanishing:
  *
  * <ul>
- *   <li>upsert/delete survive a concurrent "CLI rewrites the whole file from
- *       its own snapshot" race (lost-update guard via advisory lock)</li>
- *   <li>a torn/corrupt ~/.claude.json self-heals from the plugin backup</li>
- *   <li>an EMPTY mcpServers in ~/.claude.json never wipes a non-empty
- *       mcpServers in ~/.claude/settings.json (loss guard)</li>
- *   <li>settings.json writes are crash-safe (no truncation window)</li>
+ *   <li>upsert/delete are applied to the freshest content and preserve fields
+ *       written by another process.</li>
+ *   <li>A failed read never rewrites the live file; an unreadable primary is
+ *       reported instead of being mistaken for "no servers".</li>
+ *   <li>A readable primary without {@code mcpServers} is authoritative: the
+ *       legacy store cannot resurrect deleted servers.</li>
+ *   <li>Deleting the last server clears the settings.json copy, including when
+ *       the source lost its {@code mcpServers} key entirely.</li>
+ *   <li>A lock that cannot be obtained fails the operation instead of silently
+ *       redirecting the write to the legacy store.</li>
  * </ul>
  */
 public class McpConfigLossGuardTest {
@@ -99,6 +110,28 @@ public class McpConfigLossGuardTest {
         return server;
     }
 
+    /** Write a settings.json holding one MCP server. */
+    private void writeSettingsWithServer(String serverId) throws Exception {
+        JsonObject spec = new JsonObject();
+        spec.addProperty("type", "stdio");
+        spec.addProperty("command", "npx");
+        JsonObject servers = new JsonObject();
+        servers.add(serverId, spec);
+        JsonObject settings = new JsonObject();
+        settings.add("mcpServers", servers);
+        Files.writeString(settingsPath, settings.toString(), StandardCharsets.UTF_8);
+    }
+
+    /** @return the parsed settings.json on disk */
+    private JsonObject readSettings() throws Exception {
+        return JsonParser.parseString(Files.readString(settingsPath, StandardCharsets.UTF_8)).getAsJsonObject();
+    }
+
+    /** @return the parsed ~/.claude.json on disk */
+    private JsonObject readClaudeJson() throws Exception {
+        return JsonParser.parseString(Files.readString(claudeJsonPath, StandardCharsets.UTF_8)).getAsJsonObject();
+    }
+
     private String getCachedHomeDirectory() throws Exception {
         Field field = PlatformUtils.class.getDeclaredField("cachedRealHomeDir");
         field.setAccessible(true);
@@ -118,15 +151,13 @@ public class McpConfigLossGuardTest {
     public void upsertSurvivesConcurrentCliRewrite() throws Exception {
         writeClaudeJson("{}");
         manager.upsertMcpServer(buildServer("srv-a", "npx"));
-        // The plugin's own upsert has now created a .ccgui-backup of the previous state.
 
         // Simulate the CLI rewriting the whole file from its (stale) snapshot
         // between two plugin writes — the plugin write itself must not be lost.
-        writeClaudeJson("{}"); // CLI drops everything it doesn't know
+        writeClaudeJson("{}");
         manager.upsertMcpServer(buildServer("srv-b", "uvx"));
 
-        JsonObject after = JsonParser.parseString(
-                Files.readString(claudeJsonPath, StandardCharsets.UTF_8)).getAsJsonObject();
+        JsonObject after = readClaudeJson();
         assertTrue("srv-b must survive the concurrent rewrite",
                 after.getAsJsonObject("mcpServers").has("srv-b"));
     }
@@ -138,30 +169,41 @@ public class McpConfigLossGuardTest {
         manager.upsertMcpServer(buildServer("srv-a", "npx"));
         manager.upsertMcpServer(buildServer("srv-b", "uvx"));
 
-        JsonObject after = JsonParser.parseString(
-                Files.readString(claudeJsonPath, StandardCharsets.UTF_8)).getAsJsonObject();
-        JsonObject servers = after.getAsJsonObject("mcpServers");
+        JsonObject servers = readClaudeJson().getAsJsonObject("mcpServers");
         assertTrue(servers.has("srv-a"));
         assertTrue(servers.has("srv-b"));
     }
 
-    /** A torn write (truncated JSON) must self-heal from the plugin backup. */
+    /** Fields owned by the CLI (or the user) must survive a plugin upsert. */
     @Test
-    public void corruptClaudeJsonSelfHealsOnRead() throws Exception {
+    public void upsertPreservesUnrelatedTopLevelFields() throws Exception {
+        Files.writeString(claudeJsonPath,
+                "{\"mcpServers\":{},\"numStartups\":7,\"oauthAccount\":{\"emailAddress\":\"a@b.c\"}}",
+                StandardCharsets.UTF_8);
+
+        manager.upsertMcpServer(buildServer("srv-a", "npx"));
+
+        JsonObject after = readClaudeJson();
+        assertEquals("an unrelated numeric field must survive", 7, after.get("numStartups").getAsInt());
+        assertEquals("an unrelated object field must survive",
+                "a@b.c", after.getAsJsonObject("oauthAccount").get("emailAddress").getAsString());
+        assertTrue(after.getAsJsonObject("mcpServers").has("srv-a"));
+    }
+
+    /**
+     * A failed read must not rewrite the live file: the backup is returned for
+     * display only, so a CLI write in progress is never replaced by old data.
+     */
+    @Test
+    public void corruptClaudeJsonIsNotRewrittenOnRead() throws Exception {
         writeClaudeJson("{}");
-        // Two upserts: after the second one the backup holds the state WITH
-        // srv-a (the backup always captures the state before the LAST write).
         manager.upsertMcpServer(buildServer("srv-a", "npx"));
         manager.upsertMcpServer(buildServer("srv-b", "uvx"));
 
-        // Simulate a crash mid-write by the CLI: half a JSON document
-        Files.writeString(claudeJsonPath,
-                "{\"mcpServers\":{\"srv-a\":{\"command\":\"npx\"", StandardCharsets.UTF_8);
+        String torn = "{\"mcpServers\":{\"srv-a\":{\"command\":\"npx\"";
+        Files.writeString(claudeJsonPath, torn, StandardCharsets.UTF_8);
 
-        // Reading through the manager must heal from backup and keep srv-a
-        // (the last change before the corruption, srv-b, is inherently lost —
-        // the recovery window shrinks from "everything" to "the last write").
-        java.util.List<JsonObject> servers = manager.getMcpServers();
+        List<JsonObject> servers = manager.getMcpServers();
         assertNotNull(servers);
         boolean found = false;
         for (JsonObject s : servers) {
@@ -169,15 +211,26 @@ public class McpConfigLossGuardTest {
                 found = true;
             }
         }
-        assertTrue("server must be recovered from the backup after corruption", found);
-
-        // The healed content must also be restored onto disk
-        JsonObject onDisk = JsonParser.parseString(
-                Files.readString(claudeJsonPath, StandardCharsets.UTF_8)).getAsJsonObject();
-        assertTrue(onDisk.getAsJsonObject("mcpServers").has("srv-a"));
+        assertTrue("server must be recovered from the backup for display", found);
+        assertEquals("the read must leave the live file untouched", torn,
+                Files.readString(claudeJsonPath, StandardCharsets.UTF_8));
     }
 
-    /** Deleting a server keeps the other servers and updates settings.json sync. */
+    /** An unreadable primary without a usable backup fails loudly instead of showing "no servers". */
+    @Test
+    public void unreadablePrimaryWithoutBackupIsReported() throws Exception {
+        Files.writeString(claudeJsonPath, "{torn", StandardCharsets.UTF_8);
+
+        try {
+            manager.getMcpServers();
+            fail("an unreadable ~/.claude.json must not be reported as an empty server list");
+        } catch (IOException expected) {
+            assertTrue("the error must name the unreadable file",
+                    expected.getMessage().contains("could not be parsed"));
+        }
+    }
+
+    /** Deleting a server keeps the other servers. */
     @Test
     public void deleteRemovesOnlyTargetServer() throws Exception {
         writeClaudeJson("{}");
@@ -187,59 +240,239 @@ public class McpConfigLossGuardTest {
         boolean removed = manager.deleteMcpServer("srv-a");
 
         assertTrue(removed);
-        JsonObject after = JsonParser.parseString(
-                Files.readString(claudeJsonPath, StandardCharsets.UTF_8)).getAsJsonObject();
-        JsonObject servers = after.getAsJsonObject("mcpServers");
+        JsonObject servers = readClaudeJson().getAsJsonObject("mcpServers");
         assertFalse(servers.has("srv-a"));
         assertTrue(servers.has("srv-b"));
+    }
+
+    /** Deleting an unknown server leaves the document untouched. */
+    @Test
+    public void deletingUnknownServerKeepsDocumentUntouched() throws Exception {
+        writeClaudeJson("{\"srv-a\":{\"type\":\"stdio\",\"command\":\"npx\"}}");
+        String before = Files.readString(claudeJsonPath, StandardCharsets.UTF_8);
+
+        assertFalse(manager.deleteMcpServer("nope"));
+
+        assertEquals("an absent server must not trigger a rewrite", before,
+                Files.readString(claudeJsonPath, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * A lock that cannot be obtained must fail the operation, not silently fork
+     * the write into the legacy store (review item 4).
+     */
+    @Test
+    public void upsertFailsInsteadOfRedirectingWhenTheLockIsHeld() throws Exception {
+        writeClaudeJson("{}");
+        String before = Files.readString(claudeJsonPath, StandardCharsets.UTF_8);
+
+        AtomicInteger codemossWrites = new AtomicInteger();
+        McpServerManager legacyRecordingManager = new McpServerManager(
+                new Gson(),
+                v -> new JsonObject(),
+                c -> codemossWrites.incrementAndGet(),
+                claudeSettingsManager);
+
+        Path lock = SafeJsonFileOps.sibling(claudeJsonPath, ".ccgui-lock");
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread holder = new Thread(() -> {
+            try {
+                SafeJsonFileOps.withLock(lock, 5_000, () -> {
+                    held.countDown();
+                    try {
+                        release.await(15, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            } catch (IOException ignored) {
+                // released by the test
+            }
+        });
+        holder.start();
+        assertTrue("the competing holder must acquire the lock", held.await(5, TimeUnit.SECONDS));
+
+        try {
+            legacyRecordingManager.upsertMcpServer(buildServer("srv-a", "npx"));
+            fail("the lock timeout must be reported to the caller");
+        } catch (IOException expected) {
+            assertTrue("the error must mention the lock",
+                    expected.getMessage().toLowerCase().contains("lock")
+                            || expected.getMessage().toLowerCase().contains("timed out"));
+        } finally {
+            release.countDown();
+            holder.join(10_000);
+        }
+
+        assertEquals("the legacy store must not receive a redirected write", 0, codemossWrites.get());
+        assertEquals("the primary file must be untouched on failure", before,
+                Files.readString(claudeJsonPath, StandardCharsets.UTF_8));
+    }
+
+    // ==================== source priority ====================
+
+    /**
+     * A readable ~/.claude.json without an mcpServers key means "no servers";
+     * the legacy store must not resurrect entries deleted in the UI.
+     */
+    @Test
+    public void missingSourceKeyDoesNotFallBackToLegacyStore() throws Exception {
+        Files.writeString(claudeJsonPath, "{\"projects\":{}}", StandardCharsets.UTF_8);
+
+        JsonObject codemoss = new JsonObject();
+        JsonArray legacyServers = new JsonArray();
+        legacyServers.add(buildServer("legacy-srv", "npx"));
+        codemoss.add("mcpServers", legacyServers);
+        McpServerManager legacyManager = new McpServerManager(
+                new Gson(), v -> codemoss, c -> { }, claudeSettingsManager);
+
+        List<JsonObject> servers = legacyManager.getMcpServers();
+
+        assertTrue("a readable primary without mcpServers is authoritative", servers.isEmpty());
+    }
+
+    /** The legacy store still serves installs where ~/.claude.json never existed. */
+    @Test
+    public void legacyStoreIsUsedWhenPrimaryFileIsMissing() throws Exception {
+        Files.deleteIfExists(claudeJsonPath);
+
+        JsonObject codemoss = new JsonObject();
+        JsonArray legacyServers = new JsonArray();
+        legacyServers.add(buildServer("legacy-srv", "npx"));
+        codemoss.add("mcpServers", legacyServers);
+        McpServerManager legacyManager = new McpServerManager(
+                new Gson(), v -> codemoss, c -> { }, claudeSettingsManager);
+
+        List<JsonObject> servers = legacyManager.getMcpServers();
+
+        assertEquals(1, servers.size());
+        assertEquals("legacy-srv", servers.get(0).get("id").getAsString());
+    }
+
+    /** Project-level servers override global ones with the same name. */
+    @Test
+    public void projectServersOverrideGlobalOnes() throws Exception {
+        Files.writeString(claudeJsonPath,
+                "{\"mcpServers\":{\"srv-a\":{\"type\":\"stdio\",\"command\":\"global\"}},"
+                        + "\"projects\":{\"/proj\":{\"mcpServers\":{\"srv-a\":{\"type\":\"stdio\",\"command\":\"project\"},"
+                        + "\"srv-p\":{\"type\":\"stdio\",\"command\":\"p\"}}}}}",
+                StandardCharsets.UTF_8);
+
+        List<JsonObject> servers = manager.getMcpServersWithProjectPath("/proj");
+
+        assertEquals(2, servers.size());
+        for (JsonObject server : servers) {
+            assertEquals("id must be filled in", server.get("id").getAsString(), server.get("name").getAsString());
+            if ("srv-a".equals(server.get("id").getAsString())) {
+                assertEquals("the project-level spec must win",
+                        "project", server.getAsJsonObject("server").get("command").getAsString());
+            }
+        }
     }
 
     // ==================== sync loss guard ====================
 
     /**
      * The core loss guard: an EMPTY mcpServers in ~/.claude.json must never
-     * wipe a non-empty mcpServers in settings.json during the MCP sync.
+     * wipe a non-empty mcpServers in settings.json during a routine sync.
      */
     @Test
     public void syncDoesNotPropagateEmptyMcpServersOverNonEmptySettings() throws Exception {
-        // settings.json already has a configured server
-        JsonObject settings = new JsonObject();
-        JsonObject servers = new JsonObject();
-        JsonObject spec = new JsonObject();
-        spec.addProperty("type", "stdio");
-        spec.addProperty("command", "npx");
-        servers.add("srv-a", spec);
-        settings.add("mcpServers", servers);
-        Files.writeString(settingsPath, settings.toString(), StandardCharsets.UTF_8);
-
-        // ~/.claude.json briefly reports NO servers (CLI started before the
-        // user configured them and rewrote its snapshot)
+        writeSettingsWithServer("srv-a");
         writeClaudeJson("{}");
 
         claudeSettingsManager.syncMcpToClaudeSettings();
 
-        JsonObject after = JsonParser.parseString(
-                Files.readString(settingsPath, StandardCharsets.UTF_8)).getAsJsonObject();
         assertTrue("settings.json mcpServers must NOT be wiped by an empty source",
-                after.getAsJsonObject("mcpServers").has("srv-a"));
+                readSettings().getAsJsonObject("mcpServers").has("srv-a"));
     }
 
     /** Normal sync direction still works: non-empty source overwrites empty target. */
     @Test
     public void syncStillCopiesNonEmptyServersIntoEmptySettings() throws Exception {
+        JsonObject globalServers = new JsonObject();
         JsonObject spec = new JsonObject();
         spec.addProperty("type", "stdio");
         spec.addProperty("command", "npx");
-        JsonObject servers = new JsonObject();
-        servers.add("srv-a", spec);
-        writeClaudeJson(servers.toString());
+        globalServers.add("srv-a", spec);
+        writeClaudeJson(globalServers.toString());
 
         claudeSettingsManager.syncMcpToClaudeSettings();
 
-        JsonObject after = JsonParser.parseString(
-                Files.readString(settingsPath, StandardCharsets.UTF_8)).getAsJsonObject();
+        JsonObject after = readSettings();
         assertTrue(after.has("mcpServers"));
         assertTrue(after.getAsJsonObject("mcpServers").has("srv-a"));
+    }
+
+    /** A sync must not drop unrelated settings.json fields. */
+    @Test
+    public void syncPreservesUnrelatedSettingsFields() throws Exception {
+        JsonObject settings = new JsonObject();
+        settings.addProperty("theme", "dark");
+        settings.add("mcpServers", new JsonObject());
+        Files.writeString(settingsPath, settings.toString(), StandardCharsets.UTF_8);
+
+        JsonObject globalServers = new JsonObject();
+        JsonObject spec = new JsonObject();
+        spec.addProperty("type", "stdio");
+        spec.addProperty("command", "npx");
+        globalServers.add("srv-a", spec);
+        writeClaudeJson(globalServers.toString());
+
+        claudeSettingsManager.syncMcpToClaudeSettings();
+
+        JsonObject after = readSettings();
+        assertEquals("an unrelated field must survive the sync", "dark", after.get("theme").getAsString());
+        assertTrue(after.getAsJsonObject("mcpServers").has("srv-a"));
+    }
+
+    /**
+     * Deleting the LAST server must also clear settings.json — the delete path
+     * passes allowEmptyOverwrite=true because the user acted intentionally.
+     */
+    @Test
+    public void deletingLastServerClearsSettingsDotJson() throws Exception {
+        writeClaudeJson("{}");
+        manager.upsertMcpServer(buildServer("srv-a", "npx"));
+        assertTrue("the upsert must have synced the server into settings.json",
+                readSettings().getAsJsonObject("mcpServers").has("srv-a"));
+
+        assertTrue(manager.deleteMcpServer("srv-a"));
+
+        JsonObject after = readSettings();
+        assertTrue("settings.json must keep an (empty) mcpServers object", after.has("mcpServers"));
+        assertTrue("no ghost server may survive in settings.json after deleting the last one",
+                after.getAsJsonObject("mcpServers").keySet().isEmpty());
+    }
+
+    /**
+     * Review item 3/5: when ~/.claude.json lost its mcpServers key entirely, an
+     * intentionally emptied source must still clear the settings.json copy.
+     */
+    @Test
+    public void intentionalEmptySyncClearsSettingsWhenSourceKeyIsMissing() throws Exception {
+        writeSettingsWithServer("srv-a");
+        Files.writeString(claudeJsonPath, "{\"projects\":{}}", StandardCharsets.UTF_8);
+
+        claudeSettingsManager.syncMcpToClaudeSettings(true);
+
+        JsonObject after = readSettings();
+        assertTrue("settings.json must keep an (empty) mcpServers object", after.has("mcpServers"));
+        assertTrue("the ghost must be cleared when the source is intentionally empty",
+                after.getAsJsonObject("mcpServers").keySet().isEmpty());
+    }
+
+    /** The same missing key must NOT clear settings.json during a routine (guarded) sync. */
+    @Test
+    public void guardedSyncKeepsSettingsWhenSourceKeyIsMissing() throws Exception {
+        writeSettingsWithServer("srv-a");
+        Files.writeString(claudeJsonPath, "{\"projects\":{}}", StandardCharsets.UTF_8);
+
+        claudeSettingsManager.syncMcpToClaudeSettings();
+
+        assertTrue("a routine sync must not clear the target when the source is merely unknown",
+                readSettings().getAsJsonObject("mcpServers").has("srv-a"));
     }
 
     /** Both sides empty: sync must not crash and must leave settings empty-but-present. */
@@ -248,78 +481,42 @@ public class McpConfigLossGuardTest {
         writeClaudeJson("{}");
         claudeSettingsManager.syncMcpToClaudeSettings();
 
-        JsonObject after = JsonParser.parseString(
-                Files.readString(settingsPath, StandardCharsets.UTF_8)).getAsJsonObject();
-        // mcpServers may be absent or empty — must not throw either way
-        if (after.has("mcpServers")) {
-            assertTrue(after.getAsJsonObject("mcpServers").keySet().isEmpty());
+        if (Files.exists(settingsPath)) {
+            JsonObject after = readSettings();
+            if (after.has("mcpServers")) {
+                assertTrue(after.getAsJsonObject("mcpServers").keySet().isEmpty());
+            }
         }
     }
 
     /**
-     * Review item 2: deleting the LAST server must also clear settings.json —
-     * the delete path passes allowEmptyOverwrite=true because the user acted
-     * intentionally, so no ghost entry may survive there.
-     */
-    @Test
-    public void deletingLastServerClearsSettingsDotJson() throws Exception {
-        writeClaudeJson("{}");
-        manager.upsertMcpServer(buildServer("srv-a", "npx"));
-        // settings.json now holds srv-a (synced during upsert)
-
-        boolean removed = manager.deleteMcpServer("srv-a");
-        assertTrue(removed);
-
-        JsonObject after = JsonParser.parseString(
-                Files.readString(settingsPath, StandardCharsets.UTF_8)).getAsJsonObject();
-        if (after.has("mcpServers") && after.get("mcpServers").isJsonObject()) {
-            assertTrue("no ghost server may survive in settings.json after deleting the last one",
-                    after.getAsJsonObject("mcpServers").keySet().isEmpty());
-        }
-    }
-
-    /**
-     * Follow-up from sub-agent review: the ~/.codemoss/config.json fallback
-     * delete path must ALSO propagate the deletion to settings.json — the
-     * deleted server may have been synced there while it still lived in
-     * ~/.claude.json. No ghost entry may survive via that path either.
+     * The ~/.codemoss/config.json fallback delete path must ALSO propagate the
+     * deletion to settings.json — no ghost entry may survive via that path.
      */
     @Test
     public void codemossFallbackDeleteAlsoClearsSettingsDotJson() throws Exception {
-        // settings.json holds a server synced earlier (via ~/.claude.json)
-        JsonObject settings = new JsonObject();
-        JsonObject servers = new JsonObject();
-        JsonObject spec = new JsonObject();
-        spec.addProperty("type", "stdio");
-        spec.addProperty("command", "npx");
-        servers.add("srv-a", spec);
-        settings.add("mcpServers", servers);
-        Files.writeString(settingsPath, settings.toString(), StandardCharsets.UTF_8);
-
-        // The server ONLY exists in ~/.codemoss/config.json now (~/.claude.json
-        // has no mcpServers entry), so the delete falls back to that path.
+        writeSettingsWithServer("srv-a");
+        // The server ONLY exists in ~/.codemoss/config.json now.
         writeClaudeJson("{}");
         JsonObject codemoss = new JsonObject();
-        com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+        JsonArray arr = new JsonArray();
         arr.add(buildServer("srv-a", "npx"));
         codemoss.add("mcpServers", arr);
-        com.google.gson.JsonObject[] written = new com.google.gson.JsonObject[1];
+        java.util.concurrent.atomic.AtomicReference<JsonObject> written = new java.util.concurrent.atomic.AtomicReference<>();
         McpServerManager codemossManager = new McpServerManager(
                 new Gson(),
                 v -> codemoss,
-                c -> written[0] = c,
+                written::set,
                 claudeSettingsManager);
 
         boolean removed = codemossManager.deleteMcpServer("srv-a");
-        assertTrue(removed);
-        assertNotNull("codemoss config must have been written", written[0]);
 
-        JsonObject after = JsonParser.parseString(
-                Files.readString(settingsPath, StandardCharsets.UTF_8)).getAsJsonObject();
-        if (after.has("mcpServers") && after.get("mcpServers").isJsonObject()) {
-            assertTrue("no ghost server may survive in settings.json after a codemoss-path delete",
-                    after.getAsJsonObject("mcpServers").keySet().isEmpty());
-        }
+        assertTrue(removed);
+        assertNotNull("codemoss config must have been written", written.get());
+        JsonObject after = readSettings();
+        assertTrue("settings.json must keep an (empty) mcpServers object", after.has("mcpServers"));
+        assertTrue("no ghost server may survive in settings.json after a codemoss-path delete",
+                after.getAsJsonObject("mcpServers").keySet().isEmpty());
     }
 
     // ==================== settings.json durability ====================
@@ -331,8 +528,47 @@ public class McpConfigLossGuardTest {
         manager.upsertMcpServer(buildServer("srv-a", "npx"));
 
         String raw = Files.readString(settingsPath, StandardCharsets.UTF_8);
-        // Must parse cleanly (a torn write would leave a parse error)
         assertNotNull(JsonParser.parseString(raw).getAsJsonObject());
         assertTrue(raw.contains("srv-a"));
+    }
+
+    /** A corrupt settings.json must not be replaced by a write derived from a fallback. */
+    @Test
+    public void corruptSettingsJsonIsNotOverwrittenByAnUpdate() throws Exception {
+        writeClaudeJson("{\"srv-a\":{\"type\":\"stdio\",\"command\":\"npx\"}}");
+        String torn = "{\"env\":{\"ANTHROPIC_AUTH_TOKEN\":";
+        Files.writeString(settingsPath, torn, StandardCharsets.UTF_8);
+
+        try {
+            claudeSettingsManager.syncMcpToClaudeSettings();
+            fail("an unreadable settings.json must be reported, not silently replaced");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().toLowerCase().contains("could not parse")
+                    || expected.getMessage().toLowerCase().contains("could not update"));
+        }
+
+        assertEquals("the unreadable settings.json must be left for the user to inspect", torn,
+                Files.readString(settingsPath, StandardCharsets.UTF_8));
+    }
+
+    /** A no-op update must not rewrite settings.json nor rotate its backup. */
+    @Test
+    public void noOpSettingsWriteKeepsTheFileUntouched() throws Exception {
+        writeClaudeJson("{}");
+        // First sync normalises the document (forced env flag) and may create a backup.
+        claudeSettingsManager.syncMcpToClaudeSettings();
+        Path backup = SafeJsonFileOps.sibling(settingsPath, SafeJsonFileOps.BACKUP_SUFFIX);
+        Files.deleteIfExists(backup);
+        String content = Files.readString(settingsPath, StandardCharsets.UTF_8);
+        long modified = Files.getLastModifiedTime(settingsPath).toMillis();
+
+        // Second sync has nothing to change: no write, no new backup.
+        claudeSettingsManager.syncMcpToClaudeSettings();
+
+        assertEquals("an unchanged document must not be rewritten", modified,
+                Files.getLastModifiedTime(settingsPath).toMillis());
+        assertEquals("an unchanged document must keep its content", content,
+                Files.readString(settingsPath, StandardCharsets.UTF_8));
+        assertFalse("a no-op write must not create a backup", Files.exists(backup));
     }
 }

@@ -1,6 +1,5 @@
 package com.github.claudecodegui.util;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
@@ -19,6 +18,10 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -34,26 +37,40 @@ import java.util.concurrent.locks.ReentrantLock;
  * that truncates the target first. A crash, kill, or antivirus scan pause in
  * the middle of that window left a truncated file behind; every later reader
  * (CLI or plugin) then saw an empty/corrupt config — which is how configured
- * MCP servers "mysteriously vanished" (#<issue>). This utility prevents both
- * classes of damage:
+ * MCP servers "mysteriously vanished". This utility prevents both classes of
+ * damage:
  *
  * <ul>
  *   <li><b>Atomic writes</b>: content is staged in a temp file next to the
  *       target and moved into place with {@code ATOMIC_MOVE}. A crash can no
  *       longer leave a half-written config; readers see either the old or the
- *       new document, never a torn one.</li>
+ *       new document, never a torn one. Symlinked targets are resolved so the
+ *       link itself survives, and an existing target keeps its POSIX mode.</li>
  *   <li><b>Automatic backup</b>: before each replace, the previous file is
  *       copied to {@code <name>.ccgui-backup} so a bad overwrite can be
- *       recovered.</li>
+ *       recovered. A damaged live file never overwrites that backup.</li>
  *   <li><b>Retry reads</b>: parse failures (typically another process
  *       mid-write) are retried with backoff instead of being treated as
  *       permanent corruption.</li>
- *   <li><b>Self-healing reads</b>: {@link #readJsonOrBackup} falls back to the
- *       backup copy and restores it over the damaged target.</li>
+ *   <li><b>Read-only fallback</b>: {@link #readJsonOrBackup} may return the
+ *       backup content, but it never writes to disk — a failed read can be a
+ *       newer CLI write in progress, and restoring over it would destroy it.</li>
+ *   <li><b>Optimistic conflict detection</b>:
+ *       {@link #writeAtomicallyIfUnchanged} and
+ *       {@link #mutateJsonAtomically} compare a content fingerprint taken at
+ *       read time against the file right before the replace, and re-apply the
+ *       caller's intent on the fresh content when another process won the race.</li>
  *   <li><b>Advisory locking</b>: {@link #withLock} serialises read-modify-write
  *       cycles across plugin windows (in-JVM via a reentrant lock, cross-process
- *       via an OS file lock on a dedicated {@code .lock} sidecar file).</li>
+ *       via an OS file lock on a dedicated {@code .lock} sidecar file). Failing
+ *       to obtain the lock is reported to the caller instead of silently
+ *       running the critical section unlocked.</li>
  * </ul>
+ *
+ * <p>Remaining limitation: a process that does not honour the advisory lock
+ * (the Claude CLI) can still write between our final fingerprint check and the
+ * replace. That window is narrowed to two adjacent statements but not closed —
+ * no lock-free scheme can close it without cooperation from the other writer.
  */
 public final class SafeJsonFileOps {
 
@@ -74,11 +91,19 @@ public final class SafeJsonFileOps {
     private static final int MOVE_ATTEMPTS = 5;
     private static final long MOVE_RETRY_DELAY_MS = 100;
     private static final long LOCK_RETRY_DELAY_MS = 50;
-    /** Plain Gson used only to re-serialise a backup during self-healing restore. */
-    private static final Gson RESTORE_GSON = new Gson();
+    /** Read attempts used inside the conflict-retried mutation helper. */
+    private static final int STRICT_READ_ATTEMPTS = 3;
 
     /** In-JVM (same IDE, multiple tool windows / threads) locks keyed by lock-file path. */
     private static final ConcurrentMap<String, ReentrantLock> IN_JVM_LOCKS = new ConcurrentHashMap<>();
+
+    /**
+     * Lock-file keys this thread already holds a cross-process lock for. A nested
+     * {@link #withLock} call on the same thread must not try to re-lock the OS
+     * file: the outer frame already owns it, and a second lock from another
+     * channel would raise {@link OverlappingFileLockException}.
+     */
+    private static final ThreadLocal<Set<String>> HELD_LOCKS = ThreadLocal.withInitial(HashSet::new);
 
     private SafeJsonFileOps() {
     }
@@ -96,6 +121,86 @@ public final class SafeJsonFileOps {
     }
 
     /**
+     * Plans one read-modify-write step for {@link #mutateJsonAtomically}.
+     *
+     * <p>The mutation is re-planned from the freshly read content every time a
+     * conflict is detected, so the caller's INTENT (add this server, delete that
+     * id) is re-applied to the latest document instead of replaying a stale
+     * snapshot.
+     */
+    @FunctionalInterface
+    public interface JsonMutation {
+        /**
+         * @param current the content read from disk, or {@code null} when the file does not exist
+         * @return a writer that stages the new content, or {@code null} when nothing needs to be written
+         * @throws IOException when the intent cannot be applied to this content
+         */
+        ThrowingWriter plan(JsonObject current) throws IOException;
+    }
+
+    /**
+     * Fingerprint of a config file's content, taken at read time and re-checked
+     * right before a replace.
+     *
+     * <p>Uses a SHA-256 digest rather than size/mtime: mtime granularity is too
+     * coarse on several filesystems to see a quick external rewrite, and a size
+     * comparison alone misses same-length content changes.
+     */
+    public static final class ContentSnapshot {
+        private static final ContentSnapshot ABSENT = new ContentSnapshot(false, -1L, null);
+
+        private final boolean present;
+        private final long size;
+        private final byte[] digest;
+
+        private ContentSnapshot(boolean present, long size, byte[] digest) {
+            this.present = present;
+            this.size = size;
+            this.digest = digest;
+        }
+
+        /** @return whether the file existed when the snapshot was taken */
+        public boolean isPresent() {
+            return present;
+        }
+
+        /**
+         * @param file the file to compare against
+         * @return true when the file still holds exactly the snapshotted content
+         *         (or is still absent); false when it changed or cannot be re-read
+         */
+        public boolean matches(Path file) {
+            ContentSnapshot current;
+            try {
+                current = snapshot(file);
+            } catch (IOException e) {
+                LOG.debug("[SafeJsonFileOps] Could not re-snapshot " + file
+                        + " — treating it as changed: " + e.getMessage());
+                return false;
+            }
+            if (present != current.present) {
+                return false;
+            }
+            if (!present) {
+                return true;
+            }
+            return size == current.size && Arrays.equals(digest, current.digest);
+        }
+    }
+
+    /**
+     * Raised when the config changed between the caller's read and write: the
+     * caller must re-read the file and re-apply its intent.
+     */
+    public static final class ConflictException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        ConflictException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * Atomically replace {@code target} with the JSON produced by {@code writerFn}.
      *
      * <p>Stages the content in a temp file beside the target, backs up the
@@ -104,60 +209,58 @@ public final class SafeJsonFileOps {
      * plain replace on filesystems without atomic moves, retrying either way
      * a few times to ride out transient Windows sharing violations).
      *
+     * <p>No write happens when the target already holds exactly the requested
+     * content, and the backup is only refreshed from content that parses as
+     * JSON — see {@link #backupExisting(Path)}.
+     *
      * @param target   the config file to replace
      * @param writerFn callback that writes the new content (e.g. {@code w -> gson.toJson(obj, w)})
      * @throws IOException if the content cannot be staged or the replace keeps failing
      */
     public static void writeAtomically(Path target, ThrowingWriter writerFn) throws IOException {
-        writeAtomically(target, writerFn, true);
+        writeAtomicallyInternal(target, writerFn, null);
     }
 
     /**
-     * Internal variant of {@link #writeAtomically(Path, ThrowingWriter)}.
+     * Atomically replace {@code target} only if it still matches {@code expected}.
      *
-     * @param target     the config file to replace
-     * @param writerFn   callback that writes the new content
-     * @param makeBackup {@code false} ONLY for the self-healing restore path:
-     *                   the restore writes content parsed FROM the backup, so
-     *                   backing up first would copy the corrupt live file over
-     *                   the good backup — the "last known good" copy must be
-     *                   preserved for a potential later recovery.
-     * @throws IOException if the content cannot be staged or the replace keeps failing
+     * <p>Used by read-modify-write callers that must not clobber a concurrent
+     * update from another process (the Claude CLI rewrites {@code ~/.claude.json}
+     * from its own snapshot at arbitrary times).
+     *
+     * @param target   the config file to replace
+     * @param expected the fingerprint captured when the caller read the file
+     * @param writerFn callback that writes the new content
+     * @throws ConflictException when the file no longer matches {@code expected}
+     * @throws IOException       if the content cannot be staged or the replace keeps failing
      */
-    static void writeAtomically(Path target, ThrowingWriter writerFn, boolean makeBackup) throws IOException {
-        Path parent = target.getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
+    public static void writeAtomicallyIfUnchanged(Path target, ContentSnapshot expected, ThrowingWriter writerFn)
+            throws IOException {
+        writeAtomicallyInternal(target, writerFn, expected);
+    }
+
+    /**
+     * Take a content fingerprint of {@code file} for a later
+     * {@link #writeAtomicallyIfUnchanged} check.
+     *
+     * @param file the file to fingerprint (a missing file yields an absent snapshot)
+     * @return the fingerprint
+     * @throws IOException when the file exists but cannot be read
+     */
+    public static ContentSnapshot snapshot(Path file) throws IOException {
+        if (!Files.isRegularFile(file)) {
+            return ContentSnapshot.ABSENT;
         }
-        Path tmp = Files.createTempFile(
-                parent != null ? parent : target.toAbsolutePath().getParent(),
-                target.getFileName().toString(),
-                ".ccgui-tmp");
-        try {
-            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                writerFn.writeTo(writer);
-                writer.flush();
-            }
-            if (makeBackup) {
-                backupExisting(target);
-            }
-            moveWithRetry(tmp, target);
-        } catch (IOException | RuntimeException e) {
-            // RuntimeException from the writer callback (e.g. a Gson failure)
-            // must not leak the staged temp file either.
-            try {
-                Files.deleteIfExists(tmp);
-            } catch (IOException cleanupError) {
-                LOG.debug("[SafeJsonFileOps] Could not delete staged temp file " + tmp + ": " + cleanupError.getMessage());
-            }
-            throw e;
-        }
+        byte[] content = Files.readAllBytes(file);
+        return new ContentSnapshot(true, content.length, sha256(content));
     }
 
     /**
      * Read and parse a JSON object, retrying on transient parse failures
      * (another process mid-write is the usual cause — with atomic writers on
      * the other side those windows are short).
+     *
+     * <p>Read-only: never writes to the file or its backup.
      *
      * @param file         the JSON file to read
      * @param attempts     number of read attempts before giving up
@@ -186,14 +289,45 @@ public final class SafeJsonFileOps {
     }
 
     /**
-     * Read a JSON object with retries; if the target stays unreadable but the
-     * {@code <name>}{@value BACKUP_SUFFIX}} copy parses, restore that backup
-     * over the target (self-healing) and return it.
+     * Read a JSON object for a read-modify-write cycle.
+     *
+     * <p>Unlike {@link #readJsonObject}, an existing-but-unreadable file is
+     * reported as an error instead of {@code null}: a write derived from
+     * "nothing could be read" would replace the user's config with a document
+     * built from scratch.
      *
      * @param file         the JSON file to read
      * @param attempts     read attempts for the primary file
      * @param retryDelayMs delay between attempts
-     * @return the parsed object (from the file, or from the restored backup), or {@code null} when both are unusable
+     * @return the parsed object, or {@code null} only when the file does not exist
+     * @throws IOException when the file exists but cannot be parsed
+     */
+    public static JsonObject readJsonObjectStrict(Path file, int attempts, long retryDelayMs) throws IOException {
+        JsonObject parsed = readJsonObject(file, attempts, retryDelayMs);
+        if (parsed != null) {
+            return parsed;
+        }
+        if (!Files.exists(file)) {
+            return null;
+        }
+        throw new IOException("Could not parse " + file + " after " + attempts
+                + " attempt(s); refusing to derive a write from unreadable content");
+    }
+
+    /**
+     * Read a JSON object with retries; if the target stays unreadable but the
+     * {@code <name>}{@value BACKUP_SUFFIX}} copy parses, return that copy.
+     *
+     * <p><b>Read-only.</b> The live file is never rewritten here: a read can
+     * fail because the CLI is mid-write with content newer than our backup, so
+     * restoring the backup over it would destroy data the read was supposed to
+     * preserve. Callers that want to repair a file must do so through an
+     * explicit write path.
+     *
+     * @param file         the JSON file to read
+     * @param attempts     read attempts for the primary file
+     * @param retryDelayMs delay between attempts
+     * @return the parsed object (from the file or the backup), or {@code null} when both are unusable
      */
     public static JsonObject readJsonOrBackup(Path file, int attempts, long retryDelayMs) {
         JsonObject parsed = readJsonObject(file, attempts, retryDelayMs);
@@ -205,72 +339,116 @@ public final class SafeJsonFileOps {
         if (fromBackup == null) {
             return null;
         }
-        LOG.warn("[SafeJsonFileOps] " + file.getFileName() + " is unreadable — restoring last known good copy from "
-                + backup.getFileName());
-        try {
-            // makeBackup=false: never copy the CORRUPT live file over the good
-            // backup we are about to restore from — the last known good copy
-            // must survive for a potential later recovery (review item 3).
-            writeAtomically(file, writer -> RESTORE_GSON.toJson(fromBackup, writer), false);
-        } catch (IOException | RuntimeException e) {
-            // Restore failed (e.g. read-only file, or serialisation failure) —
-            // still return the parsed backup content so the caller keeps
-            // working with the recovered data.
-            LOG.warn("[SafeJsonFileOps] Could not write restored copy back to " + file + ": " + e.getMessage());
-        }
+        LOG.warn("[SafeJsonFileOps] " + file.getFileName() + " is unreadable — returning the last known good copy from "
+                + backup.getFileName() + " (read-only; the live file is left untouched)");
         return fromBackup;
+    }
+
+    /**
+     * Apply a mutation to a JSON file with optimistic concurrency control.
+     *
+     * <p>Each attempt fingerprints the file, reads it strictly, lets the caller
+     * re-plan its intent against that content, and performs a guarded replace.
+     * When another process replaced the file in between, the attempt is
+     * retried from a fresh read; after {@code maxAttempts} the failure is
+     * reported instead of overwriting the other writer's data.
+     *
+     * @param file         the JSON file to mutate
+     * @param maxAttempts  how many read/re-plan/replace rounds to try
+     * @param retryDelayMs delay between rounds
+     * @param mutation     the intent, re-applied to the latest content on every round
+     * @throws IOException when the file stays unreadable, the mutation throws, or the
+     *                     concurrent changes outlast {@code maxAttempts}
+     */
+    public static void mutateJsonAtomically(Path file, int maxAttempts, long retryDelayMs, JsonMutation mutation)
+            throws IOException {
+        IOException lastError = null;
+        int attempts = Math.max(1, maxAttempts);
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            ContentSnapshot expected = snapshot(file);
+            JsonObject current = readJsonObjectStrict(file, STRICT_READ_ATTEMPTS, retryDelayMs);
+            ThrowingWriter writer = mutation.plan(current);
+            if (writer == null) {
+                LOG.debug("[SafeJsonFileOps] " + file.getFileName() + " — mutation needs no write");
+                return;
+            }
+            try {
+                writeAtomicallyIfUnchanged(file, expected, writer);
+                return;
+            } catch (ConflictException conflict) {
+                lastError = conflict;
+                LOG.info("[SafeJsonFileOps] " + file.getFileName() + " changed while a mutation was applied"
+                        + " (attempt " + attempt + "/" + attempts + ") — re-reading and re-applying");
+                if (attempt < attempts) {
+                    sleepQuietly(retryDelayMs);
+                }
+            }
+        }
+        throw new IOException("Could not update " + file + " after " + attempts
+                + " attempt(s): the file kept changing concurrently", lastError);
     }
 
     /**
      * Run {@code action} while holding an advisory lock on {@code lockFile}.
      *
-     * <p>Serialises read-modify-write cycles across (a) threads inside this
-     * JVM (reentrant lock, handles multiple tool windows in one IDE) and
-     * (b) separate plugin processes (OS file lock, handles multiple IDE
-     * windows). Lock acquisition waits up to {@code timeoutMs}; on timeout the
-     * action still runs without the lock (writes remain atomic, only the RMW
-     * window widens) so a stuck peer never blocks the UI forever. Worst-case
-     * total wait is about {@code 2 x timeoutMs}: the in-JVM lock and the OS
-     * file lock each have their own independent {@code timeoutMs} budget.
+     * <p>Serialises read-modify-write cycles across (a) threads inside this JVM
+     * (reentrant lock, handles multiple tool windows in one IDE) and (b)
+     * separate plugin processes (OS file lock, handles multiple IDE windows).
+     *
+     * <p>Failure to obtain either lock is reported, never ignored: running the
+     * critical section unlocked would re-open exactly the lost-update window
+     * this method exists to close, while still reporting success. Nested calls
+     * on the same thread re-enter the outer lock instead of re-locking the OS
+     * file.
      *
      * @param lockFile  the sidecar lock file (created if missing, never deleted)
-     * @param timeoutMs how long to wait for the lock
+     * @param timeoutMs how long to wait for each lock
      * @param action    the critical section
-     * @throws IOException if the lock file cannot be opened or the action throws
+     * @throws IOException if a lock cannot be acquired (timeout/interrupt/IO error) or the action throws
      */
     public static void withLock(Path lockFile, long timeoutMs, IORunnable action) throws IOException {
         Path parent = lockFile.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
         }
-        ReentrantLock jvmLock = IN_JVM_LOCKS.computeIfAbsent(
-                lockFile.toAbsolutePath().toString(), key -> new ReentrantLock());
-        boolean jvmLocked = false;
+        String lockKey = lockFile.toAbsolutePath().toString();
+        if (HELD_LOCKS.get().contains(lockKey)) {
+            // Re-entrant call: this thread already owns both the in-JVM and the
+            // OS lock through an outer frame.
+            action.run();
+            return;
+        }
+
+        ReentrantLock jvmLock = IN_JVM_LOCKS.computeIfAbsent(lockKey, key -> new ReentrantLock());
         try {
-            jvmLocked = jvmLock.tryLock(timeoutMs, TimeUnit.MILLISECONDS);
-            if (!jvmLocked) {
-                LOG.warn("[SafeJsonFileOps] Timed out waiting for in-JVM lock on " + lockFile
-                        + " — proceeding without it");
+            if (!jvmLock.tryLock(timeoutMs, TimeUnit.MILLISECONDS)) {
+                throw new IOException("Timed out after " + timeoutMs + " ms waiting for the in-JVM lock on "
+                        + lockFile + "; no changes were written — retry the operation");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            LOG.warn("[SafeJsonFileOps] Interrupted while waiting for in-JVM lock on " + lockFile);
+            throw new IOException("Interrupted while waiting for the in-JVM lock on " + lockFile, e);
         }
+
         try {
             try (FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-                 FileLock lock = acquireLock(channel, timeoutMs)) {
-                action.run();
+                 FileLock fileLock = acquireLock(channel, lockFile, timeoutMs)) {
+                Set<String> held = HELD_LOCKS.get();
+                held.add(lockKey);
+                try {
+                    action.run();
+                } finally {
+                    held.remove(lockKey);
+                }
             } catch (OverlappingFileLockException e) {
-                // The file lock is already held by this JVM through another
-                // channel (e.g. a nested withLock call on the same thread, or
-                // another thread that already passed the reentrant gate).
-                // Serialisation is already in effect — run without re-locking.
-                action.run();
+                // Another component in this JVM locked the same file through a
+                // different channel; proceeding unlocked would silently void the
+                // serialisation guarantee.
+                throw new IOException("The lock file " + lockFile
+                        + " is already locked by this JVM through another channel", e);
             }
         } finally {
-            if (jvmLocked) {
-                jvmLock.unlock();
-            }
+            jvmLock.unlock();
         }
     }
 
@@ -289,9 +467,123 @@ public final class SafeJsonFileOps {
     // ==================== internals ====================
 
     /**
+     * Shared implementation of the atomic replace.
+     *
+     * @param target   the file to replace (may be a symlink)
+     * @param writerFn callback that writes the new content
+     * @param expected fingerprint the target must still match, or {@code null} for an unconditional write
+     * @throws IOException on staging/backup/replace failure or a fingerprint mismatch
+     */
+    private static void writeAtomicallyInternal(Path target, ThrowingWriter writerFn, ContentSnapshot expected)
+            throws IOException {
+        Path realTarget = resolveRealTarget(target);
+        Path parent = realTarget.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Path tmp = Files.createTempFile(
+                parent != null ? parent : realTarget.toAbsolutePath().getParent(),
+                realTarget.getFileName().toString(),
+                ".ccgui-tmp");
+        try {
+            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+                writerFn.writeTo(writer);
+                writer.flush();
+            }
+            if (hasSameContent(realTarget, tmp)) {
+                // Nothing to change: rewriting would needlessly rotate the
+                // backup and bump the mtime for every no-op sync.
+                LOG.debug("[SafeJsonFileOps] " + realTarget.getFileName()
+                        + " already holds the requested content — skipping the write");
+                return;
+            }
+            if (expected != null && !expected.matches(realTarget)) {
+                throw new ConflictException(realTarget.getFileName()
+                        + " changed after it was read — the caller must re-read and re-apply its update");
+            }
+            backupExisting(realTarget);
+            copyPermissions(realTarget, tmp);
+            moveWithRetry(tmp, realTarget);
+        } finally {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException cleanupError) {
+                LOG.debug("[SafeJsonFileOps] Could not delete staged temp file " + tmp + ": " + cleanupError.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Resolve a symlinked target to the file it points at, so the replace
+     * updates the real file and leaves the link in place. A rename onto the
+     * link path would replace the link itself with a regular file.
+     *
+     * @param target the path handed to the write
+     * @return the real path to replace
+     * @throws IOException when the link is dangling or cannot be resolved
+     */
+    private static Path resolveRealTarget(Path target) throws IOException {
+        if (!Files.isSymbolicLink(target)) {
+            return target;
+        }
+        Path real = target.toRealPath();
+        LOG.debug("[SafeJsonFileOps] Writing through the symlink " + target + " -> " + real);
+        return real;
+    }
+
+    /**
+     * @param existing the current target
+     * @param staged   the temp file holding the new content
+     * @return true when both hold byte-identical content
+     */
+    private static boolean hasSameContent(Path existing, Path staged) {
+        if (!Files.isRegularFile(existing)) {
+            return false;
+        }
+        try {
+            if (Files.size(existing) != Files.size(staged)) {
+                return false;
+            }
+            return Arrays.equals(Files.readAllBytes(existing), Files.readAllBytes(staged));
+        } catch (IOException e) {
+            // Unreadable target: fall through to the normal write path.
+            return false;
+        }
+    }
+
+    /**
+     * Copy the mode of an existing target onto the staged file so the atomic
+     * replace does not silently change permissions (e.g. 0644 → 0600).
+     *
+     * <p>New files keep the staged temp file's mode — 0600 on POSIX, the
+     * process default on filesystems without POSIX attributes. Not covered:
+     * Windows ACLs. They are inherited from the directory and are not touched
+     * by this code, which is a Windows-verification gap, not a guarantee.
+     *
+     * @param source the existing target (ignored when it does not exist)
+     * @param staged the temp file about to replace it
+     */
+    private static void copyPermissions(Path source, Path staged) {
+        try {
+            if (!Files.isRegularFile(source)) {
+                return;
+            }
+            Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(source);
+            Files.setPosixFilePermissions(staged, permissions);
+        } catch (UnsupportedOperationException | IOException e) {
+            LOG.debug("[SafeJsonFileOps] Could not carry permissions from " + source + " to " + staged
+                    + ": " + e.getMessage());
+        }
+    }
+
+    /**
      * Copy the current target to the backup sibling (best effort — a backup
      * failure must not block the write; the staged temp file still replaces
-     * the corrupt/old content atomically).
+     * the old content atomically).
+     *
+     * <p>Only content that parses as JSON is promoted to the backup: the backup
+     * is the recovery source, so replacing it with a damaged snapshot would
+     * destroy the last known good copy.
      *
      * <p>The backup may carry secrets (the settings.json backup can hold
      * ANTHROPIC_AUTH_TOKEN — Security J), so it is created with owner-only
@@ -299,9 +591,16 @@ public final class SafeJsonFileOps {
      * (closing the create-to-chmod window) and re-forced after the copy to
      * cover pre-existing backup files, where the creation attribute is
      * ignored. Windows falls back to a plain create (default ACLs).
+     *
+     * @param target the file about to be replaced
      */
     private static void backupExisting(Path target) {
         if (!Files.isRegularFile(target)) {
+            return;
+        }
+        if (!isValidJson(target)) {
+            LOG.warn("[SafeJsonFileOps] Not backing up " + target.getFileName()
+                    + " — its current content is not valid JSON, the last known good backup is kept");
             return;
         }
         Path backup = sibling(target, BACKUP_SUFFIX);
@@ -318,6 +617,19 @@ public final class SafeJsonFileOps {
             hardenOwnerOnly(backup);
         } catch (IOException e) {
             LOG.warn("[SafeJsonFileOps] Could not back up " + target + " before replacing: " + e.getMessage());
+        }
+    }
+
+    /**
+     * @param file the candidate config file
+     * @return true when the file parses as a JSON document
+     */
+    private static boolean isValidJson(Path file) {
+        try (java.io.Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            JsonParser.parseReader(reader);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            return false;
         }
     }
 
@@ -384,21 +696,30 @@ public final class SafeJsonFileOps {
 
     /**
      * Try to acquire the OS-level exclusive lock, polling until the deadline.
-     * Returns {@code null} (proceed-unlocked) when the deadline passes — the
-     * caller's write is still atomic, so this only widens the RMW window.
+     *
+     * @param channel   the channel of the lock file
+     * @param lockFile  the lock file (for the error message)
+     * @param timeoutMs how long to wait
+     * @return the acquired lock
+     * @throws IOException when the timeout elapses, the wait is interrupted, or the channel fails
      */
-    private static FileLock acquireLock(FileChannel channel, long timeoutMs) throws IOException {
-        long deadline = System.currentTimeMillis() + timeoutMs;
+    private static FileLock acquireLock(FileChannel channel, Path lockFile, long timeoutMs) throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
         for (;;) {
             FileLock lock = channel.tryLock();
             if (lock != null) {
                 return lock;
             }
-            if (System.currentTimeMillis() >= deadline) {
-                LOG.warn("[SafeJsonFileOps] Timed out waiting for file lock — proceeding without it");
-                return null;
+            if (System.nanoTime() >= deadline) {
+                throw new IOException("Timed out after " + timeoutMs + " ms waiting for the cross-process lock "
+                        + lockFile + "; no changes were written — retry the operation");
             }
-            sleepQuietly(LOCK_RETRY_DELAY_MS);
+            try {
+                Thread.sleep(LOCK_RETRY_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for the cross-process lock " + lockFile, e);
+            }
         }
     }
 
@@ -408,6 +729,18 @@ public final class SafeJsonFileOps {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * @param content the bytes to digest
+     * @return the SHA-256 digest of {@code content}
+     */
+    private static byte[] sha256(byte[] content) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(content);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by the Java platform", e);
         }
     }
 }

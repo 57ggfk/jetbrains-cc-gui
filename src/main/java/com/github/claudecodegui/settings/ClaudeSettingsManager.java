@@ -11,7 +11,6 @@ import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.File;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -19,6 +18,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 
 /**
  * Claude Settings Manager.
@@ -31,6 +32,8 @@ public class ClaudeSettingsManager {
     private static final int READ_ATTEMPTS = 3;
     /** Delay between read attempts (ms). */
     private static final long READ_RETRY_DELAY_MS = 100;
+    /** Read/re-apply rounds for one settings.json mutation before it fails explicitly. */
+    private static final int MUTATION_ATTEMPTS = 3;
 
     /**
      * System-protected fields - these should never be overridden by provider configs
@@ -78,11 +81,13 @@ public class ClaudeSettingsManager {
     }
 
     /**
-     * Read Claude Settings.
-     * Self-healing: when the file is unreadable/corrupt (e.g. a torn write
-     * from an older plugin version), fall back to the plugin's backup copy
-     * instead of returning an empty default — an empty default here used to be
-     * the seed for "all my MCP servers vanished".
+     * Read Claude Settings for display and decision paths.
+     *
+     * <p>Lenient and READ-ONLY: a corrupt file falls back to the plugin backup
+     * copy (never written back over the live file), and a missing file yields
+     * the default object. Read-modify-write callers must use
+     * {@link #readClaudeSettingsForUpdate()} instead — deriving a write from
+     * this fallback would replace an unreadable file with a fabricated document.
      */
     public JsonObject readClaudeSettings() throws IOException {
         Path settingsPath = pathManager.getClaudeSettingsPath();
@@ -95,6 +100,114 @@ public class ClaudeSettingsManager {
         JsonObject healed = SafeJsonFileOps.readJsonOrBackup(
                 settingsPath, READ_ATTEMPTS, READ_RETRY_DELAY_MS);
         return healed != null ? healed : createDefaultClaudeSettings();
+    }
+
+    /**
+     * Read Claude Settings for a read-modify-write cycle.
+     *
+     * @return the parsed settings, or a default object when the file does not exist
+     * @throws IOException when the file exists but cannot be parsed: any write derived
+     *                     from a fallback would overwrite the user's real file
+     */
+    public JsonObject readClaudeSettingsForUpdate() throws IOException {
+        Path settingsPath = pathManager.getClaudeSettingsPath();
+        if (!Files.exists(settingsPath)) {
+            return createDefaultClaudeSettings();
+        }
+        JsonObject parsed = SafeJsonFileOps.readJsonObjectStrict(settingsPath, READ_ATTEMPTS, READ_RETRY_DELAY_MS);
+        return parsed != null ? parsed : createDefaultClaudeSettings();
+    }
+
+    /**
+     * Apply a mutation to settings.json with optimistic concurrency control.
+     *
+     * <p>The mutation is re-planned against the freshest content on every
+     * attempt, and the replace only happens when the file still matches the
+     * fingerprint taken before the read. A concurrent writer (provider sync in
+     * another window, the CLI) therefore wins its update instead of being
+     * silently overwritten with a stale snapshot.
+     *
+     * @param mutation returns true when the settings it received must be written
+     * @throws IOException when the file stays unreadable or keeps changing
+     */
+    private void updateClaudeSettings(Predicate<JsonObject> mutation) throws IOException {
+        mutateClaudeSettings(current -> mutation.test(current) ? current : null);
+    }
+
+    /**
+     * Run one settings.json read-modify-write cycle, retrying on conflicts.
+     *
+     * @param planner plans the write against the current content; returns the document
+     *                to persist, or {@code null} when nothing needs to be written
+     * @throws IOException when the file stays unreadable or keeps changing
+     */
+    private void mutateClaudeSettings(SettingsMutation planner) throws IOException {
+        Path settingsPath = pathManager.getClaudeSettingsPath();
+        IOException lastError = null;
+        for (int attempt = 1; attempt <= MUTATION_ATTEMPTS; attempt++) {
+            SafeJsonFileOps.ContentSnapshot expected = SafeJsonFileOps.snapshot(settingsPath);
+            JsonObject current = readClaudeSettingsForUpdate();
+            JsonObject next = planner.plan(current);
+            if (next == null) {
+                LOG.debug("[ClaudeSettingsManager] settings.json needs no update");
+                return;
+            }
+            applyForcedSettings(next);
+            try {
+                SafeJsonFileOps.writeAtomicallyIfUnchanged(
+                        settingsPath, expected, writer -> gson.toJson(next, writer));
+                hardenFilePermissions(settingsPath);
+                LOG.info("[ClaudeSettingsManager] Updated settings: " + settingsPath);
+                return;
+            } catch (SafeJsonFileOps.ConflictException conflict) {
+                lastError = conflict;
+                LOG.info("[ClaudeSettingsManager] settings.json changed while an update was applied (attempt "
+                        + attempt + "/" + MUTATION_ATTEMPTS + ") — re-reading and re-applying");
+                if (attempt < MUTATION_ATTEMPTS) {
+                    pauseBeforeRetry();
+                }
+            }
+        }
+        throw new IOException("Could not update ~/.claude/settings.json after " + MUTATION_ATTEMPTS
+                + " attempt(s): it kept changing concurrently", lastError);
+    }
+
+    /**
+     * Planner for one settings.json mutation, re-invoked on every conflict retry.
+     */
+    @FunctionalInterface
+    private interface SettingsMutation {
+        /**
+         * @param current the freshly read settings
+         * @return the document to write, or {@code null} when no write is needed
+         * @throws IOException when the plan cannot be applied to this content
+         */
+        JsonObject plan(JsonObject current) throws IOException;
+    }
+
+    /**
+     * Force-write the plugin-managed settings every write must carry.
+     *
+     * @param settings the document about to be written (modified in place)
+     */
+    private static void applyForcedSettings(JsonObject settings) {
+        JsonObject env;
+        if (settings.has("env") && settings.get("env").isJsonObject()) {
+            env = settings.getAsJsonObject("env");
+        } else {
+            env = new JsonObject();
+            settings.add("env", env);
+        }
+        env.addProperty("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+    }
+
+    /** Pause between conflict retries, preserving the interrupt status. */
+    private static void pauseBeforeRetry() {
+        try {
+            Thread.sleep(READ_RETRY_DELAY_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -128,18 +241,11 @@ public class ClaudeSettingsManager {
             Files.createDirectories(settingsPath.getParent());
         }
 
-        // Force-write CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC setting
-        // Ensure the env object exists
-        if (!settings.has("env") || settings.get("env").isJsonNull()) {
-            settings.add("env", new JsonObject());
-        }
-        JsonObject env = settings.getAsJsonObject("env");
-        // Force-set to string value "1"
-        env.addProperty("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+        applyForcedSettings(settings);
 
         // Atomic replace: never leave a truncated settings.json behind if the
         // IDE crashes or is killed mid-write (SafeJsonFileOps also keeps a
-        // .ccgui-backup copy for self-healing reads).
+        // .ccgui-backup copy and preserves the file mode / symlink target).
         SafeJsonFileOps.writeAtomically(settingsPath, writer -> gson.toJson(settings, writer));
         LOG.info("[ClaudeSettingsManager] Synced settings to: " + settingsPath);
         // Security (J): settings.json may hold ANTHROPIC_AUTH_TOKEN; restrict to 0600.
@@ -179,74 +285,74 @@ public class ClaudeSettingsManager {
      * @throws IOException on read/write failures
      */
     public void syncMcpToClaudeSettings(boolean allowEmptyOverwrite) throws IOException {
-        try {
-            String homeDir = NodeDetector.resolveHomeForFileOps();
+        Path claudeJsonPath = Paths.get(NodeDetector.resolveHomeForFileOps(), ".claude.json");
+        if (!Files.exists(claudeJsonPath)) {
+            LOG.info("[ClaudeSettingsManager] ~/.claude.json not found, skipping MCP sync");
+            return;
+        }
 
-            // Read ~/.claude.json
-            Path claudeJsonPath = Paths.get(homeDir, ".claude.json");
-            File claudeJsonFile = claudeJsonPath.toFile();
-
-            if (!claudeJsonFile.exists()) {
-                LOG.info("[ClaudeSettingsManager] ~/.claude.json not found, skipping MCP sync");
-                return;
-            }
-
-            // Self-healing read of ~/.claude.json: retry transient parse
-            // failures (another process mid-write), then fall back to the
-            // plugin's own backup copy and restore it over the damaged file.
-            JsonObject claudeJson = SafeJsonFileOps.readJsonOrBackup(
+        // Strict reads on both sides: a sync derived from unreadable content
+        // would push a fabricated (empty or stale) server list into
+        // settings.json. The source is re-read on every conflict retry so the
+        // sync always speaks about the latest state, never an old snapshot.
+        mutateClaudeSettings(settings -> {
+            JsonObject claudeJson = SafeJsonFileOps.readJsonObjectStrict(
                     claudeJsonPath, READ_ATTEMPTS, READ_RETRY_DELAY_MS);
             if (claudeJson == null) {
-                LOG.error("[ClaudeSettingsManager] Failed to parse ~/.claude.json and no usable backup exists — "
-                        + "skipping MCP sync (settings.json left untouched)");
-                return;
+                LOG.info("[ClaudeSettingsManager] ~/.claude.json disappeared, skipping MCP sync");
+                return null;
             }
+            return applyMcpServers(claudeJson, settings, allowEmptyOverwrite) ? settings : null;
+        });
+        LOG.info("[ClaudeSettingsManager] Successfully synced MCP configuration to ~/.claude/settings.json");
+    }
 
-            // Read ~/.claude/settings.json (self-healing: fall back to the
-            // plugin's backup when the live file is truncated/corrupt)
-            JsonObject settings = readClaudeSettings();
+    /**
+     * Copy the MCP-related fields from ~/.claude.json into settings.json.
+     *
+     * <p>A missing {@code mcpServers} key in the source means "no servers", not
+     * "unknown": when the caller knows the user emptied the list on purpose
+     * ({@code allowEmptyOverwrite}) the empty state is written as an empty object
+     * so a previously synced ghost disappears; otherwise the target list is kept
+     * (loss guard against a CLI snapshot that predates the user's configuration).
+     *
+     * @param claudeJson          the freshly read source document
+     * @param settings            the target settings (modified in place)
+     * @param allowEmptyOverwrite whether an empty or absent source may clear the target
+     * @return true when settings.json must be written
+     */
+    private boolean applyMcpServers(JsonObject claudeJson, JsonObject settings, boolean allowEmptyOverwrite) {
+        boolean changed = false;
+        JsonObject sourceServers = claudeJson.has("mcpServers") && claudeJson.get("mcpServers").isJsonObject()
+                ? claudeJson.getAsJsonObject("mcpServers")
+                : null;
+        boolean sourceEmpty = sourceServers == null || sourceServers.keySet().isEmpty();
+        boolean targetHasServers = settings.has("mcpServers")
+                && settings.get("mcpServers").isJsonObject()
+                && !settings.getAsJsonObject("mcpServers").keySet().isEmpty();
 
-            // Sync mcpServers — but never let an EMPTY .claude.json mcpServers
-            // wipe a non-empty mcpServers in settings.json. .claude.json is
-            // rewritten by the Claude CLI from its in-memory snapshot; if the
-            // CLI's snapshot briefly had no servers (e.g. it started before the
-            // user configured them, or a torn write was restored from a backup
-            // taken earlier), blindly copying the empty object here used to
-            // propagate the loss into settings.json (#<issue>: "configured MCP
-            // servers vanish"). Only overwrite when the source actually has
-            // servers, or when the source is non-empty and the target is empty.
-            if (claudeJson.has("mcpServers") && claudeJson.get("mcpServers").isJsonObject()) {
-                JsonObject sourceServers = claudeJson.getAsJsonObject("mcpServers");
-                boolean sourceEmpty = sourceServers.keySet().isEmpty();
-                boolean targetHasServers = settings.has("mcpServers")
-                        && settings.get("mcpServers").isJsonObject()
-                        && !settings.getAsJsonObject("mcpServers").keySet().isEmpty();
-                if (allowEmptyOverwrite || !sourceEmpty || !targetHasServers) {
-                    settings.add("mcpServers", sourceServers);
-                    LOG.info("[ClaudeSettingsManager] Synced mcpServers to settings.json (source servers: "
-                            + sourceServers.keySet().size() + ")");
-                } else {
-                    LOG.warn("[ClaudeSettingsManager] Skipped syncing an empty mcpServers from ~/.claude.json "
-                            + "over the non-empty mcpServers in settings.json (loss guard)");
-                }
-            }
-
-            // Sync disabledMcpServers
-            if (claudeJson.has("disabledMcpServers")) {
-                settings.add("disabledMcpServers", claudeJson.get("disabledMcpServers"));
-                JsonArray disabledServers = claudeJson.getAsJsonArray("disabledMcpServers");
-                LOG.info("[ClaudeSettingsManager] Synced " + disabledServers.size()
-                                 + " disabled MCP servers to settings.json");
-            }
-
-            // Write back to settings.json
-            writeClaudeSettings(settings);
-
-            LOG.info("[ClaudeSettingsManager] Successfully synced MCP configuration to ~/.claude/settings.json");
-        } catch (Exception e) {
-            LOG.error("[ClaudeSettingsManager] Failed to sync MCP to Claude settings: " + e.getMessage(), e);
-            throw new IOException("Failed to sync MCP settings", e);
+        if (allowEmptyOverwrite && sourceEmpty && targetHasServers) {
+            settings.add("mcpServers", new JsonObject());
+            changed = true;
+            LOG.info("[ClaudeSettingsManager] Cleared settings.json mcpServers: the source was intentionally emptied");
+        } else if (sourceEmpty && targetHasServers) {
+            LOG.warn("[ClaudeSettingsManager] Skipped syncing an empty mcpServers from ~/.claude.json "
+                    + "over the non-empty mcpServers in settings.json (loss guard)");
+        } else if (sourceServers != null) {
+            settings.add("mcpServers", sourceServers);
+            changed = true;
+            LOG.info("[ClaudeSettingsManager] Synced mcpServers to settings.json (source servers: "
+                    + sourceServers.keySet().size() + ")");
         }
+
+        if (claudeJson.has("disabledMcpServers")) {
+            settings.add("disabledMcpServers", claudeJson.get("disabledMcpServers"));
+            changed = true;
+            JsonArray disabledServers = claudeJson.getAsJsonArray("disabledMcpServers");
+            LOG.info("[ClaudeSettingsManager] Synced " + disabledServers.size()
+                    + " disabled MCP servers to settings.json");
+        }
+        return changed;
     }
 
     /**
@@ -315,15 +421,21 @@ public class ClaudeSettingsManager {
      * not leak into other auth flows.
      */
     public void removeCliLoginFromClaudeSettings() throws IOException {
-        JsonObject settings = readClaudeSettings();
-
-        if (settings.has("env") && !settings.get("env").isJsonNull()) {
-            JsonObject env = settings.getAsJsonObject("env");
-            if (env.has("CCGUI_CLI_LOGIN_AUTHORIZED")) {
-                env.remove("CCGUI_CLI_LOGIN_AUTHORIZED");
-                writeClaudeSettings(settings);
-                LOG.info("[ClaudeSettingsManager] Removed CLI login authorization flag from settings.json");
+        AtomicBoolean removed = new AtomicBoolean(false);
+        updateClaudeSettings(settings -> {
+            if (!settings.has("env") || !settings.get("env").isJsonObject()) {
+                return false;
             }
+            JsonObject env = settings.getAsJsonObject("env");
+            if (!env.has("CCGUI_CLI_LOGIN_AUTHORIZED")) {
+                return false;
+            }
+            env.remove("CCGUI_CLI_LOGIN_AUTHORIZED");
+            removed.set(true);
+            return true;
+        });
+        if (removed.get()) {
+            LOG.info("[ClaudeSettingsManager] Removed CLI login authorization flag from settings.json");
         }
     }
 
@@ -433,9 +545,10 @@ public class ClaudeSettingsManager {
      * Set the alwaysThinkingEnabled setting.
      */
     public void setAlwaysThinkingEnabled(boolean enabled) throws IOException {
-        JsonObject claudeSettings = readClaudeSettings();
-        claudeSettings.addProperty("alwaysThinkingEnabled", enabled);
-        writeClaudeSettings(claudeSettings);
+        updateClaudeSettings(settings -> {
+            settings.addProperty("alwaysThinkingEnabled", enabled);
+            return true;
+        });
     }
 
     /**
@@ -453,31 +566,33 @@ public class ClaudeSettingsManager {
             throw new IllegalArgumentException("Provider cannot be null");
         }
 
-        JsonObject oldClaudeSettings = readClaudeSettings();
-        ClaudeSettingsSyncPlan.Decision decision =
-                ClaudeSettingsSyncPlan.plan(oldClaudeSettings, provider);
-
-        if (decision.action == ClaudeSettingsSyncPlan.Action.SKIP) {
-            LOG.info("[ClaudeSettingsManager] Skip settings.json sync: " + decision.reason
-                    + (provider.has("id") && !provider.get("id").isJsonNull()
-                    ? " (active=" + provider.get("id").getAsString() + ")"
-                    : ""));
-            return;
-        }
-
-        LOG.info("[ClaudeSettingsManager] Applying provider config (managed-env merge, empty-env protected)");
-        LOG.info("[ClaudeSettingsManager] Original settings keys: " + oldClaudeSettings.keySet());
-        LOG.info("[ClaudeSettingsManager] Final settings keys: " + decision.nextSettings.keySet());
-        writeClaudeSettings(decision.nextSettings);
+        // Re-planned against the freshest settings on every retry, so a
+        // concurrent provider sync in another window is merged rather than
+        // clobbered by a decision computed from an old read.
+        mutateClaudeSettings(current -> {
+            ClaudeSettingsSyncPlan.Decision decision = ClaudeSettingsSyncPlan.plan(current, provider);
+            if (decision.action == ClaudeSettingsSyncPlan.Action.SKIP) {
+                LOG.info("[ClaudeSettingsManager] Skip settings.json sync: " + decision.reason
+                        + (provider.has("id") && !provider.get("id").isJsonNull()
+                        ? " (active=" + provider.get("id").getAsString() + ")"
+                        : ""));
+                return null;
+            }
+            LOG.info("[ClaudeSettingsManager] Applying provider config (managed-env merge, empty-env protected)");
+            LOG.info("[ClaudeSettingsManager] Original settings keys: " + current.keySet());
+            LOG.info("[ClaudeSettingsManager] Final settings keys: " + decision.nextSettings.keySet());
+            return decision.nextSettings;
+        });
     }
 
     /**
      * Sync Skills to Claude settings.json.
      */
     public void syncSkillsToClaudeSettings(JsonArray plugins) throws IOException {
-        JsonObject claudeSettings = readClaudeSettings();
-        claudeSettings.add("plugins", plugins);
-        writeClaudeSettings(claudeSettings);
+        updateClaudeSettings(settings -> {
+            settings.add("plugins", plugins);
+            return true;
+        });
     }
 
     /**
@@ -509,7 +624,34 @@ public class ClaudeSettingsManager {
         }
 
         JsonObject settingsConfig = provider.getAsJsonObject("settingsConfig");
-        JsonObject claudeSettings = readClaudeSettings().deepCopy();
+
+        // The repair is re-applied to the freshest settings on every conflict
+        // retry, so a concurrent write cannot be silently reverted by a plan
+        // computed from an older read.
+        AtomicBoolean changed = new AtomicBoolean(false);
+        mutateClaudeSettings(current -> {
+            boolean mutated = repairIntoSettings(current, settingsConfig, provider);
+            changed.set(mutated);
+            return mutated ? current : null;
+        });
+
+        if (changed.get()) {
+            LOG.info("[ClaudeSettingsManager] Repaired settings.json with missing provider fields");
+        } else {
+            LOG.info("[ClaudeSettingsManager] No missing provider fields to repair");
+        }
+        return changed.get();
+    }
+
+    /**
+     * Fill in the provider-managed fields that settings.json is missing.
+     *
+     * @param claudeSettings the settings to repair (modified in place)
+     * @param settingsConfig the provider's settings payload
+     * @param provider       the provider entry (for its id)
+     * @return true when at least one field or env key was added
+     */
+    private boolean repairIntoSettings(JsonObject claudeSettings, JsonObject settingsConfig, JsonObject provider) {
         boolean changed = false;
 
         // 1. Repair top-level provider-managed fields.
@@ -562,13 +704,6 @@ public class ClaudeSettingsManager {
                 claudeSettings.addProperty("codemossProviderId", providerId);
                 changed = true;
             }
-        }
-
-        if (changed) {
-            writeClaudeSettings(claudeSettings);
-            LOG.info("[ClaudeSettingsManager] Repaired settings.json with missing provider fields");
-        } else {
-            LOG.info("[ClaudeSettingsManager] No missing provider fields to repair");
         }
         return changed;
     }
