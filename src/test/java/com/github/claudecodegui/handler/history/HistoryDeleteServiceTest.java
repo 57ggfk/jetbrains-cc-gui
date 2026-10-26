@@ -2,6 +2,7 @@ package com.github.claudecodegui.handler.history;
 
 import com.github.claudecodegui.handler.core.HandlerContext;
 import com.github.claudecodegui.session.ClaudeSession;
+import com.google.gson.JsonObject;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -210,6 +211,106 @@ public class HistoryDeleteServiceTest {
 
         assertTrue(historyLoadService.awaitReload());
         assertEquals("codex", historyLoadService.provider);
+    }
+
+    @Test
+    public void payloadProviderWinsOverStalePanelProvider() {
+        JsonObject request = HistoryDeleteService.parseRequestObject(
+                "{\"sessionId\":\"session-1\",\"provider\":\"claude\"}");
+
+        assertEquals("claude", HistoryDeleteService.resolveProvider(request, "codex"));
+    }
+
+    @Test
+    public void missingPayloadProviderFallsBackToPanelProvider() {
+        assertEquals("codex", HistoryDeleteService.resolveProvider(null, "codex"));
+        assertEquals("codex", HistoryDeleteService.resolveProvider(
+                HistoryDeleteService.parseRequestObject("{\"sessionId\":\"session-1\"}"), "codex"));
+    }
+
+    @Test
+    public void sidecarDirectoryRemovalDeletesSubagentTranscripts() throws Exception {
+        Path projectDir = temporaryFolder.newFolder("projects", "proj").toPath();
+        String sessionId = "9d1f0f6e-1b2c-4b3a-9d4e-2f5a6b7c8d90";
+        Path subagentsDir = projectDir.resolve(sessionId).resolve("subagents");
+        Files.createDirectories(subagentsDir);
+        Path transcript = Files.write(subagentsDir.resolve("agent-a80732c8.jsonl"),
+                Collections.singletonList("{}"), StandardCharsets.UTF_8);
+        Path meta = Files.write(subagentsDir.resolve("agent-a80732c8.meta.json"),
+                Collections.singletonList("{}"), StandardCharsets.UTF_8);
+
+        Path otherSubagentsDir = projectDir.resolve("other-session").resolve("subagents");
+        Files.createDirectories(otherSubagentsDir);
+        Path otherTranscript = Files.write(otherSubagentsDir.resolve("agent-keep.jsonl"),
+                Collections.singletonList("{}"), StandardCharsets.UTF_8);
+
+        int deleted = HistoryDeleteService.deleteSessionSidecarDirectory(projectDir, sessionId);
+
+        assertEquals(2, deleted);
+        assertFalse(Files.exists(transcript));
+        assertFalse(Files.exists(meta));
+        assertFalse(Files.exists(projectDir.resolve(sessionId)));
+        assertTrue(Files.exists(otherTranscript));
+    }
+
+    @Test
+    public void sidecarDirectoryRemovalKeepsUnknownSessionFiles() throws Exception {
+        // Only the known subagents subtree is ours to delete; a future Claude Code
+        // artifact beside it must survive, and so must the directory holding it.
+        Path projectDir = temporaryFolder.newFolder("projects", "proj").toPath();
+        String sessionId = "9d1f0f6e-1b2c-4b3a-9d4e-2f5a6b7c8d90";
+        Path sessionDir = Files.createDirectories(projectDir.resolve(sessionId));
+        Path subagentsDir = Files.createDirectories(sessionDir.resolve("subagents"));
+        Files.write(subagentsDir.resolve("agent-a80732c8.jsonl"),
+                Collections.singletonList("{}"), StandardCharsets.UTF_8);
+        Path unknown = Files.write(sessionDir.resolve("future-artifact.bin"),
+                Collections.singletonList("keep"), StandardCharsets.UTF_8);
+
+        int deleted = HistoryDeleteService.deleteSessionSidecarDirectory(projectDir, sessionId);
+
+        assertEquals(1, deleted);
+        assertFalse(Files.exists(subagentsDir));
+        assertTrue(Files.exists(unknown));
+        assertTrue(Files.exists(sessionDir));
+    }
+
+    @Test
+    public void sidecarDirectoryRemovalRefusesSymlinkedSessionDirectory() throws Exception {
+        // Deleting through a symlinked session directory would reach whatever it
+        // points at, so the walk must refuse the link itself.
+        Path projectDir = temporaryFolder.newFolder("projects", "proj").toPath();
+        Path realDir = temporaryFolder.newFolder("elsewhere", "real").toPath();
+        Path realSubagents = Files.createDirectories(realDir.resolve("subagents"));
+        Path transcript = Files.write(realSubagents.resolve("agent-a80732c8.jsonl"),
+                Collections.singletonList("{}"), StandardCharsets.UTF_8);
+        String sessionId = "9d1f0f6e-1b2c-4b3a-9d4e-2f5a6b7c8d90";
+        try {
+            Files.createSymbolicLink(projectDir.resolve(sessionId), realDir);
+        } catch (Exception symlinksUnavailable) {
+            // Windows without Developer Mode cannot create links; nothing to assert.
+            return;
+        }
+
+        assertEquals(0, HistoryDeleteService.deleteSessionSidecarDirectory(projectDir, sessionId));
+        assertTrue(Files.exists(transcript));
+    }
+
+    @Test
+    public void sidecarDirectoryRemovalRejectsEscapingSessionId() throws Exception {
+        Path projectDir = temporaryFolder.newFolder("projects", "proj").toPath();
+        Path outsideDir = Files.createDirectories(projectDir.getParent().resolve("outside"));
+        Path survivor = Files.write(outsideDir.resolve("keep.jsonl"),
+                Collections.singletonList("{}"), StandardCharsets.UTF_8);
+
+        assertEquals(0, HistoryDeleteService.deleteSessionSidecarDirectory(projectDir, "../outside"));
+        assertTrue(Files.exists(survivor));
+    }
+
+    @Test
+    public void sidecarDirectoryRemovalIgnoresSessionsWithoutSidecars() throws Exception {
+        Path projectDir = temporaryFolder.newFolder("projects", "proj").toPath();
+
+        assertEquals(0, HistoryDeleteService.deleteSessionSidecarDirectory(projectDir, "missing-session"));
     }
 
     private Path writeCodexRollout(Path sessionDir, String sessionId, String parentId, String body)
