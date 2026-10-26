@@ -23,6 +23,17 @@ describe('useSessionManagement', () => {
     setBackgroundTasks: vi.fn(),
   });
 
+  /**
+   * Decode the JSON body of the last bridge event of a given kind. Delete
+   * payloads carry {sessionId|sessionIds, provider} rather than a bare id, so
+   * assertions compare the parsed object instead of the raw string.
+   */
+  const lastBridgePayload = (event: string) => {
+    const calls = (window.sendToJava as any).mock.calls.map((call: unknown[]) => call[0] as string);
+    const payload = [...calls].reverse().find((entry: string) => entry.startsWith(`${event}:`));
+    return payload ? JSON.parse(payload.slice(event.length + 1)) : null;
+  };
+
   beforeEach(() => {
     window.__sessionTransitioning = false;
     window.__sessionTransitionToken = null;
@@ -189,8 +200,16 @@ describe('useSessionManagement', () => {
 
     expect(historyData.sessions).toEqual([]);
     expect(historyData.total).toBe(0);
-    expect(window.sendToJava).toHaveBeenCalledWith('delete_session:history-1');
-    expect(window.sendToJava).toHaveBeenCalledWith('delete_session:history-2');
+    // Each delete carries the row's own provider so the backend routes on the
+    // right store instead of the (possibly stale) panel provider.
+    const deletePayloads = (window.sendToJava as any).mock.calls
+      .map((call: unknown[]) => call[0] as string)
+      .filter((entry: string) => entry.startsWith('delete_session:'))
+      .map((entry: string) => JSON.parse(entry.slice('delete_session:'.length)));
+    expect(deletePayloads).toEqual([
+      { sessionId: 'history-1', provider: 'claude' },
+      { sessionId: 'history-2', provider: 'codex' },
+    ]);
   });
 
   it('sends one backend request when deleting multiple history sessions', () => {
@@ -240,7 +259,10 @@ describe('useSessionManagement', () => {
     expect(historyData.sessions).toEqual([]);
     expect(historyData.total).toBe(0);
     expect(window.sendToJava).toHaveBeenCalledTimes(1);
-    expect(window.sendToJava).toHaveBeenCalledWith('delete_sessions:["history-1","history-2"]');
+    expect(lastBridgePayload('delete_sessions')).toEqual({
+      sessionIds: ['history-1', 'history-2'],
+      provider: 'claude',
+    });
     expect(mocks.addToast).toHaveBeenCalledWith('history.sessionDeleted', 'success');
   });
 
@@ -262,7 +284,10 @@ describe('useSessionManagement', () => {
       result.current.deleteHistorySessions(['history-1', 'history-2', 'history-1']);
     });
 
-    expect(window.sendToJava).toHaveBeenCalledWith('delete_sessions:["history-1","history-2"]');
+    expect(lastBridgePayload('delete_sessions')).toEqual({
+      sessionIds: ['history-1', 'history-2'],
+      provider: 'claude',
+    });
     expect(mocks.addToast).toHaveBeenCalledWith('history.sessionDeleted', 'success');
   });
 
@@ -344,7 +369,10 @@ describe('useSessionManagement', () => {
       result.current.deleteHistorySessions(['history-1', 'history-2']);
     });
 
-    expect(window.sendToJava).toHaveBeenCalledWith('delete_sessions:["history-1","history-2"]');
+    expect(lastBridgePayload('delete_sessions')).toEqual({
+      sessionIds: ['history-1', 'history-2'],
+      provider: 'claude',
+    });
     expect(window.sendToJava).toHaveBeenCalledWith('create_new_session:');
     expect(mocks.addToast).not.toHaveBeenCalledWith('history.sessionDeleted', 'success');
     expect(window.__pendingSessionTransitionToast).toEqual({
