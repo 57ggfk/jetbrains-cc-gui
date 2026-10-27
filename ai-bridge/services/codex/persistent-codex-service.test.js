@@ -42,6 +42,24 @@ const {
 
 setCodexPristineBaseEnv({ ...process.env, CODEX_HOME: join(testCwd, 'native-home') });
 
+test('daemon sends keep changing editor context separate without rebuilding the runtime', async () => {
+  const channelId = 'editor-context';
+  const data = { channelId, cwd: testCwd, codexCommandPrefix: peerCommandPrefix('editor-context') };
+  for (const [message, file] of [['inspect the selection', 'App.java'], ['look here now', 'Service.java']]) {
+    const result = await codexSendPersistent({ ...data, message,
+      additionalContext: { ide_context: { kind: 'application', value: `Active file: ${file}` } } },
+    { titleDependencies: { enabled: async () => false } });
+    assert.equal(result.outcome, 'completed');
+  }
+  const items = codexEvents().filter(event => event.channelId === channelId && event.kind === 'itemCompleted');
+  const users = items.filter(event => event.payload.item.type === 'userMessage');
+  assert.deepEqual(users.map(event => event.payload.item.content), ['inspect the selection', 'look here now']
+    .map(text => [{ type: 'text', text }]));
+  const turns = items.filter(event => event.payload.item.type === 'agentMessage').map(event => JSON.parse(event.payload.item.text));
+  assert.deepEqual(turns.map(turn => turn.additionalContext.ide_context.value), ['Active file: App.java', 'Active file: Service.java']);
+  assert.ok(items.every(event => event.runtimeGeneration === 1));
+});
+
 // The webview mirrors this mapping when it derives an access scope from the
 // permission mode (deriveCodexAccessScopeFromMode). A drift here is what made a
 // Full Auto session keep running inside the workspace sandbox.
@@ -619,6 +637,41 @@ test('interaction reply bypasses the pending send and reaches the peer', async (
 
   const result = await sendPromise;
   assert.equal(result.outcome, 'completed');
+});
+
+test('a reply Codex is no longer waiting for is reported apart from a correctable one', async () => {
+  const channelId = 'ch-reply-outcomes';
+  const sendPromise = codexSendPersistent({
+    channelId,
+    cwd: testCwd,
+    codexCommandPrefix: peerCommandPrefix('reverse-approval'),
+    message: 'needs approval',
+    clientMessageId: 'cm-reply-outcomes-1',
+  });
+  let interaction = null;
+  for (let i = 0; i < 200 && !interaction; i += 1) {
+    await new Promise((r) => setTimeout(r, 20));
+    interaction = codexEvents().find((event) => event.kind === 'interactionRequested'
+      && event.channelId === channelId);
+  }
+  assert.ok(interaction, 'approval surfaced while the send is still pending');
+  const reply = (result) => codexRespondInteractionPersistent({
+    channelId, rpcId: interaction.payload.rpcId, result,
+  });
+
+  // A malformed answer leaves the native request open for a corrected one.
+  await assert.rejects(reply([]), { code: 'INVALID_INTERACTION_RESULT' });
+  await reply({ decision: 'accept' });
+  // The request is answered: a second answer can never be delivered again.
+  await assert.rejects(reply({ decision: 'decline' }), { code: 'INTERACTION_NOT_PENDING' });
+
+  assert.equal((await sendPromise).outcome, 'completed');
+});
+
+test('a reply for a session without a runtime is not retryable', async () => {
+  await assert.rejects(codexRespondInteractionPersistent({
+    channelId: 'ch-no-runtime', cwd: testCwd, rpcId: 7, result: { decision: 'accept' },
+  }), { code: 'INTERACTION_NOT_PENDING' });
 });
 
 test('abortTurn stops the active operation without queueing', async () => {
