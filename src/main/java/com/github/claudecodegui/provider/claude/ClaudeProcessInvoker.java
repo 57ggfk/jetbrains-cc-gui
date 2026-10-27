@@ -172,6 +172,8 @@ class ClaudeProcessInvoker {
                     if (wasInterrupted) {
                         long elapsed = System.currentTimeMillis() - startTime;
                         log.info("[ProcessInvoker] Request was interrupted by user (elapsed: " + elapsed + "ms)");
+                        // A clean exit after Stop is not an abort acknowledgement. Keep success false;
+                        // processExited lets execution ownership settle the stopped turn as FAILED.
                         result.cancelled = exitCode != 0;
                         result.error = "User interrupted";
                         callback.onComplete(result);

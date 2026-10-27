@@ -8,9 +8,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.lang.ref.WeakReference;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
 
 /**
  * Session state management.
@@ -115,9 +112,7 @@ public class SessionState {
     private volatile Object loadingOwner;
     private volatile Object turnOwner = new Object();
     private volatile SessionExecutionState executionState = new SessionExecutionState();
-    private final List<Consumer<ExecutionBinding>> executionBindingListeners = new CopyOnWriteArrayList<>();
 
-    public record ExecutionBinding(String provider, String model, SessionExecutionState execution) { }
 
     // Message history is also updated by daemon reader and history-loader threads.
     // Every message callback and history replacement takes this lock so a transport
@@ -188,7 +183,6 @@ public class SessionState {
     /** Starts a send before any previous provider process has finished shutting down. */
     public Object beginTurn() {
         synchronized (messageStateLock) {
-            publishExecutionBinding();
             // Preserve an unfinished predecessor as a detached source, without changing cancellation policy.
             if (executionState.hasLiveTurn()) {
                 rebindExecution();
@@ -199,7 +193,6 @@ public class SessionState {
             loadingOwner = null;
             error = null;
             executionState.beginTurn();
-            publishExecutionBinding();
             return turnOwner;
         }
     }
@@ -236,36 +229,6 @@ public class SessionState {
     public SessionExecutionOwnership currentExecutionOwnership() {
         synchronized (messageStateLock) {
             return executionOwnershipForOwner(turnOwner);
-        }
-    }
-
-    /** Subscription cleanup is weak so an application observer cannot retain the conversation or Project. */
-    public Runnable observeExecutionBindings(Consumer<ExecutionBinding> listener) {
-        synchronized (messageStateLock) {
-            if (executionBindingListeners.size() >= 8) {
-                throw new IllegalStateException("Too many execution observers");
-            }
-            executionBindingListeners.add(listener);
-            listener.accept(new ExecutionBinding(provider, model, executionState));
-        }
-        WeakReference<SessionState> reference = new WeakReference<>(this);
-        return () -> {
-            SessionState owner = reference.get();
-            if (owner != null) {
-                owner.executionBindingListeners.remove(listener);
-            }
-        };
-    }
-
-    private void publishExecutionBinding() {
-        ExecutionBinding binding = new ExecutionBinding(provider, model, executionState);
-        for (Consumer<ExecutionBinding> listener : executionBindingListeners) {
-            try {
-                listener.accept(binding);
-            } catch (RuntimeException error) {
-                com.intellij.openapi.diagnostic.Logger.getInstance(SessionState.class)
-                        .warn("[SessionExecution] Observer rejected a binding update", error);
-            }
         }
     }
 
@@ -387,7 +350,6 @@ public class SessionState {
                     rebindExecution();
                 }
                 this.sessionId = sessionId;
-                publishExecutionBinding();
             }
         }
     }
@@ -398,7 +360,6 @@ public class SessionState {
             if (!java.util.Objects.equals(this.sessionId, sessionId)) {
                 rebindExecution();
                 this.sessionId = sessionId;
-                publishExecutionBinding();
             }
         }
     }
@@ -502,7 +463,6 @@ public class SessionState {
     public void setModel(String model) {
         synchronized (messageStateLock) {
             this.model = normalizeRetiredModelId(model);
-            publishExecutionBinding();
         }
     }
 
@@ -519,7 +479,6 @@ public class SessionState {
     public void setModelVerbatim(String model) {
         synchronized (messageStateLock) {
             this.model = model == null ? null : model.trim();
-            publishExecutionBinding();
         }
     }
 
@@ -575,7 +534,6 @@ public class SessionState {
             if (!java.util.Objects.equals(this.provider, provider)) {
                 rebindExecution();
                 this.provider = provider;
-                publishExecutionBinding();
             }
         }
     }
@@ -609,7 +567,6 @@ public class SessionState {
             if (!this.runtimeSessionEpoch.equals(epoch)) {
                 rebindExecution();
                 this.runtimeSessionEpoch = epoch;
-                publishExecutionBinding();
             }
         }
     }

@@ -241,10 +241,6 @@ public class CodexMessageHandler implements MessageCallback {
                         result.processExited);
             }
             clearNativeInteractions();
-            // Provider termination can confirm cancellation after MESSAGE_END or an error completed the transport future.
-            if (!ownsCurrentTurn()) {
-                return;
-            }
             boolean streamEndedBeforeComplete = streamEndedThisTurn;
             boolean wasStreaming = isStreaming;
 

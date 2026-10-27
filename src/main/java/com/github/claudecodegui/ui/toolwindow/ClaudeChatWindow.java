@@ -321,9 +321,9 @@ public class ClaudeChatWindow {
         chatWindowDelegate.initializeHandlers();
         this.permissionServiceKey = chatWindowDelegate.setupPermissionService();
         this.sessionId = this.permissionServiceKey;
-        java.lang.ref.WeakReference<ClaudeChatWindow> officeOwner = new java.lang.ref.WeakReference<>(this);
+        java.lang.ref.WeakReference<ClaudeChatWindow> executionOwner = new java.lang.ref.WeakReference<>(this);
         PermissionService.getInstance(project, permissionServiceKey).setExecutionOwnerSupplier(() -> {
-            ClaudeChatWindow current = officeOwner.get();
+            ClaudeChatWindow current = executionOwner.get();
             if (current == null || current.disposed || current.project.isDisposed()) {
                 return null;
             }

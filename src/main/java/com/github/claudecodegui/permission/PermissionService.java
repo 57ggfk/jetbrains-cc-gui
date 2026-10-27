@@ -1,5 +1,8 @@
 package com.github.claudecodegui.permission;
 
+import com.github.claudecodegui.session.SessionExecutionOwnership;
+import com.github.claudecodegui.session.SessionExecutionState;
+import com.github.claudecodegui.session.SessionInteractionScope;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
@@ -10,6 +13,7 @@ import javax.swing.*;
 import java.nio.file.*;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 
 /**
  * Permission service - handles permission requests from the Node.js process
@@ -24,17 +28,17 @@ public class PermissionService {
     private final Gson gson = new Gson();
     private volatile long lastActivityTime = System.currentTimeMillis();
     private volatile PermissionDecisionListener decisionListener;
-    private volatile java.util.function.Supplier<com.github.claudecodegui.session.SessionExecutionOwnership> executionOwner;
+    private volatile Supplier<SessionExecutionOwnership> executionOwner;
 
-    public void setExecutionOwnerSupplier(java.util.function.Supplier<com.github.claudecodegui.session.SessionExecutionOwnership> supplier) {
+    public void setExecutionOwnerSupplier(Supplier<SessionExecutionOwnership> supplier) {
         this.executionOwner = supplier;
     }
 
-    private <T> CompletableFuture<T> observeFileDialog(JsonObject request, java.util.function.Supplier<CompletableFuture<T>> create,
-                                                       com.github.claudecodegui.session.SessionExecutionState.WaitReason reason) {
-        com.github.claudecodegui.session.SessionExecutionOwnership owner = null;
+    private <T> CompletableFuture<T> observeFileDialog(JsonObject request, Supplier<CompletableFuture<T>> create,
+                                                       SessionExecutionState.WaitReason reason) {
+        SessionExecutionOwnership owner = null;
         try {
-            java.util.function.Supplier<com.github.claudecodegui.session.SessionExecutionOwnership> supplier = executionOwner;
+            Supplier<SessionExecutionOwnership> supplier = executionOwner;
             if (supplier != null) {
                 owner = supplier.get();
             }
@@ -43,11 +47,11 @@ public class PermissionService {
         }
         String correlation = request.has("executionScope") && request.get("executionScope").isJsonPrimitive()
                 && request.getAsJsonPrimitive("executionScope").isString() ? request.get("executionScope").getAsString() : "";
-        com.github.claudecodegui.session.SessionExecutionOwnership captured = owner;
-        return com.github.claudecodegui.session.SessionInteractionScope.forFileRequest(correlation, captured, () -> {
+        SessionExecutionOwnership captured = owner;
+        return SessionInteractionScope.forFileRequest(correlation, captured, () -> {
             CompletableFuture<T> future = create.get();
-            com.github.claudecodegui.session.SessionExecutionOwnership matched =
-                    com.github.claudecodegui.session.SessionInteractionScope.resolve(captured);
+            SessionExecutionOwnership matched =
+                    SessionInteractionScope.resolve(captured);
             if (matched != null && future != null) {
                 try {
                     matched.bindInteraction(reason, future);
@@ -402,7 +406,7 @@ public class PermissionService {
         final long dialogStart = System.currentTimeMillis();
 
         CompletableFuture<Integer> future = observeFileDialog(request, () -> shower.showPermissionDialog(toolName, inputs),
-                com.github.claudecodegui.session.SessionExecutionState.WaitReason.PERMISSION);
+                SessionExecutionState.WaitReason.PERMISSION);
         future.thenAccept(response -> {
             LOG.info("[PERM_FUTURE] response=" + response + ", elapsed="
                     + (System.currentTimeMillis() - dialogStart) + "ms, tool=" + toolName);
@@ -433,7 +437,7 @@ public class PermissionService {
         debugLog("FALLBACK_DIALOG", "Using JOptionPane for: " + toolName);
         try {
             CompletableFuture<Integer> future = observeFileDialog(request, CompletableFuture::new,
-                    com.github.claudecodegui.session.SessionExecutionState.WaitReason.PERMISSION);
+                    SessionExecutionState.WaitReason.PERMISSION);
             ApplicationManager.getApplication().invokeLater(
                     () -> future.complete(showSystemPermissionDialog(toolName, inputs)));
 
@@ -529,7 +533,7 @@ public class PermissionService {
                                            String requestId, JsonObject questionsData, String fileName) {
         final long dialogStart = System.currentTimeMillis();
         CompletableFuture<JsonObject> future = observeFileDialog(questionsData, () -> shower.showAskUserQuestionDialog(requestId, questionsData),
-                com.github.claudecodegui.session.SessionExecutionState.WaitReason.QUESTION);
+                SessionExecutionState.WaitReason.QUESTION);
 
         future.thenAccept(answers -> {
             debugLog("ASK_RESPONSE", "Got answers after " + (System.currentTimeMillis() - dialogStart) + "ms");
@@ -590,7 +594,7 @@ public class PermissionService {
                                             String requestId, JsonObject request, String fileName) {
         final long dialogStart = System.currentTimeMillis();
         CompletableFuture<JsonObject> future = observeFileDialog(request, () -> shower.showPlanApprovalDialog(requestId, request),
-                com.github.claudecodegui.session.SessionExecutionState.WaitReason.PLAN);
+                SessionExecutionState.WaitReason.PLAN);
 
         future.thenAccept(response -> {
             debugLog("PLAN_RESPONSE", "Got response after " + (System.currentTimeMillis() - dialogStart) + "ms");
@@ -626,7 +630,7 @@ public class PermissionService {
 
         CompletableFuture<DiffReviewResult> reviewFuture =
                 observeFileDialog(request, () -> DiffReviewService.reviewFileChange(matched, toolName, inputs),
-                        com.github.claudecodegui.session.SessionExecutionState.WaitReason.PERMISSION);
+                        SessionExecutionState.WaitReason.PERMISSION);
         if (reviewFuture == null) {
             LOG.info("[DIFF_REVIEW] Not available for " + toolName + ", falling back");
             return false;

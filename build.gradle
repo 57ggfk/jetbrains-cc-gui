@@ -148,8 +148,7 @@ dependencies {
 }
 
 intellijPlatform {
-    // Select the non-instrumented artifact as well as disabling bytecode transformation.
-    // Disabling only the task leaves test compilation pointing at an empty/stale instrumented jar.
+    // Use current non-instrumented output when bytecode instrumentation is disabled.
     instrumentCode = false
 
     pluginVerification {
@@ -200,24 +199,6 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     // Ensure consistent source/target compatibility
     options.release.set(17)
-}
-
-tasks.named('compileTestJava', JavaCompile) {
-    // Incremental test analysis can omit replaced main classes on the Windows/JDK build path.
-    // Compile tests from the current class directory without reusing that stale analysis.
-    options.incremental = false
-}
-
-tasks.named('test', Test) {
-    // Disabled instrumentation can leave old test bytecode ahead of the current classes.
-    // Keep the platform runtime, but discover and load the current compiler output first.
-    def currentTestClasses = tasks.named('compileTestJava', JavaCompile).flatMap { it.destinationDirectory }
-    def platformRuntimeClasspath = classpath
-    def staleInstrumentedTests = layout.buildDirectory.dir('instrumented/instrumentTestCode')
-    testClassesDirs = files(currentTestClasses)
-    classpath = files(currentTestClasses, platformRuntimeClasspath.filter {
-        !it.toPath().normalize().startsWith(staleInstrumentedTests.get().asFile.toPath().normalize())
-    })
 }
 
 // Ensure plugin.xml is patched with the correct since/until build and change notes
