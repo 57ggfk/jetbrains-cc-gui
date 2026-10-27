@@ -88,6 +88,26 @@ public class CodexAppServerRequestExecutorTest {
     }
 
     @Test
+    public void timedOutControlCommandStillCarriesAnErrorMessage() {
+        CodexAppServerRequestExecutor executor = new CodexAppServerRequestExecutor(
+                Logger.getInstance(CodexAppServerRequestExecutorTest.class), ignored -> { });
+        DaemonBridge silentDaemon = new DaemonBridge(null, null, null) {
+            @Override
+            public CompletableFuture<Boolean> sendCommand(String method, JsonObject params, DaemonOutputCallback callback) {
+                return new CompletableFuture<>();
+            }
+        };
+
+        JsonObject result = executor.sendControlCommand(silentDaemon, "codex.respondInteraction", new JsonObject(), 10L);
+
+        // A null message becomes JsonNull, which Gson drops when the ack is sent
+        // to the page, so the failure would read as a success there.
+        assertTrue(result.has("error"));
+        assertTrue(result.get("error").isJsonPrimitive());
+        assertTrue(result.get("error").getAsString().contains("codex.respondInteraction"));
+    }
+
+    @Test
     public void reviewAndCompactMarkersReachTheChatConsumer() {
         RecordingDaemon daemon = new RecordingDaemon();
         AtomicInteger markers = new AtomicInteger();

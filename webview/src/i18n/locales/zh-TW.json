@@ -1086,7 +1086,9 @@
     "previewUnavailable": "原生檔案預覽不可用。你可以拒絕或取消該請求。",
     "requestedPermissions": "請求的原生權限",
     "allowWithRule": "允許並加入此命令規則",
-    "allowWithNetworkRule": "允許並加入此網路規則"
+    "allowWithNetworkRule": "允許並加入此網路規則",
+    "codexDeliveryRetry": "Codex 沒有收到你的選擇（{{error}}），請重新選擇。",
+    "codexDeliveryFailed": "Codex 沒有收到你的選擇（{{error}}）。如果對話沒有繼續，請點擊停止後重新傳送。"
   },
   "askUserQuestion": {
     "title": "Claude 有一些問題想問你",

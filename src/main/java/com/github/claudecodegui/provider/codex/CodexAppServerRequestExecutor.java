@@ -232,9 +232,14 @@ class CodexAppServerRequestExecutor {
             }
             return new JsonObject();
         } catch (Exception e) {
-            CodexAppServerRequestExecutor.this.log.warn("[CodexDaemonExecutor] control command " + method + " failed: " + e.getMessage());
+            // Timeouts carry no message; a null error would be dropped from the
+            // page ack and the failure would read as a success there.
+            String reason = e.getMessage() != null ? e.getMessage()
+                    : e instanceof TimeoutException ? method + " timed out after " + timeoutMs + " ms"
+                    : method + " failed: " + e.getClass().getSimpleName();
+            CodexAppServerRequestExecutor.this.log.warn("[CodexDaemonExecutor] control command " + method + " failed: " + reason);
             JsonObject error = new JsonObject();
-            error.addProperty("error", e.getMessage());
+            error.addProperty("error", reason);
             return error;
         }
     }

@@ -1492,7 +1492,9 @@
     "previewUnavailable": "原生文件预览不可用。你可以拒绝或取消该请求。",
     "requestedPermissions": "请求的原生权限",
     "allowWithRule": "允许并添加此命令规则",
-    "allowWithNetworkRule": "允许并添加此网络规则"
+    "allowWithNetworkRule": "允许并添加此网络规则",
+    "codexDeliveryRetry": "Codex 没有收到你的选择（{{error}}），请重新选择。",
+    "codexDeliveryFailed": "Codex 没有收到你的选择（{{error}}）。如果对话没有继续，请点击停止后重新发送。"
   },
   "askUserQuestion": {
     "title": "Claude 有一些问题想问你",
