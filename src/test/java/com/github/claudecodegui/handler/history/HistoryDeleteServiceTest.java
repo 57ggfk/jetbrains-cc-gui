@@ -210,7 +210,7 @@ public class HistoryDeleteServiceTest {
         HistoryDeleteService service = new HistoryDeleteService(
                 fixture.context(), new NodeJsServiceCaller(fixture.context()), null);
 
-        service.cleanupSessionMetadata("session-1");
+        assertTrue(service.cleanupSessionMetadata("session-1"));
 
         assertEquals(Set.of("session-2"), fixture.favoriteIds());
         assertEquals(Set.of("session-2"), fixture.titledSessionIds());
@@ -218,18 +218,28 @@ public class HistoryDeleteServiceTest {
 
     @Test
     public void cleanupSessionMetadataDeletesTitleEvenWhenFavoriteRemovalFails() {
-        RecordingNodeJsServiceCaller caller = new RecordingNodeJsServiceCaller(true, false);
+        RecordingNodeJsServiceCaller caller = new RecordingNodeJsServiceCaller(null, "{\"success\":true}");
 
-        new HistoryDeleteService(null, caller, null).cleanupSessionMetadata("session-1");
+        assertFalse(new HistoryDeleteService(null, caller, null).cleanupSessionMetadata("session-1"));
 
         assertEquals(Arrays.asList("removeFavorite:session-1", "deleteTitle:session-1"), caller.calls);
     }
 
     @Test
     public void cleanupSessionMetadataSwallowsTitleDeletionFailure() {
-        RecordingNodeJsServiceCaller caller = new RecordingNodeJsServiceCaller(false, true);
+        RecordingNodeJsServiceCaller caller = new RecordingNodeJsServiceCaller("true", null);
 
-        new HistoryDeleteService(null, caller, null).cleanupSessionMetadata("session-1");
+        assertFalse(new HistoryDeleteService(null, caller, null).cleanupSessionMetadata("session-1"));
+
+        assertEquals(Arrays.asList("removeFavorite:session-1", "deleteTitle:session-1"), caller.calls);
+    }
+
+    @Test
+    public void cleanupSessionMetadataTreatsFailedServiceResultAsFailure() {
+        // A failed save inside the JS services still exits 0 and prints false.
+        RecordingNodeJsServiceCaller caller = new RecordingNodeJsServiceCaller("false", "{\"success\":false}");
+
+        assertFalse(new HistoryDeleteService(null, caller, null).cleanupSessionMetadata("session-1"));
 
         assertEquals(Arrays.asList("removeFavorite:session-1", "deleteTitle:session-1"), caller.calls);
     }
@@ -272,33 +282,34 @@ public class HistoryDeleteServiceTest {
         }
     }
 
+    /** Records calls; a null result makes that call throw. */
     private static class RecordingNodeJsServiceCaller extends NodeJsServiceCaller {
-        private final boolean failFavorites;
-        private final boolean failTitles;
+        private final String favoritesResult;
+        private final String titlesResult;
         private final List<String> calls = new ArrayList<>();
 
-        private RecordingNodeJsServiceCaller(boolean failFavorites, boolean failTitles) {
+        private RecordingNodeJsServiceCaller(String favoritesResult, String titlesResult) {
             super(null);
-            this.failFavorites = failFavorites;
-            this.failTitles = failTitles;
+            this.favoritesResult = favoritesResult;
+            this.titlesResult = titlesResult;
         }
 
         @Override
         public String callNodeJsFavoritesService(String functionName, String sessionId) throws Exception {
             calls.add(functionName + ":" + sessionId);
-            if (failFavorites) {
+            if (favoritesResult == null) {
                 throw new IllegalArgumentException("favorites failed");
             }
-            return "true";
+            return favoritesResult;
         }
 
         @Override
         public String callNodeJsDeleteTitle(String sessionId) throws Exception {
             calls.add("deleteTitle:" + sessionId);
-            if (failTitles) {
+            if (titlesResult == null) {
                 throw new Exception("titles failed");
             }
-            return "{\"success\":true}";
+            return titlesResult;
         }
     }
 

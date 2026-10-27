@@ -593,23 +593,43 @@ class HistoryDeleteService {
         return new int[]{mainDeleted ? 1 : 0, agentFilesDeleted};
     }
 
-    void cleanupSessionMetadata(String sessionId) {
+    /**
+     * Removes the deleted session's favorite and custom title.
+     *
+     * @return true if both were cleaned up
+     */
+    boolean cleanupSessionMetadata(String sessionId) {
         // Independent steps: a failed favorite removal must not leave the custom title behind.
+        // Both services report a failed save as a false result while still exiting 0.
         boolean favoriteRemoved = runMetadataCleanupStep("remove favorite",
-                () -> nodeJsServiceCaller.callNodeJsFavoritesService("removeFavorite", sessionId));
+                () -> "true".equals(nodeJsServiceCaller.callNodeJsFavoritesService("removeFavorite", sessionId)));
         boolean titleDeleted = runMetadataCleanupStep("delete custom title",
-                () -> nodeJsServiceCaller.callNodeJsDeleteTitle(sessionId));
+                () -> isSuccessResult(nodeJsServiceCaller.callNodeJsDeleteTitle(sessionId)));
         if (favoriteRemoved && titleDeleted) {
             LOG.info("[HistoryHandler] Cleaned up session metadata");
         }
+        return favoriteRemoved && titleDeleted;
     }
 
-    private static boolean runMetadataCleanupStep(String step, Callable<String> action) {
+    private static boolean runMetadataCleanupStep(String step, Callable<Boolean> action) {
         try {
-            action.call();
-            return true;
+            if (action.call()) {
+                return true;
+            }
+            LOG.warn("[HistoryHandler] Failed to " + step + " (does not affect deletion): service reported failure");
         } catch (Exception e) {
             LOG.warn("[HistoryHandler] Failed to " + step + " (does not affect deletion): " + e.getMessage());
+        }
+        return false;
+    }
+
+    private static boolean isSuccessResult(String json) {
+        try {
+            JsonElement result = JsonParser.parseString(json);
+            return result.isJsonObject()
+                    && result.getAsJsonObject().has("success")
+                    && result.getAsJsonObject().get("success").getAsBoolean();
+        } catch (RuntimeException e) {
             return false;
         }
     }
