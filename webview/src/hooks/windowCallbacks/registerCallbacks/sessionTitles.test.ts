@@ -29,4 +29,29 @@ describe('native session titles', () => {
     expect(custom).not.toHaveBeenCalled();
     expect(restored).toHaveBeenCalledTimes(1);
   });
+
+  describe('restoreSessionTitle', () => {
+    it('applies the persisted title to the current session', () => {
+      window.restoreSessionTitle!('root', '  Saved by hand  ');
+      expect(custom).toHaveBeenCalledWith('Saved by hand');
+    });
+
+    it('ignores titles for other sessions', () => {
+      window.restoreSessionTitle!('another-root', 'Saved by hand');
+      expect(custom).not.toHaveBeenCalled();
+    });
+
+    it('does not overwrite a manual edit that already landed', () => {
+      options.customSessionTitleRef.current = 'Newer edit';
+      window.restoreSessionTitle!('root', 'Saved by hand');
+      expect(custom).not.toHaveBeenCalled();
+    });
+
+    it('applies a title that arrived before the callback was registered', () => {
+      window.__pendingRestoreSessionTitle = { sessionId: 'root', title: 'Saved before mount' };
+      registerSessionAndSdkCallbacks(options, { current: ((key: string) => key) as UseWindowCallbacksOptions['t'] });
+      expect(custom).toHaveBeenCalledWith('Saved before mount');
+      expect(window.__pendingRestoreSessionTitle).toBeUndefined();
+    });
+  });
 });
