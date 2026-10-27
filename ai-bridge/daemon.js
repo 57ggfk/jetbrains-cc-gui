@@ -51,6 +51,7 @@ import {
   setPermissionModePersistent as grokSetPermissionModePersistent,
   getContextUsagePersistent as grokGetContextUsagePersistent,
   getUsagePersistent as grokGetUsagePersistent,
+  getPlanUsagePersistent as grokGetPlanUsagePersistent,
   getRuntimeSnapshot as getGrokRuntimeSnapshot
 } from './services/grok/persistent-acp-service.js';
 import {
@@ -800,7 +801,23 @@ async function runDaemonMain() {
       return;
     }
 
-    if (request.method !== 'heartbeat' && request.method !== 'status') {
+    if (request.method === 'grok.getPlanUsage' && (!isDaemonMode || idleShutdownInFlight)) {
+      writeRawLine({
+        id: request.id || '0',
+        done: true,
+        success: true,
+        result: {
+          present: false,
+          unavailable: true,
+          provider: 'grok',
+          source: 'x.ai/billing',
+          message: 'Grok daemon is shutting down',
+        },
+      });
+      return;
+    }
+
+    if (request.method !== 'heartbeat' && request.method !== 'status' && request.method !== 'grok.getPlanUsage') {
       // A retired Java generation should not send commands here. Return an
       // explicit error if a stale writer races the final exit.
       if (!isDaemonMode) {
@@ -989,6 +1006,7 @@ async function runDaemonMain() {
       ['codex.listSkills', codexListSkillsPersistent],
       ['codex.getMcpStatus', codexGetMcpStatusPersistent],
       ['codex.reloadMcp', codexReloadMcpPersistent],
+      ['grok.getPlanUsage', grokGetPlanUsagePersistent],
     ]);
     const readOnlyHandler = readOnlyCodexMethods.get(request.method);
     if (readOnlyHandler) {
