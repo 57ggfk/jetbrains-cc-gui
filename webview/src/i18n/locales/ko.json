@@ -1130,7 +1130,9 @@
     "previewUnavailable": "Native file preview is unavailable. You can deny or cancel this request.",
     "requestedPermissions": "Requested native permissions",
     "allowWithRule": "Allow with this command rule",
-    "allowWithNetworkRule": "Allow with this network rule"
+    "allowWithNetworkRule": "Allow with this network rule",
+    "codexDeliveryRetry": "Codex가 선택을 받지 못했습니다({{error}}). 다시 선택해 주세요.",
+    "codexDeliveryFailed": "Codex가 선택을 받지 못했습니다({{error}}). 대화가 계속되지 않으면 중지를 누른 뒤 다시 보내 주세요."
   },
   "askUserQuestion": {
     "title": "Claude가 질문이 있습니다",

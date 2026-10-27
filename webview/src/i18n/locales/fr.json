@@ -1045,7 +1045,9 @@
     "previewUnavailable": "Native file preview is unavailable. You can deny or cancel this request.",
     "requestedPermissions": "Requested native permissions",
     "allowWithRule": "Allow with this command rule",
-    "allowWithNetworkRule": "Allow with this network rule"
+    "allowWithNetworkRule": "Allow with this network rule",
+    "codexDeliveryRetry": "Codex n'a pas reçu votre choix ({{error}}). Veuillez choisir à nouveau.",
+    "codexDeliveryFailed": "Codex n'a pas reçu votre choix ({{error}}). Si la conversation ne reprend pas, cliquez sur Arrêter puis renvoyez votre message."
   },
   "askUserQuestion": {
     "title": "Claude a quelques questions pour vous",

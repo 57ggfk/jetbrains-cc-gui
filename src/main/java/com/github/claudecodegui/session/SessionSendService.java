@@ -478,25 +478,25 @@ public class SessionSendService {
             return CompletableFuture.completedFuture(null);
         }
 
-        String contextAppend = this.contextService.buildCodexContextAppend(openedFilesJson, fileTagPaths);
+        JsonObject turnSettings = nativeCodexSettings == null ? new JsonObject() : nativeCodexSettings.deepCopy();
+        turnSettings.add("additionalContext", this.contextService.buildCodexAdditionalContext(openedFilesJson, fileTagPaths));
         String sessionInstructions = this.contextService.buildCodexSessionInstructions(agentPrompt, openedFilesJson);
-        String finalInput = (input != null ? input : "") + contextAppend;
-        String configuredModel = new CodexSettingsManager(gson).resolveModelAlias(state.getModel());
+        String configuredModel = new CodexSettingsManager(this.gson).resolveModelAlias(this.state.getModel());
 
         CompletableFuture<com.github.claudecodegui.provider.common.SDKResult> backend = codexSDKBridge.sendMessage(
                 channelId,
-                finalInput,
-                state.getSessionId(),
-                state.getCwd(),
+                input != null ? input : "",
+                this.state.getSessionId(),
+                this.state.getCwd(),
                 attachments,
                 effectivePermissionMode,
                 configuredModel,
                 sessionInstructions,
-                requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
+                requestedReasoningEffort != null ? requestedReasoningEffort : this.state.getReasoningEffort(),
                 effectiveCodexServiceTier,
                 handler,
                 clientMessageId,
-                nativeCodexSettings
+                turnSettings
         );
         if (execution != null) {
             execution.bindResult(backend);
