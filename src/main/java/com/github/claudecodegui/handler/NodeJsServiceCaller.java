@@ -19,12 +19,18 @@ public class NodeJsServiceCaller {
     private static final int PROCESS_TIMEOUT_SECONDS = 30;
 
     private static final Set<String> ALLOWED_FAVORITES_FUNCTIONS = Set.of(
-        "loadFavorites", "toggleFavorite"
+        "loadFavorites", "toggleFavorite", "removeFavorite"
     );
 
     private static final Set<String> ALLOWED_TITLES_FUNCTIONS = Set.of(
         "loadTitles", "updateTitle", "deleteTitle"
     );
+
+    // Every write rewrites the whole favorites.json / session-titles.json, so
+    // overlapping calls (e.g. deleting one session while renaming another) lose
+    // updates. JVM-wide: each chat window has its own caller, the files are shared.
+    private static final Object FAVORITES_FILE_LOCK = new Object();
+    private static final Object TITLES_FILE_LOCK = new Object();
 
     private final HandlerContext context;
     private final int processTimeoutSeconds;
@@ -60,7 +66,7 @@ public class NodeJsServiceCaller {
         pb.redirectErrorStream(true);
         pb.environment().put("SESSION_ID", sessionId);
 
-        return executeNodeScript(pb);
+        return executeLocked(FAVORITES_FILE_LOCK, pb);
     }
 
     /**
@@ -84,7 +90,7 @@ public class NodeJsServiceCaller {
         ProcessBuilder pb = buildNodeProcessBuilder(nodePath, nodeScript, servicePath);
         pb.redirectErrorStream(true);
 
-        return executeNodeScript(pb);
+        return executeLocked(TITLES_FILE_LOCK, pb);
     }
 
     /**
@@ -110,7 +116,7 @@ public class NodeJsServiceCaller {
         pb.environment().put("SESSION_ID", sessionId);
         pb.environment().put("CUSTOM_TITLE", customTitle);
 
-        return executeNodeScript(pb);
+        return executeLocked(TITLES_FILE_LOCK, pb);
     }
 
     /**
@@ -130,7 +136,7 @@ public class NodeJsServiceCaller {
         pb.redirectErrorStream(true);
         pb.environment().put("SESSION_ID", sessionId);
 
-        return executeNodeScript(pb);
+        return executeLocked(TITLES_FILE_LOCK, pb);
     }
 
     /**
@@ -141,6 +147,12 @@ public class NodeJsServiceCaller {
         List<String> command = NodeDetector.buildNodeInlineCommand(nodePath, nodeScript);
         command.add(servicePath);
         return new ProcessBuilder(command);
+    }
+
+    private String executeLocked(Object fileLock, ProcessBuilder pb) throws Exception {
+        synchronized (fileLock) {
+            return executeNodeScript(pb);
+        }
     }
 
     static String resolveServicePath(String nodePath, String bridgePath, String serviceFileName) {
