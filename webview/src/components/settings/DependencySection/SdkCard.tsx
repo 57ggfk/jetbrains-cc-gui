@@ -135,7 +135,7 @@ const SdkCard = ({
                 <div>{t('settings.dependency.versionSourceFallback')}</div>
                 <div>{t(`settings.dependency.${versionErrorKey}`)}</div>
                 <button type="button" className={styles.retryButton} onClick={onRetryVersions} disabled={isVersionLoading || isAnyOperationInProgress}>
-                  {t('common.retry')}
+                  {t('settings.cli.retry')}
                 </button>
               </div>
             )}

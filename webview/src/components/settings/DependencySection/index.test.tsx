@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import en from '../../../i18n/locales/en.json';
+import zh from '../../../i18n/locales/zh.json';
 import { requestDependencyStatusUntilSettled } from '../../../utils/bridgeStartup';
 import DependencySection from './index';
 
@@ -25,7 +27,11 @@ const translations: Record<string, string> = {
   'settings.dependency.updateAvailable': '有更新',
   'settings.dependency.rollbackWarning': '目标版本低于当前版本，将执行回退安装。',
   'settings.dependency.targetVersionValue': '目标版本 {{version}}',
+  'settings.cli.retry': '重试',
 };
+
+const resolveLocaleKey = (locale: Record<string, unknown>, key: string): unknown =>
+  key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], locale);
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -102,9 +108,9 @@ describe('DependencySection', () => {
     });
     expect(screen.getByText(`settings.dependency.${key}`)).toBeTruthy();
     expect(screen.queryByText('最新稳定版 v0.3.220')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(window.sendToJava).toHaveBeenCalledWith('get_dependency_versions:{"id":"claude-sdk"}');
-    expect((screen.getByRole('button', { name: 'common.retry' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '重试' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('版本列表加载中')).toBeTruthy();
     act(() => {
       window.dependencyVersionsLoaded?.(JSON.stringify({
@@ -112,9 +118,24 @@ describe('DependencySection', () => {
       }));
     });
     expect(screen.queryByText(`settings.dependency.${key}`)).toBeNull();
-    expect(screen.queryByRole('button', { name: 'common.retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
     expect(screen.getByText('最新稳定版 v0.3.307')).toBeTruthy();
     expect(screen.queryByText('版本列表加载中')).toBeNull();
+  });
+
+  it('uses version lookup keys that exist in the shipped locales', () => {
+    const keys = [
+      'settings.cli.retry',
+      'settings.dependency.versionCacheAccessError',
+      'settings.dependency.versionQueryTimeout',
+      'settings.dependency.versionQueryNetworkError',
+      'settings.dependency.versionQueryFailed',
+    ];
+    for (const locale of [en, zh]) {
+      for (const key of keys) {
+        expect(typeof resolveLocaleKey(locale, key), key).toBe('string');
+      }
+    }
   });
 
   it('returns to loading when the dependency tab retries a previous error', () => {
