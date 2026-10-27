@@ -7,6 +7,7 @@ import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow;
 import com.github.claudecodegui.ui.toolwindow.ClaudeSDKToolWindow;
 import com.github.claudecodegui.util.JcefClassAvailability;
+import com.github.claudecodegui.util.JcefMissingGuidance;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -73,6 +74,14 @@ public class QuickFixWithClaudeAction extends AnAction implements DumbAware {
         Project project = e.getProject();
         Editor editor = e.getData(CommonDataKeys.EDITOR);
         if (project == null || editor == null) {
+            return;
+        }
+
+        // ClaudeChatWindow construction links JCEF classes; without the Web Browser (JCEF)
+        // plugin it throws NoClassDefFoundError. Check before the prompt popup so the user
+        // does not type a prompt that can never run, and before ClaudeNotifier.setWaiting.
+        if (!JcefClassAvailability.isAvailable(QuickFixWithClaudeAction.class.getClassLoader())) {
+            JcefMissingGuidance.showNotification(project);
             return;
         }
 
@@ -231,14 +240,6 @@ public class QuickFixWithClaudeAction extends AnAction implements DumbAware {
         ToolWindow toolWindow = ToolWindowManager.getInstance(project).getToolWindow("CCG");
         if (toolWindow == null) {
             ClaudeNotifier.showError(project, ClaudeCodeGuiBundle.message("quickfix.toolWindowNotFound"));
-            return;
-        }
-
-        // ClaudeChatWindow construction links JCEF classes; without the Web Browser (JCEF)
-        // plugin it throws NoClassDefFoundError, so bail out before any side effect such as
-        // ClaudeNotifier.setWaiting(project) leaves the status bar stuck.
-        if (!JcefClassAvailability.isAvailable(QuickFixWithClaudeAction.class.getClassLoader())) {
-            ClaudeNotifier.showError(project, ClaudeCodeGuiBundle.message("toolwindow.jcefPluginMissing"));
             return;
         }
 

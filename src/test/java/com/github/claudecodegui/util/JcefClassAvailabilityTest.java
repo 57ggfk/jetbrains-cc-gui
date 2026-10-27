@@ -16,14 +16,22 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Proves the JCEF availability probe and that the tool-window factory can load when those
- * classes are hidden, without initializing JCEF or starting Chromium.
+ * Proves the JCEF availability probe, and that every entry point guarding chat-window
+ * construction can link when those classes are hidden, without initializing JCEF or
+ * starting Chromium.
  */
 public class JcefClassAvailabilityTest {
 
     private static final AtomicBoolean JCEF_STATIC_INIT = new AtomicBoolean();
-    private static final String TOOL_WINDOW_FACTORY =
-            "com.github.claudecodegui.ui.toolwindow.ClaudeSDKToolWindow";
+    private static final String PLUGIN_PACKAGE_PREFIX = "com.github.claudecodegui.";
+    private static final String JCEF_MODULE_PACKAGE_PREFIX = "com.intellij.ui.jcef.";
+    private static final String SURFACE_FRAME_FENCE = "com.github.claudecodegui.ui.SurfaceFrameFence";
+    private static final List<String> GUARDED_ENTRY_POINTS = List.of(
+            "com.github.claudecodegui.ui.toolwindow.ClaudeSDKToolWindow",
+            "com.github.claudecodegui.action.tab.CreateNewTabAction",
+            "com.github.claudecodegui.action.editor.QuickFixWithClaudeAction",
+            "com.github.claudecodegui.ui.ErrorPanelBuilder",
+            "com.github.claudecodegui.util.JcefMissingGuidance");
 
     /** Called from generated JCEF stub classes when their static initializers run. */
     public static void markJcefStaticInit() {
@@ -39,13 +47,13 @@ public class JcefClassAvailabilityTest {
     @Test
     public void requiredClassesAreAvailableWithoutRunningStaticInitializers() throws Exception {
         Map<String, byte[]> stubs = bothStubs();
-        ClassLoader initializing = loader(stubs, Set.of(), Set.of(), false);
+        ClassLoader initializing = loader(stubs, Set.of(), Set.of());
         Class.forName(JcefClassAvailability.JB_CEF_BROWSER, true, initializing);
         Class.forName(JcefClassAvailability.JB_CEF_OSR_HANDLER_FACTORY, true, initializing);
         Assert.assertTrue("stub static initializers must be observable", JCEF_STATIC_INIT.get());
 
         JCEF_STATIC_INIT.set(false);
-        Assert.assertTrue(JcefClassAvailability.isAvailable(loader(stubs, Set.of(), Set.of(), false)));
+        Assert.assertTrue(JcefClassAvailability.isAvailable(loader(stubs, Set.of(), Set.of())));
         Assert.assertFalse(JCEF_STATIC_INIT.get());
     }
 
@@ -58,8 +66,7 @@ public class JcefClassAvailabilityTest {
         ClassLoader loader = loader(
                 stubs,
                 Set.of(JcefClassAvailability.JB_CEF_BROWSER),
-                Set.of(),
-                false);
+                Set.of());
 
         Assert.assertFalse(JcefClassAvailability.isAvailable(loader));
     }
@@ -73,8 +80,7 @@ public class JcefClassAvailabilityTest {
         ClassLoader loader = loader(
                 stubs,
                 Set.of(JcefClassAvailability.JB_CEF_OSR_HANDLER_FACTORY),
-                Set.of(),
-                false);
+                Set.of());
 
         Assert.assertFalse(JcefClassAvailability.isAvailable(loader));
     }
@@ -88,29 +94,41 @@ public class JcefClassAvailabilityTest {
         ClassLoader loader = loader(
                 stubs,
                 Set.of(),
-                Set.of(JcefClassAvailability.JB_CEF_OSR_HANDLER_FACTORY),
-                false);
+                Set.of(JcefClassAvailability.JB_CEF_OSR_HANDLER_FACTORY));
 
         Assert.assertFalse(JcefClassAvailability.isAvailable(loader));
         Assert.assertFalse(JCEF_STATIC_INIT.get());
     }
 
     /**
-     * Verifies the tool-window factory entry class loads and initializes when JCEF classes are
-     * hidden, so the availability check can run before chat-window construction.
+     * Verifies every entry point that guards chat-window construction links and initializes
+     * while the Web Browser (JCEF) module is absent, so its availability check can actually run.
+     * All plugin classes are defined child-first, so their own references resolve with JCEF hidden.
      */
     @Test
-    public void toolWindowFactoryLoadsWhenJcefClassesAreHidden() throws Exception {
-        ClassLoader loader = loader(
-                Map.of(TOOL_WINDOW_FACTORY, readClassBytes(TOOL_WINDOW_FACTORY)),
-                Set.of(),
-                Set.of(),
-                true);
+    public void guardedEntryPointsLinkWhenJcefModuleIsHidden() throws Exception {
+        ClassLoader loader = new PluginWithoutJcefModuleClassLoader(JcefClassAvailabilityTest.class.getClassLoader());
 
-        Class<?> factory = Class.forName(TOOL_WINDOW_FACTORY, true, loader);
-
-        Assert.assertSame(loader, factory.getClassLoader());
         Assert.assertFalse(JcefClassAvailability.isAvailable(loader));
+        for (String entryPoint : GUARDED_ENTRY_POINTS) {
+            Class<?> type = Class.forName(entryPoint, true, loader);
+            Assert.assertSame(entryPoint, loader, type.getClassLoader());
+        }
+    }
+
+    /**
+     * Sanity check for the loader above: it reproduces the issue #1912 failure, where the chat
+     * window's frame fence cannot link without JBCefOSRHandlerFactory. If the fence stops
+     * needing JCEF this test must change, not the guard.
+     */
+    @Test
+    public void hiddenJcefModuleReproducesChatWindowLinkFailure() {
+        ClassLoader loader = new PluginWithoutJcefModuleClassLoader(JcefClassAvailabilityTest.class.getClassLoader());
+
+        NoClassDefFoundError error = Assert.assertThrows(
+                NoClassDefFoundError.class,
+                () -> Class.forName(SURFACE_FRAME_FENCE, true, loader));
+        Assert.assertTrue(error.getMessage(), error.getMessage().contains("JBCefOSRHandlerFactory"));
     }
 
     private static Map<String, byte[]> bothStubs() throws IOException {
@@ -129,28 +147,16 @@ public class JcefClassAvailabilityTest {
                 "markJcefStaticInit");
     }
 
-    private static byte[] readClassBytes(String binaryName) throws IOException {
-        String resource = binaryName.replace('.', '/') + ".class";
-        try (InputStream in = JcefClassAvailabilityTest.class.getClassLoader().getResourceAsStream(resource)) {
-            if (in == null) {
-                throw new IllegalStateException("Missing class bytes for " + binaryName);
-            }
-            return in.readAllBytes();
-        }
-    }
-
     private static ClassLoader loader(
             Map<String, byte[]> defined,
             Set<String> hidden,
-            Set<String> linkageFailures,
-            boolean hideJcefPackages
+            Set<String> linkageFailures
     ) {
         return new FilteringClassLoader(
                 JcefClassAvailabilityTest.class.getClassLoader(),
                 defined,
                 hidden,
-                linkageFailures,
-                hideJcefPackages);
+                linkageFailures);
     }
 
     /**
@@ -249,20 +255,17 @@ public class JcefClassAvailabilityTest {
         private final Map<String, byte[]> defined;
         private final Set<String> hidden;
         private final Set<String> linkageFailures;
-        private final boolean hideJcefPackages;
 
         private FilteringClassLoader(
                 ClassLoader parent,
                 Map<String, byte[]> defined,
                 Set<String> hidden,
-                Set<String> linkageFailures,
-                boolean hideJcefPackages
+                Set<String> linkageFailures
         ) {
             super(parent);
             this.defined = defined;
             this.hidden = hidden;
             this.linkageFailures = linkageFailures;
-            this.hideJcefPackages = hideJcefPackages;
         }
 
         @Override
@@ -276,7 +279,7 @@ public class JcefClassAvailabilityTest {
                     byte[] bytes = defined.get(name);
                     if (bytes != null) {
                         loaded = defineClass(name, bytes, 0, bytes.length);
-                    } else if (hidden.contains(name) || (hideJcefPackages && isJcefClass(name))) {
+                    } else if (hidden.contains(name)) {
                         throw new ClassNotFoundException(name);
                     } else {
                         loaded = super.loadClass(name, false);
@@ -288,11 +291,50 @@ public class JcefClassAvailabilityTest {
                 return loaded;
             }
         }
+    }
 
-        private static boolean isJcefClass(String name) {
-            return name.startsWith("com.intellij.ui.jcef.")
-                    || name.startsWith("org.cef.")
-                    || name.startsWith("com.jetbrains.cef.");
+    /**
+     * Defines plugin classes itself (child-first) and hides the Web Browser (JCEF) module
+     * package, mirroring Android Studio 2026.2+ without that plugin. Platform and JBR classes,
+     * including {@code org.cef}, still come from the parent.
+     */
+    private static final class PluginWithoutJcefModuleClassLoader extends ClassLoader {
+
+        private PluginWithoutJcefModuleClassLoader(ClassLoader parent) {
+            super(parent);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            synchronized (getClassLoadingLock(name)) {
+                if (name.startsWith(JCEF_MODULE_PACKAGE_PREFIX)) {
+                    throw new ClassNotFoundException(name);
+                }
+                Class<?> loaded = findLoadedClass(name);
+                if (loaded == null && name.startsWith(PLUGIN_PACKAGE_PREFIX)) {
+                    loaded = definePluginClass(name);
+                }
+                if (loaded == null) {
+                    loaded = super.loadClass(name, false);
+                }
+                if (resolve) {
+                    resolveClass(loaded);
+                }
+                return loaded;
+            }
+        }
+
+        private Class<?> definePluginClass(String name) throws ClassNotFoundException {
+            String resource = name.replace('.', '/') + ".class";
+            try (InputStream in = getParent().getResourceAsStream(resource)) {
+                if (in == null) {
+                    return null;
+                }
+                byte[] bytes = in.readAllBytes();
+                return defineClass(name, bytes, 0, bytes.length);
+            } catch (IOException e) {
+                throw new ClassNotFoundException(name, e);
+            }
         }
     }
 }

@@ -15,7 +15,7 @@ public final class JcefClassAvailability {
     }
 
     /**
-     * Returns whether both required JCEF classes link from {@code classLoader}.
+     * Returns whether both required JCEF classes can be loaded from {@code classLoader}.
      * A missing class or a linkage error is treated as unavailable. Passing the
      * tool-window factory's loader probes the plugin classpath rather than the
      * optional JCEF module marker.
@@ -33,8 +33,9 @@ public final class JcefClassAvailability {
 
     private static boolean canLoad(ClassLoader classLoader, String className) {
         try {
-            // initialize=false: linking is enough to notice a missing class, and JCEF
-            // static initializers must not run during the probe.
+            // initialize=false loads the class and its supertypes without initializing it.
+            // That is enough to notice a missing Web Browser (JCEF) module, and JCEF static
+            // initializers must not run during the probe.
             Class.forName(className, false, classLoader);
             return true;
         } catch (ClassNotFoundException | LinkageError e) {

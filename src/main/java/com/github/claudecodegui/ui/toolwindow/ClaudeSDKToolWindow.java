@@ -6,6 +6,7 @@ import com.github.claudecodegui.startup.BridgePreloader;
 import com.github.claudecodegui.ui.ErrorPanelBuilder;
 import com.github.claudecodegui.ui.detached.DetachedWindowManager;
 import com.github.claudecodegui.util.JcefClassAvailability;
+import com.github.claudecodegui.util.JcefMissingGuidance;
 import com.github.claudecodegui.util.PlatformUtils;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -228,8 +229,8 @@ public class ClaudeSDKToolWindow implements ToolWindowFactory, DumbAware {
         // that class is absent until Web Browser (JCEF) is installed, so show guidance
         // before bridge startup, tab restoration, listeners, or chat-window linkage.
         if (!JcefClassAvailability.isAvailable(ClaudeSDKToolWindow.class.getClassLoader())) {
-            LOG.info("[ToolWindow] JCEF classes are unavailable, showing plugin installation guidance");
-            installJcefPluginMissingPanel(toolWindow);
+            LOG.info("[ToolWindow] JCEF classes are unavailable, showing installation guidance");
+            installJcefMissingPanel(toolWindow);
             return;
         }
 
@@ -406,15 +407,15 @@ public class ClaudeSDKToolWindow implements ToolWindowFactory, DumbAware {
     }
 
     /**
-     * Swing fallback used when the Web Browser (JCEF) plugin is not installed.
-     * Does not touch saved tabs, SDK bridges, or chat-only tool-window actions.
-     * The bundle text tells the user to restart the IDE after installing the plugin.
+     * Swing fallback used when the JCEF classes cannot be loaded, e.g. when the Web Browser
+     * (JCEF) plugin is not installed in Android Studio. Does not touch saved tabs, SDK bridges,
+     * or chat-only tool-window actions. The guidance text ends with an IDE restart step.
      */
-    private void installJcefPluginMissingPanel(@NotNull ToolWindow toolWindow) {
+    private void installJcefMissingPanel(@NotNull ToolWindow toolWindow) {
         JPanel panel = ErrorPanelBuilder.buildCenteredPanel(
                 "⚠️",
-                ClaudeCodeGuiBundle.message("toolwindow.jcefPluginMissing"),
-                ClaudeCodeGuiBundle.message("toolwindow.jcefPluginMissingSolution"));
+                JcefMissingGuidance.title(),
+                JcefMissingGuidance.solution());
         Content content = ContentFactory.getInstance().createContent(panel, TOOL_WINDOW_DISPLAY_NAME, false);
         content.setCloseable(false);
         toolWindow.getContentManager().addContent(content);
