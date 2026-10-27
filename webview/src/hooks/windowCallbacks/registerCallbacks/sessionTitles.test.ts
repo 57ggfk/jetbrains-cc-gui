@@ -13,6 +13,7 @@ describe('native session titles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     options.customSessionTitleRef.current = null;
+    options.currentProviderRef.current = 'claude';
     registerSessionAndSdkCallbacks(options, { current: ((key: string) => key) as UseWindowCallbacksOptions['t'] });
   });
   it('keeps automatic titles separate from manual overrides', () => {
@@ -52,6 +53,23 @@ describe('native session titles', () => {
       registerSessionAndSdkCallbacks(options, { current: ((key: string) => key) as UseWindowCallbacksOptions['t'] });
       expect(custom).toHaveBeenCalledWith('Saved before mount');
       expect(window.__pendingRestoreSessionTitle).toBeUndefined();
+    });
+
+    // Regression: the AI title and the persisted title can arrive in either
+    // order after a reload. The persisted manual title must win both times.
+    it('wins over an AI title that arrived first', () => {
+      window.updateSessionTitle!('root', 'Automatic title');
+      window.restoreSessionTitle!('root', 'Saved manual title');
+      expect(custom).toHaveBeenCalledTimes(1);
+      expect(custom).toHaveBeenCalledWith('Saved manual title');
+    });
+
+    it('survives an AI title that arrives later', () => {
+      window.restoreSessionTitle!('root', 'Saved manual title');
+      window.updateSessionTitle!('root', 'Automatic title');
+      expect(custom).toHaveBeenCalledTimes(1);
+      expect(custom).toHaveBeenCalledWith('Saved manual title');
+      expect(restored).toHaveBeenLastCalledWith({ sessionId: 'root', title: 'Automatic title' });
     });
   });
 });

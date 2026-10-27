@@ -172,13 +172,14 @@ export function registerSessionAndSdkCallbacks(
     // Only apply the title if it matches the current session to prevent
     // stale events from overwriting the wrong session's title.
     if (currentSessionIdRef.current !== sessionId) return;
-    if (options.currentProviderRef.current === 'codex') {
-      options.setRestoredSessionTitle({ sessionId, title: title.trim() });
-      if (!customSessionTitleRef.current) applyHistoryTitleLocal(sessionId, title.trim());
-      return;
-    }
-    setCustomSessionTitle(title.trim());
-    applyHistoryTitleLocal(sessionId, title.trim());
+    const trimmed = title.trim();
+    // Automatic titles go to restoredSessionTitle, never to
+    // customSessionTitle: that slot is reserved for manual edits and the
+    // persisted custom title. Keeping the two apart means a later AI title can
+    // never overwrite a manual title, and restoreSessionTitle never mistakes an
+    // AI title for a manual edit.
+    options.setRestoredSessionTitle({ sessionId, title: trimmed });
+    if (!customSessionTitleRef.current) applyHistoryTitleLocal(sessionId, trimmed);
   };
 
   // =========================================================================
@@ -196,7 +197,8 @@ export function registerSessionAndSdkCallbacks(
     // Only a title keyed to the session on screen may show; a stale push for a
     // previously opened session must not retitle the current one.
     if (currentSessionIdRef.current !== sessionId) return;
-    // A manual edit that landed after the restore request was issued wins.
+    // customSessionTitle carries only manual edits and persisted titles, so a
+    // nonempty value is a newer manual edit that must win over this restore.
     if (customSessionTitleRef.current) return;
     setCustomSessionTitle(title.trim());
   };
