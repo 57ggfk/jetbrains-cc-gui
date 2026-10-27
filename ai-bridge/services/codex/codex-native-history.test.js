@@ -11,7 +11,11 @@ test('native display page loads items, preserves identities and never resumes a 
   const calls = [];
   const read = async (method, params) => {
     calls.push({ method, params });
-    if (method === 'thread/read') return { thread: { id: 'thread', cwd: '/saved', createdAt: 1 } };
+    if (method === 'thread/read') {
+      assert.equal(params.includeTurns, false);
+      assert.equal(params.excludeTurns, true, 'metadata reads must not hydrate paginated history');
+      return { thread: { id: 'thread', cwd: '/saved', createdAt: 1 } };
+    }
     if (method === 'thread/turns/list') return { data: [{ id: 'turn', itemsView: 'notLoaded', items: [] }], nextCursor: 'opaque:old' };
     return { data: [
       { turnId: 'turn', item: { id: 'user', type: 'userMessage', clientId: 'client', content: [{ type: 'text', text: 'same' }] } },
@@ -29,6 +33,27 @@ test('native display page loads items, preserves identities and never resumes a 
   assert.equal(page.messages[3].raw.message.content[0].content, 'clean');
   assert.equal(page.messages[2].raw.uuid, 'codex:thread:turn:command');
   assert.deepEqual(calls.map((call) => call.method), ['thread/read', 'thread/turns/list', 'thread/items/list']);
+});
+
+test('only an explicit unmaterialized thread response represents an empty native history', async () => {
+  const message = 'thread thread is not materialized yet; thread/turns/list is unavailable before first user message';
+  const calls = [];
+  const read = async (method, params) => {
+    calls.push({ method, params });
+    if (method === 'thread/read') return { thread: { id: 'thread', turns: [] } };
+    throw Object.assign(new Error(message), { rpcCode: -32600 });
+  };
+  const page = await readNativeHistoryPage(read, { threadId: 'thread' });
+  assert.equal(page.complete, true);
+  assert.deepEqual(page.messages, []);
+  assert.equal(calls.length, 2, 'empty native threads must not resume or hydrate a writer');
+  for (const error of [Object.assign(new Error(message), { rpcCode: -32001 }),
+    Object.assign(new Error(message.replace('thread thread ', 'thread another ')), { rpcCode: -32600 })]) {
+    await assert.rejects(readNativeHistoryPage(async method => {
+      if (method === 'thread/read') return { thread: { id: 'thread' } };
+      throw error;
+    }, { threadId: 'thread' }), value => value === error);
+  }
 });
 
 test('only explicit pagination capability errors select a fixed full native read', async () => {
