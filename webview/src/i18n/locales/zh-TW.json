@@ -2116,6 +2116,10 @@
     "updatingClaudeSdk": "更新中...",
     "updateClaudeSdkSuccess": "已更新至 {{version}}，請重新傳送訊息。",
     "updateClaudeSdkFailed": "更新失敗：{{error}}",
+    "updateClaudeSdkFailedUnknown": "更新失敗。請開啟相依性管理查看詳情。",
+    "updateClaudeSdkTimedOut": "15 分鐘內沒有收到結果。請到相依性管理查看更新狀態。",
+    "updateClaudeSdkCustomCli": "SDK 已更新至 {{version}}，但外掛執行的是自訂的 Claude CLI（{{path}}）。請按方案二更新它。",
+    "updateClaudeSdkAlreadyLatest": "{{version}} 已是本外掛支援的最新 SDK，而此模型需要更新的 Claude Code。請在外掛發布新版本後更新外掛，或改用其他模型。",
     "codexWriterConflict": {
       "title": "Codex 執行緒被佔用",
       "intro": "此會話正由另一個 Codex 回合或用戶端寫入，本次傳送未能啟動。",

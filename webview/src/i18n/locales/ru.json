@@ -2038,6 +2038,10 @@
     "updatingClaudeSdk": "Обновление...",
     "updateClaudeSdkSuccess": "Обновлено до {{version}}. Отправьте сообщение ещё раз.",
     "updateClaudeSdkFailed": "Не удалось обновить: {{error}}",
+    "updateClaudeSdkFailedUnknown": "Не удалось обновить. Подробности — в управлении зависимостями.",
+    "updateClaudeSdkTimedOut": "За 15 минут результата нет. Проверьте состояние обновления в управлении зависимостями.",
+    "updateClaudeSdkCustomCli": "SDK обновлён до {{version}}, но плагин запускает ваш Claude CLI ({{path}}). Обновите его по варианту 2.",
+    "updateClaudeSdkAlreadyLatest": "{{version}} — уже самый новый SDK, который поддерживает плагин, а этой модели нужен более новый Claude Code. Обновите плагин, когда выйдет новая версия, или выберите другую модель.",
     "codexWriterConflict": {
       "title": "Поток Codex занят",
       "intro": "Другой ход или клиент Codex записывает данные в эту беседу. Не удалось начать отправку.",

@@ -2100,6 +2100,10 @@
     "updatingClaudeSdk": "업데이트 중...",
     "updateClaudeSdkSuccess": "{{version}}(으)로 업데이트했습니다. 메시지를 다시 보내 주세요.",
     "updateClaudeSdkFailed": "업데이트 실패: {{error}}",
+    "updateClaudeSdkFailedUnknown": "업데이트에 실패했습니다. 자세한 내용은 종속성 관리에서 확인하세요.",
+    "updateClaudeSdkTimedOut": "15분이 지나도 결과가 없습니다. 종속성 관리에서 업데이트 상태를 확인하세요.",
+    "updateClaudeSdkCustomCli": "SDK를 {{version}}(으)로 업데이트했지만 플러그인은 직접 지정한 Claude CLI({{path}})를 실행합니다. 방법 2로 업데이트하세요.",
+    "updateClaudeSdkAlreadyLatest": "{{version}}은(는) 이 플러그인이 지원하는 최신 SDK이지만, 이 모델에는 더 새로운 Claude Code가 필요합니다. 새 플러그인 버전이 나오면 플러그인을 업데이트하거나 다른 모델을 선택하세요.",
     "codexWriterConflict": {
       "title": "Codex 스레드 사용 중",
       "intro": "다른 Codex 턴이나 클라이언트가 이 대화에 기록 중이어서 이번 전송을 시작할 수 없습니다.",

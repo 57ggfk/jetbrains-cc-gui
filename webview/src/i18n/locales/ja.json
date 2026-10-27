@@ -2013,6 +2013,10 @@
     "updatingClaudeSdk": "更新中...",
     "updateClaudeSdkSuccess": "{{version}} に更新しました。メッセージをもう一度送信してください。",
     "updateClaudeSdkFailed": "更新に失敗しました：{{error}}",
+    "updateClaudeSdkFailedUnknown": "更新に失敗しました。詳細は依存関係管理で確認してください。",
+    "updateClaudeSdkTimedOut": "15 分経っても結果がありません。依存関係管理で更新状況を確認してください。",
+    "updateClaudeSdkCustomCli": "SDK を {{version}} に更新しましたが、プラグインは独自に指定した Claude CLI（{{path}}）を実行しています。方法 2 でそちらを更新してください。",
+    "updateClaudeSdkAlreadyLatest": "{{version}} はこのプラグインが対応する最新の SDK ですが、このモデルにはさらに新しい Claude Code が必要です。プラグインの新しいリリースが出たら更新するか、別のモデルを選んでください。",
     "codexWriterConflict": {
       "title": "Codex スレッドが使用中",
       "intro": "別の Codex ターンまたはクライアントがこの会話に書き込んでいるため、今回の送信を開始できませんでした。",

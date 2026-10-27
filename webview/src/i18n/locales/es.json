@@ -2017,6 +2017,10 @@
     "updatingClaudeSdk": "Actualizando...",
     "updateClaudeSdkSuccess": "Actualizado a {{version}}. Vuelve a enviar tu mensaje.",
     "updateClaudeSdkFailed": "La actualización falló: {{error}}",
+    "updateClaudeSdkFailedUnknown": "La actualización falló. Abre Gestión de dependencias para ver los detalles.",
+    "updateClaudeSdkTimedOut": "No hubo resultado tras 15 minutos. Revisa el estado de la actualización en Gestión de dependencias.",
+    "updateClaudeSdkCustomCli": "SDK actualizado a {{version}}, pero el plugin ejecuta tu CLI de Claude personalizado ({{path}}). Actualízalo con la opción 2.",
+    "updateClaudeSdkAlreadyLatest": "{{version}} ya es el SDK más reciente que admite este plugin, y este modelo necesita un Claude Code más nuevo. Actualiza el plugin cuando salga una nueva versión o elige otro modelo.",
     "codexWriterConflict": {
       "title": "Hilo de Codex ocupado",
       "intro": "Otro turno o cliente de Codex está escribiendo en esta conversación. No se pudo iniciar este envío.",

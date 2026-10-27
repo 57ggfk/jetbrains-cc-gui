@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { requestClaudeSdkUpdate } from './claudeSdkUpdate';
+import {
+  CLAUDE_SDK_UPDATE_TIMEOUT_MS,
+  getClaudeSdkUpdateSnapshot,
+  requestClaudeSdkUpdate,
+  subscribeClaudeSdkUpdate,
+} from './claudeSdkUpdate';
 
 const respond = (payload: unknown) => window.dependencyInstallResult?.(JSON.stringify(payload));
+const progress = (payload: unknown) => window.dependencyInstallProgress?.(JSON.stringify(payload));
 
 describe('requestClaudeSdkUpdate', () => {
   let sendToJava: ReturnType<typeof vi.fn>;
@@ -10,13 +16,16 @@ describe('requestClaudeSdkUpdate', () => {
     sendToJava = vi.fn();
     window.sendToJava = sendToJava;
     window.dependencyInstallResult = undefined;
+    window.dependencyInstallProgress = undefined;
   });
 
   afterEach(() => {
     // Settle a request a test left pending so module state does not leak.
     respond({ success: false, sdkId: 'claude-sdk' });
+    vi.useRealTimers();
     window.sendToJava = undefined;
     window.dependencyInstallResult = undefined;
+    window.dependencyInstallProgress = undefined;
   });
 
   it('sends the same update request as the dependency settings page', () => {
@@ -108,5 +117,81 @@ describe('requestClaudeSdkUpdate', () => {
 
     await expect(second).resolves.toEqual({ success: false, error: 'npm install failed' });
     expect(window.dependencyInstallResult).toBe(firstHandler);
+  });
+
+  it('reports the previous version and the Claude CLI override from the host', async () => {
+    const pending = requestClaudeSdkUpdate();
+    respond({
+      success: true,
+      sdkId: 'claude-sdk',
+      installedVersion: '0.3.300',
+      previousVersion: '0.3.220',
+      customCliPath: '/usr/local/bin/claude',
+    });
+
+    await expect(pending).resolves.toEqual({
+      success: true,
+      installedVersion: '0.3.300',
+      previousVersion: '0.3.220',
+      customCliPath: '/usr/local/bin/claude',
+    });
+  });
+
+  it('shares the running update and its npm output with subscribers', async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeClaudeSdkUpdate(listener);
+    const previousProgress = vi.fn();
+    window.dependencyInstallProgress = previousProgress;
+
+    const pending = requestClaudeSdkUpdate();
+    expect(getClaudeSdkUpdateSnapshot()).toMatchObject({ updating: true, progress: undefined });
+
+    progress({ sdkId: 'claude-sdk', log: '  added 3 packages in 2s  ' });
+    progress({ sdkId: 'codex-sdk', log: 'other sdk output' });
+    progress({ sdkId: 'claude-sdk', log: '   ' });
+    expect(getClaudeSdkUpdateSnapshot().progress).toBe('added 3 packages in 2s');
+    expect(previousProgress).toHaveBeenCalledTimes(3);
+
+    const before = Date.now();
+    respond({ success: true, sdkId: 'claude-sdk', installedVersion: '0.3.300' });
+    await pending;
+
+    const snapshot = getClaudeSdkUpdateSnapshot();
+    expect(snapshot.updating).toBe(false);
+    expect(snapshot.progress).toBeUndefined();
+    expect(snapshot.lastResult).toEqual({ success: true, installedVersion: '0.3.300' });
+    expect(snapshot.completedAt).toBeGreaterThanOrEqual(before);
+    expect(window.dependencyInstallProgress).toBe(previousProgress);
+    expect(listener).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('gives up when no result arrives so the next call sends again', async () => {
+    vi.useFakeTimers();
+    const pending = requestClaudeSdkUpdate();
+
+    vi.advanceTimersByTime(CLAUDE_SDK_UPDATE_TIMEOUT_MS);
+
+    await expect(pending).resolves.toEqual({ success: false, timedOut: true });
+    expect(window.dependencyInstallResult).toBeUndefined();
+    expect(window.dependencyInstallProgress).toBeUndefined();
+
+    void requestClaudeSdkUpdate();
+    expect(sendToJava).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for a parsable result instead of settling on a malformed one', async () => {
+    let settled = false;
+    const pending = requestClaudeSdkUpdate().then((result) => {
+      settled = true;
+      return result;
+    });
+
+    window.dependencyInstallResult?.('not json');
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    respond({ success: true, sdkId: 'claude-sdk', installedVersion: '0.3.300' });
+    await expect(pending).resolves.toEqual({ success: true, installedVersion: '0.3.300' });
   });
 });

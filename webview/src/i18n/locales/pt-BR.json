@@ -2152,6 +2152,10 @@
     "updatingClaudeSdk": "Atualizando...",
     "updateClaudeSdkSuccess": "Atualizado para {{version}}. Envie sua mensagem novamente.",
     "updateClaudeSdkFailed": "Falha na atualização: {{error}}",
+    "updateClaudeSdkFailedUnknown": "Falha na atualização. Abra Gerenciamento de Dependências para ver os detalhes.",
+    "updateClaudeSdkTimedOut": "Nenhum resultado após 15 minutos. Verifique o status da atualização em Gerenciamento de Dependências.",
+    "updateClaudeSdkCustomCli": "SDK atualizado para {{version}}, mas o plugin executa seu CLI do Claude personalizado ({{path}}). Atualize-o pela opção 2.",
+    "updateClaudeSdkAlreadyLatest": "{{version}} já é o SDK mais recente que este plugin suporta, e este modelo precisa de um Claude Code mais novo. Atualize o plugin quando sair uma nova versão ou escolha outro modelo.",
     "codexWriterConflict": {
       "title": "Thread do Codex ocupada",
       "intro": "Outro turno ou cliente do Codex está gravando nesta conversa. Não foi possível iniciar este envio.",

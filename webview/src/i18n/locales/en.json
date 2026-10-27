@@ -2589,6 +2589,10 @@
     "updatingClaudeSdk": "Updating...",
     "updateClaudeSdkSuccess": "Updated to {{version}}. Send your message again.",
     "updateClaudeSdkFailed": "Update failed: {{error}}",
+    "updateClaudeSdkFailedUnknown": "Update failed. Open Dependency Settings for details.",
+    "updateClaudeSdkTimedOut": "No result after 15 minutes. Check Dependency Settings for the update status.",
+    "updateClaudeSdkCustomCli": "SDK updated to {{version}}, but the plugin runs your custom Claude CLI ({{path}}). Update it with Option 2.",
+    "updateClaudeSdkAlreadyLatest": "{{version}} is already the newest SDK this plugin supports, and this model needs a newer Claude Code. Update the plugin when a new release is out, or choose another model.",
     "codexWriterConflict": {
       "title": "Codex thread is busy",
       "intro": "Another Codex turn or client is writing to this conversation. This send could not start.",

@@ -2593,6 +2593,10 @@
     "updatingClaudeSdk": "更新中...",
     "updateClaudeSdkSuccess": "已更新到 {{version}}，请重新发送消息。",
     "updateClaudeSdkFailed": "更新失败：{{error}}",
+    "updateClaudeSdkFailedUnknown": "更新失败。请打开依赖管理查看详情。",
+    "updateClaudeSdkTimedOut": "15 分钟内没有收到结果。请到依赖管理查看更新状态。",
+    "updateClaudeSdkCustomCli": "SDK 已更新到 {{version}}，但插件运行的是自定义的 Claude CLI（{{path}}）。请按方案二更新它。",
+    "updateClaudeSdkAlreadyLatest": "{{version}} 已是本插件支持的最新 SDK，而此模型需要更新的 Claude Code。请在插件发布新版本后更新插件，或换用其他模型。",
     "codexWriterConflict": {
       "title": "Codex 线程被占用",
       "intro": "该会话正由另一个 Codex 回合或客户端写入，本次发送未能启动。",

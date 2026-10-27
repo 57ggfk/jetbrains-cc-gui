@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -41,6 +42,9 @@ public class DependencyManager {
     private static final String DEPS_DIR_NAME = "dependencies";
     private static final String MANIFEST_FILE = "manifest.json";
     private static final String INSTALLED_MARKER = ".installed";
+    // Every chat window installs into the same dependencies directory, so installs of one SDK
+    // (e.g. the chat's update button and the Dependencies page) run one after another.
+    private static final Map<SdkDefinition, ReentrantLock> INSTALL_LOCKS = new ConcurrentHashMap<>();
 
     private final Gson gson;
     private final NodeDetector nodeDetector;
@@ -346,13 +350,36 @@ public class DependencyManager {
     }
 
     /**
-     * Installs an SDK at a requested version (synchronous).
+     * Installs an SDK at a requested version (synchronous). Waits while another install of the
+     * same SDK is running so two npm installs never write the same directory at once.
      */
     public InstallResult installSdkSync(String sdkId, String requestedVersion, Consumer<String> logCallback) {
         SdkDefinition sdk = SdkDefinition.fromId(sdkId);
         if (sdk == null) {
             return InstallResult.failure(sdkId, "Unknown SDK: " + sdkId, "");
         }
+
+        ReentrantLock lock = INSTALL_LOCKS.computeIfAbsent(sdk, key -> new ReentrantLock());
+        if (!lock.tryLock()) {
+            if (logCallback != null) {
+                logCallback.accept("Waiting for another installation of " + sdk.getDisplayName() + " to finish...");
+            }
+            try {
+                lock.lockInterruptibly();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return InstallResult.failure(sdkId, "Installation interrupted", "");
+            }
+        }
+        try {
+            return installSdkLocked(sdk, sdkId, requestedVersion, logCallback);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private InstallResult installSdkLocked(SdkDefinition sdk, String sdkId, String requestedVersion,
+                                           Consumer<String> logCallback) {
 
         StringBuilder logs = new StringBuilder();
         Consumer<String> log = (msg) -> {
@@ -419,6 +446,7 @@ public class DependencyManager {
             List<String> packages = buildPackageSpecs(sdk, normalizedRequestedVersion);
             int maxRetries = 2;
             InstallResult lastResult = null;
+            boolean installed = false;
 
             for (int attempt = 0; attempt <= maxRetries; attempt++) {
                 if (attempt > 0) {
@@ -471,6 +499,7 @@ public class DependencyManager {
                 int exitCode = process.exitValue();
                 if (exitCode == 0) {
                     // Installation succeeded, proceed to next steps
+                    installed = true;
                     break;
                 }
 
@@ -525,6 +554,13 @@ public class DependencyManager {
                     Thread.currentThread().interrupt();
                     return InstallResult.failure(sdkId, "Installation interrupted", logs.toString());
                 }
+            }
+
+            if (!installed) {
+                // Every attempt timed out; report it instead of falling through to success.
+                return lastResult != null
+                        ? lastResult
+                        : InstallResult.failure(sdkId, "npm install did not complete", logs.toString());
             }
 
             // 6. Create the installation marker file

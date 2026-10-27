@@ -9,6 +9,7 @@ import com.github.claudecodegui.model.NodeDetectionResult;
 import com.github.claudecodegui.dependency.InstallResult;
 import com.github.claudecodegui.dependency.SdkDefinition;
 import com.github.claudecodegui.dependency.UpdateInfo;
+import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.ide.util.PropertiesComponent;
@@ -212,12 +213,13 @@ public class DependencyHandler extends BaseMessageHandler {
                         return;
                     }
 
+                    String previousVersion = this.dependencyManager.getInstalledVersion(sdkId);
                     InstallResult result = this.dependencyManager.installSdkSync(sdkId, requestedVersion, (logLine) -> {
                         this.sendInstallProgress(sdkId, logLine);
                     });
 
-                    this.restartClaudeDaemonAfterSdkChange(result);
-                    this.sendInstallResult(result);
+                    this.reloadClaudeSdkAfterChange(result);
+                    this.sendInstallResult(result, previousVersion);
 
                     // Refresh status after installation completes
                     if (result.isSuccess()) {
@@ -321,13 +323,14 @@ public class DependencyHandler extends BaseMessageHandler {
                         return;
                     }
 
+                    String previousVersion = this.dependencyManager.getInstalledVersion(sdkId);
                     this.sendInstallProgress(sdkId, "Updating SDK with npm install...");
                     InstallResult result = this.dependencyManager.installSdkSync(sdkId, requestedVersion, (logLine) -> {
                         this.sendInstallProgress(sdkId, logLine);
                     });
 
-                    this.restartClaudeDaemonAfterSdkChange(result);
-                    this.sendInstallResult(result);
+                    this.reloadClaudeSdkAfterChange(result);
+                    this.sendInstallResult(result, previousVersion);
 
                     // Refresh status after update completes
                     if (result.isSuccess()) {
@@ -527,23 +530,18 @@ public class DependencyHandler extends BaseMessageHandler {
     // ==================== Helper Methods ====================
 
     /**
-     * The Claude daemon keeps the SDK module it imported at startup, so a newly installed
-     * Claude SDK only takes effect in a fresh daemon. Shut it down before reporting success
-     * so the next request (e.g. a resend right after the chat's update button) spawns one
-     * with the new SDK, as {@link ClaudeCliPathHandler} does after a CLI path change.
+     * Claude daemons keep the SDK module they imported, so a newly installed Claude SDK only takes
+     * effect in a fresh daemon. Mark the change before reporting success: the daemon of every chat
+     * window then restarts before its next request (e.g. a resend right after the chat's update
+     * button), and a daemon in the middle of a reply is left alone until it finishes.
      */
-    private void restartClaudeDaemonAfterSdkChange(InstallResult result) {
-        if (!shouldRestartClaudeDaemon(result)) {
-            return;
-        }
-        try {
-            this.context.getClaudeSDKBridge().shutdownDaemon();
-        } catch (Exception e) {
-            LOG.warn("[DependencyHandler] Failed to shutdown Claude daemon after SDK change: " + e.getMessage());
+    private void reloadClaudeSdkAfterChange(InstallResult result) {
+        if (shouldReloadClaudeSdk(result)) {
+            ClaudeSDKBridge.markSdkChanged();
         }
     }
 
-    static boolean shouldRestartClaudeDaemon(InstallResult result) {
+    static boolean shouldReloadClaudeSdk(InstallResult result) {
         return result.isSuccess() && SdkDefinition.CLAUDE_SDK.getId().equals(result.getSdkId());
     }
 
@@ -567,20 +565,43 @@ public class DependencyHandler extends BaseMessageHandler {
     }
 
     private void sendInstallResult(InstallResult result) {
+        this.sendInstallResult(result, null);
+    }
+
+    private void sendInstallResult(InstallResult result, String previousVersion) {
+        String customCliPath = SdkDefinition.CLAUDE_SDK.getId().equals(result.getSdkId())
+                ? PropertiesComponent.getInstance().getValue(ClaudeCliPathHandler.CLAUDE_CLI_PATH_PROPERTY_KEY)
+                : null;
+        JsonObject json = buildInstallResultJson(result, previousVersion, customCliPath);
+
+        ApplicationManager.getApplication().invokeLater(() ->
+            this.callJavaScript("window.dependencyInstallResult", this.escapeJs(this.gson.toJson(json)))
+        );
+    }
+
+    /**
+     * Builds the {@code dependencyInstallResult} payload. On success it also reports the version
+     * installed before, so the chat can tell an update that changed nothing, and the Claude CLI
+     * override, because the plugin runs that binary instead of the SDK while it is set.
+     */
+    static JsonObject buildInstallResultJson(InstallResult result, String previousVersion, String customCliPath) {
         JsonObject json = new JsonObject();
         json.addProperty("success", result.isSuccess());
         json.addProperty("sdkId", result.getSdkId());
 
         if (result.isSuccess()) {
             json.addProperty("installedVersion", result.getInstalledVersion());
+            if (previousVersion != null) {
+                json.addProperty("previousVersion", previousVersion);
+            }
+            if (customCliPath != null && !customCliPath.trim().isEmpty()) {
+                json.addProperty("customCliPath", customCliPath.trim());
+            }
         } else {
             json.addProperty("error", result.getErrorMessage());
         }
         json.addProperty("logs", result.getLogs());
-
-        ApplicationManager.getApplication().invokeLater(() ->
-            this.callJavaScript("window.dependencyInstallResult", this.escapeJs(this.gson.toJson(json)))
-        );
+        return json;
     }
 
     private JsonObject toJson(UpdateInfo info) {
