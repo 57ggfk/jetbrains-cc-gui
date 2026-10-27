@@ -1,7 +1,9 @@
 package com.github.claudecodegui.handler.history;
 
+import com.github.claudecodegui.handler.NodeJsServiceCaller;
 import com.github.claudecodegui.handler.core.HandlerContext;
 import com.github.claudecodegui.session.ClaudeSession;
+import com.github.claudecodegui.testing.SessionMetadataBridgeFixture;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -10,11 +12,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
@@ -197,6 +201,39 @@ public class HistoryDeleteServiceTest {
         assertEquals("codex", historyLoadService.provider);
     }
 
+    @Test
+    public void cleanupSessionMetadataRemovesFavoriteAndCustomTitle() throws Exception {
+        SessionMetadataBridgeFixture fixture =
+                SessionMetadataBridgeFixture.create(temporaryFolder.newFolder("metadata").toPath());
+        fixture.seedFavorites("session-1", "session-2");
+        fixture.seedTitles("session-1", "session-2");
+        HistoryDeleteService service = new HistoryDeleteService(
+                fixture.context(), new NodeJsServiceCaller(fixture.context()), null);
+
+        service.cleanupSessionMetadata("session-1");
+
+        assertEquals(Set.of("session-2"), fixture.favoriteIds());
+        assertEquals(Set.of("session-2"), fixture.titledSessionIds());
+    }
+
+    @Test
+    public void cleanupSessionMetadataDeletesTitleEvenWhenFavoriteRemovalFails() {
+        RecordingNodeJsServiceCaller caller = new RecordingNodeJsServiceCaller(true, false);
+
+        new HistoryDeleteService(null, caller, null).cleanupSessionMetadata("session-1");
+
+        assertEquals(Arrays.asList("removeFavorite:session-1", "deleteTitle:session-1"), caller.calls);
+    }
+
+    @Test
+    public void cleanupSessionMetadataSwallowsTitleDeletionFailure() {
+        RecordingNodeJsServiceCaller caller = new RecordingNodeJsServiceCaller(false, true);
+
+        new HistoryDeleteService(null, caller, null).cleanupSessionMetadata("session-1");
+
+        assertEquals(Arrays.asList("removeFavorite:session-1", "deleteTitle:session-1"), caller.calls);
+    }
+
     private Path writeCodexRollout(Path sessionDir, String sessionId, String parentId, String body)
             throws Exception {
         Path path = sessionDir.resolve("rollout-2026-07-16T09-27-59-" + sessionId + ".jsonl");
@@ -232,6 +269,36 @@ public class HistoryDeleteServiceTest {
         public CompletableFuture<Void> interrupt() {
             interrupted = true;
             return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    private static class RecordingNodeJsServiceCaller extends NodeJsServiceCaller {
+        private final boolean failFavorites;
+        private final boolean failTitles;
+        private final List<String> calls = new ArrayList<>();
+
+        private RecordingNodeJsServiceCaller(boolean failFavorites, boolean failTitles) {
+            super(null);
+            this.failFavorites = failFavorites;
+            this.failTitles = failTitles;
+        }
+
+        @Override
+        public String callNodeJsFavoritesService(String functionName, String sessionId) throws Exception {
+            calls.add(functionName + ":" + sessionId);
+            if (failFavorites) {
+                throw new IllegalArgumentException("favorites failed");
+            }
+            return "true";
+        }
+
+        @Override
+        public String callNodeJsDeleteTitle(String sessionId) throws Exception {
+            calls.add("deleteTitle:" + sessionId);
+            if (failTitles) {
+                throw new Exception("titles failed");
+            }
+            return "{\"success\":true}";
         }
     }
 

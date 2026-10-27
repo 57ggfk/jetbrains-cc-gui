@@ -29,6 +29,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -592,13 +593,24 @@ class HistoryDeleteService {
         return new int[]{mainDeleted ? 1 : 0, agentFilesDeleted};
     }
 
-    private void cleanupSessionMetadata(String sessionId) {
-        try {
-            nodeJsServiceCaller.callNodeJsFavoritesService("removeFavorite", sessionId);
-            nodeJsServiceCaller.callNodeJsDeleteTitle(sessionId);
+    void cleanupSessionMetadata(String sessionId) {
+        // Independent steps: a failed favorite removal must not leave the custom title behind.
+        boolean favoriteRemoved = runMetadataCleanupStep("remove favorite",
+                () -> nodeJsServiceCaller.callNodeJsFavoritesService("removeFavorite", sessionId));
+        boolean titleDeleted = runMetadataCleanupStep("delete custom title",
+                () -> nodeJsServiceCaller.callNodeJsDeleteTitle(sessionId));
+        if (favoriteRemoved && titleDeleted) {
             LOG.info("[HistoryHandler] Cleaned up session metadata");
+        }
+    }
+
+    private static boolean runMetadataCleanupStep(String step, Callable<String> action) {
+        try {
+            action.call();
+            return true;
         } catch (Exception e) {
-            LOG.warn("[HistoryHandler] Failed to clean up metadata (does not affect deletion): " + e.getMessage());
+            LOG.warn("[HistoryHandler] Failed to " + step + " (does not affect deletion): " + e.getMessage());
+            return false;
         }
     }
 
