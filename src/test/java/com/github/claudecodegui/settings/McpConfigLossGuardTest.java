@@ -146,20 +146,32 @@ public class McpConfigLossGuardTest {
 
     // ==================== upsert / delete durability ====================
 
-    /** Upsert must persist the server even when the CLI rewrites the file concurrently. */
+    /**
+     * After an external rewrite, the next upsert is applied to the rewritten
+     * content: the plugin's server lands and the other writer's fields survive.
+     *
+     * <p>Known limitation, pinned here on purpose: a stale snapshot written by a
+     * process that ignores the advisory lock (the Claude CLI) still drops
+     * servers the plugin added before that rewrite. Neither the lock, the
+     * fingerprint check nor the backup (which predates the plugin's write) can
+     * undo it. If that limitation is ever lifted, the last assertion fails on
+     * purpose: update it to expect srv-a, do not delete the coverage.
+     */
     @Test
-    public void upsertSurvivesConcurrentCliRewrite() throws Exception {
+    public void upsertAfterExternalRewriteAppliesToTheRewrittenContent() throws Exception {
         writeClaudeJson("{}");
         manager.upsertMcpServer(buildServer("srv-a", "npx"));
 
-        // Simulate the CLI rewriting the whole file from its (stale) snapshot
-        // between two plugin writes — the plugin write itself must not be lost.
-        writeClaudeJson("{}");
+        // The CLI rewrites the whole file from a snapshot taken before srv-a existed.
+        Files.writeString(claudeJsonPath, "{\"numStartups\":7,\"projects\":{}}", StandardCharsets.UTF_8);
         manager.upsertMcpServer(buildServer("srv-b", "uvx"));
 
         JsonObject after = readClaudeJson();
-        assertTrue("srv-b must survive the concurrent rewrite",
-                after.getAsJsonObject("mcpServers").has("srv-b"));
+        assertTrue("srv-b must be written", after.getAsJsonObject("mcpServers").has("srv-b"));
+        assertEquals("the external writer's fields must survive the upsert",
+                7, after.get("numStartups").getAsInt());
+        assertFalse("known limitation: the stale external rewrite dropped srv-a",
+                after.getAsJsonObject("mcpServers").has("srv-a"));
     }
 
     /** Upserting a second server must not drop the first one. */
@@ -227,6 +239,8 @@ public class McpConfigLossGuardTest {
         } catch (IOException expected) {
             assertTrue("the error must name the unreadable file",
                     expected.getMessage().contains("could not be parsed"));
+            assertTrue("the error must tell the user how to recover: " + expected.getMessage(),
+                    expected.getMessage().contains("valid JSON object"));
         }
     }
 
@@ -538,6 +552,40 @@ public class McpConfigLossGuardTest {
         assertTrue("settings.json must keep an (empty) mcpServers object", after.has("mcpServers"));
         assertTrue("no ghost server may survive in settings.json after a codemoss-path delete",
                 after.getAsJsonObject("mcpServers").keySet().isEmpty());
+    }
+
+    /**
+     * A codemoss-path delete removes only the deleted id from settings.json: it
+     * did not touch ~/.claude.json, so an empty source there must not clear the
+     * other servers in settings.json.
+     */
+    @Test
+    public void codemossFallbackDeleteKeepsOtherSettingsServers() throws Exception {
+        JsonObject spec = new JsonObject();
+        spec.addProperty("type", "stdio");
+        spec.addProperty("command", "npx");
+        JsonObject settingsServers = new JsonObject();
+        settingsServers.add("srv-a", spec);
+        settingsServers.add("srv-other", spec.deepCopy());
+        JsonObject settings = new JsonObject();
+        settings.add("mcpServers", settingsServers);
+        Files.writeString(settingsPath, settings.toString(), StandardCharsets.UTF_8);
+        writeClaudeJson("{}");
+        JsonObject codemoss = new JsonObject();
+        JsonArray arr = new JsonArray();
+        arr.add(buildServer("srv-a", "npx"));
+        codemoss.add("mcpServers", arr);
+        McpServerManager codemossManager = new McpServerManager(
+                new Gson(),
+                v -> codemoss,
+                c -> { },
+                claudeSettingsManager);
+
+        assertTrue(codemossManager.deleteMcpServer("srv-a"));
+
+        JsonObject after = readSettings().getAsJsonObject("mcpServers");
+        assertFalse("the deleted server must leave settings.json", after.has("srv-a"));
+        assertTrue("servers unrelated to the delete must stay in settings.json", after.has("srv-other"));
     }
 
     // ==================== settings.json durability ====================

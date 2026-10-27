@@ -105,9 +105,10 @@ public class McpServerManager {
             // good copy for display only: reading must never write the backup
             // back over a file the CLI may be updating right now.
             claudeJson = SafeJsonFileOps.readJsonObject(
-                    SafeJsonFileOps.sibling(claudeJsonPath, SafeJsonFileOps.BACKUP_SUFFIX), 2, READ_RETRY_DELAY_MS);
+                    SafeJsonFileOps.backupPathOf(claudeJsonPath), 2, READ_RETRY_DELAY_MS);
             if (claudeJson == null) {
-                throw new IOException("~/.claude.json exists but could not be parsed, and no usable backup is available");
+                throw new IOException("~/.claude.json exists but could not be parsed, and no usable backup is available;"
+                        + " make sure it is readable and holds a valid JSON object");
             }
             LOG.warn("[McpServerManager] ~/.claude.json is unreadable — showing the last known good copy from "
                     + SafeJsonFileOps.BACKUP_SUFFIX + " (the live file is left untouched)");
@@ -491,8 +492,12 @@ public class McpServerManager {
     }
 
     /**
-     * Legacy path: delete from {@code ~/.codemoss/config.json}, then propagate
-     * the deletion to settings.json.
+     * Legacy path: delete from {@code ~/.codemoss/config.json}, then drop the
+     * same id from settings.json.
+     *
+     * <p>Only that id is removed: this delete never touched ~/.claude.json, so
+     * re-syncing from it (with an intentional-empty overwrite) could clear
+     * unrelated servers from settings.json.
      *
      * @param serverId the server to delete
      * @return true when it was found and removed
@@ -523,7 +528,11 @@ public class McpServerManager {
         configWriter.accept(config);
         LOG.info("[McpServerManager] Deleted MCP server from ~/.codemoss/config.json: " + serverId);
         // The deleted server may have been synced into settings.json earlier.
-        syncAfterMutation(true);
+        try {
+            claudeSettingsManager.removeMcpServerFromClaudeSettings(serverId);
+        } catch (Exception syncError) {
+            LOG.warn("[McpServerManager] Failed to remove " + serverId + " from settings.json: " + syncError.getMessage());
+        }
         return true;
     }
 

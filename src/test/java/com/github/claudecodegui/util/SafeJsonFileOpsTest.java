@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
@@ -150,6 +151,93 @@ public class SafeJsonFileOpsTest {
         assertEquals("the last known good backup must survive a corrupt live file",
                 "{\"v\":1}", Files.readString(backup, StandardCharsets.UTF_8));
         assertEquals("{\"v\":3}", Files.readString(file, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * A truncated (0-byte) or NUL-filled live file parses leniently as JSON null
+     * or a bare string, but it is not a usable config: it must never replace
+     * the last known good backup either.
+     */
+    @Test
+    public void emptyOrNulLiveFileNeverReplacesTheGoodBackup() throws Exception {
+        Path file = tempDir.resolve("config.json");
+        Path backup = backupOf(file);
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":1}"));
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":2}"));
+
+        Files.write(file, new byte[0]);
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":3}"));
+        assertEquals("a 0-byte live file must not replace the good backup",
+                "{\"v\":1}", Files.readString(backup, StandardCharsets.UTF_8));
+
+        Files.write(file, new byte[]{0, 0, 0, 0});
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":4}"));
+        assertEquals("a NUL-filled live file must not replace the good backup",
+                "{\"v\":1}", Files.readString(backup, StandardCharsets.UTF_8));
+        assertEquals("{\"v\":4}", Files.readString(file, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * The backup is swapped in atomically like the main file: rewriting it in
+     * place would destroy the last good copy if the IDE died mid-copy. A new
+     * file key after the refresh shows a replace rather than an in-place rewrite.
+     */
+    @Test
+    public void backupIsReplacedAtomicallyNotRewrittenInPlace() throws Exception {
+        Path file = tempDir.resolve("config.json");
+        Path backup = backupOf(file);
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":1}"));
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":2}"));
+        Object firstKey = Files.readAttributes(backup, BasicFileAttributes.class).fileKey();
+        Assume.assumeTrue("the filesystem exposes no file keys", firstKey != null);
+
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":3}"));
+
+        assertEquals("{\"v\":2}", Files.readString(backup, StandardCharsets.UTF_8));
+        assertFalse("the backup must be replaced, not truncated and rewritten in place",
+                firstKey.equals(Files.readAttributes(backup, BasicFileAttributes.class).fileKey()));
+        assertTrue("no staged backup copy may be left behind", stagedTempFiles(tempDir).isEmpty());
+    }
+
+    /** The backup fallback must look where the write put the backup: beside the symlink's target. */
+    @Test
+    public void readJsonOrBackupFindsTheBackupOfASymlinkedFile() throws Exception {
+        Path realDir = Files.createDirectories(tempDir.resolve("real"));
+        Path real = realDir.resolve("config.json");
+        Files.writeString(real, "{\"v\":1}", StandardCharsets.UTF_8);
+        Path link = tempDir.resolve("config.json");
+        try {
+            Files.createSymbolicLink(link, real);
+        } catch (IOException | UnsupportedOperationException e) {
+            Assume.assumeTrue("symlinks are not permitted here: " + e.getMessage(), false);
+            return;
+        }
+        SafeJsonFileOps.writeAtomically(link, w -> w.write("{\"v\":2}"));
+        // toRealPath: the temp dir itself may sit behind a symlink (/var -> /private/var on macOS).
+        assertEquals(backupOf(real.toRealPath()), SafeJsonFileOps.backupPathOf(link));
+
+        Files.writeString(real, "{torn", StandardCharsets.UTF_8);
+
+        JsonObject recovered = SafeJsonFileOps.readJsonOrBackup(link, 1, 1);
+        assertNotNull("the backup beside the symlink target must be found", recovered);
+        assertEquals(1, recovered.get("v").getAsInt());
+    }
+
+    /** An unreadable file's error names the usable backup so the user knows how to recover. */
+    @Test
+    public void strictReadErrorPointsToAUsableBackup() throws Exception {
+        Path file = tempDir.resolve("config.json");
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":1}"));
+        SafeJsonFileOps.writeAtomically(file, w -> w.write("{\"v\":2}"));
+        Files.writeString(file, "{torn", StandardCharsets.UTF_8);
+
+        try {
+            SafeJsonFileOps.readJsonObjectStrict(file, 1, 1);
+            fail("an unreadable file must be reported");
+        } catch (IOException expected) {
+            assertTrue("the error must name the backup: " + expected.getMessage(),
+                    expected.getMessage().contains(backupOf(file).toString()));
+        }
     }
 
     /**

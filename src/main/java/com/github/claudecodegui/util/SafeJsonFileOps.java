@@ -15,7 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
@@ -79,13 +78,8 @@ public final class SafeJsonFileOps {
     /** Suffix for the automatic pre-overwrite backup of a config file. */
     public static final String BACKUP_SUFFIX = ".ccgui-backup";
 
-    /**
-     * Owner-only (0600) attribute for files that may carry secrets — the
-     * settings.json backup can hold ANTHROPIC_AUTH_TOKEN (Security J).
-     * Evaluated lazily so non-POSIX filesystems never trip over it at class init.
-     */
-    private static final java.util.function.Supplier<FileAttribute<Set<PosixFilePermission>>> OWNER_ONLY_ATTR =
-            () -> PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+    /** Suffix of the staged temp files that are moved over a config or its backup. */
+    private static final String TEMP_SUFFIX = ".ccgui-tmp";
 
     /** How many times the replace-move is retried (Windows sharing violations while another process reads the target). */
     private static final int MOVE_ATTEMPTS = 5;
@@ -210,8 +204,8 @@ public final class SafeJsonFileOps {
      * a few times to ride out transient Windows sharing violations).
      *
      * <p>No write happens when the target already holds exactly the requested
-     * content, and the backup is only refreshed from content that parses as
-     * JSON — see {@link #backupExisting(Path)}.
+     * content, and the backup is only refreshed from content that parses as a
+     * JSON object — see {@link #backupExisting(Path)}.
      *
      * @param target   the config file to replace
      * @param writerFn callback that writes the new content (e.g. {@code w -> gson.toJson(obj, w)})
@@ -311,7 +305,25 @@ public final class SafeJsonFileOps {
             return null;
         }
         throw new IOException("Could not parse " + file + " after " + attempts
-                + " attempt(s); refusing to derive a write from unreadable content");
+                + " attempt(s); refusing to derive a write from unreadable content. " + recoveryHint(file));
+    }
+
+    /**
+     * The backup is offered as reference material, not as a drop-in fix: it
+     * predates the plugin's last write and any newer edits by other tools.
+     *
+     * @param file the unreadable config file
+     * @return what the user can do about it, naming the backup when one parses
+     */
+    private static String recoveryHint(Path file) {
+        String hint = "Retry in a moment (another process may be writing it); if it stays unreadable,"
+                + " make sure it is readable and holds a valid JSON object.";
+        Path backup = backupPathOf(file);
+        if (readJsonObject(backup, 1, 0) == null) {
+            return hint;
+        }
+        return hint + " " + backup + " holds the copy from before the plugin's last change"
+                + " (it lacks that change and any newer edits by other tools).";
     }
 
     /**
@@ -334,7 +346,7 @@ public final class SafeJsonFileOps {
         if (parsed != null) {
             return parsed;
         }
-        Path backup = sibling(file, BACKUP_SUFFIX);
+        Path backup = backupPathOf(file);
         JsonObject fromBackup = readJsonObject(backup, 2, retryDelayMs);
         if (fromBackup == null) {
             return null;
@@ -464,6 +476,28 @@ public final class SafeJsonFileOps {
         return file.resolveSibling(file.getFileName() + suffix);
     }
 
+    /**
+     * Locate the {@value BACKUP_SUFFIX} copy of {@code file}.
+     *
+     * <p>The atomic replace writes the backup beside the real file, so a
+     * symlinked config has its backup next to the link's target, not next to
+     * the link. A dangling link falls back to the sibling of the link itself.
+     *
+     * @param file the config file (may be a symlink)
+     * @return the path of its backup
+     */
+    public static Path backupPathOf(Path file) {
+        Path real = file;
+        if (Files.isSymbolicLink(file)) {
+            try {
+                real = file.toRealPath();
+            } catch (IOException e) {
+                LOG.debug("[SafeJsonFileOps] Could not resolve the symlink " + file + ": " + e.getMessage());
+            }
+        }
+        return sibling(real, BACKUP_SUFFIX);
+    }
+
     // ==================== internals ====================
 
     /**
@@ -484,7 +518,7 @@ public final class SafeJsonFileOps {
         Path tmp = Files.createTempFile(
                 parent != null ? parent : realTarget.toAbsolutePath().getParent(),
                 realTarget.getFileName().toString(),
-                ".ccgui-tmp");
+                TEMP_SUFFIX);
         try {
             try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
                 writerFn.writeTo(writer);
@@ -505,11 +539,7 @@ public final class SafeJsonFileOps {
             copyPermissions(realTarget, tmp);
             moveWithRetry(tmp, realTarget);
         } finally {
-            try {
-                Files.deleteIfExists(tmp);
-            } catch (IOException cleanupError) {
-                LOG.debug("[SafeJsonFileOps] Could not delete staged temp file " + tmp + ": " + cleanupError.getMessage());
-            }
+            deleteQuietly(tmp);
         }
     }
 
@@ -581,16 +611,20 @@ public final class SafeJsonFileOps {
      * failure must not block the write; the staged temp file still replaces
      * the old content atomically).
      *
-     * <p>Only content that parses as JSON is promoted to the backup: the backup
-     * is the recovery source, so replacing it with a damaged snapshot would
-     * destroy the last known good copy.
+     * <p>Only content that parses as a JSON object is promoted to the backup:
+     * the backup is the recovery source, so replacing it with a damaged
+     * snapshot would destroy the last known good copy.
+     *
+     * <p>The copy is staged in a temp file and moved over the old backup, like
+     * the main file: rewriting the backup in place would destroy the last good
+     * copy if the IDE died mid-copy, and a concurrent reader could see half of it.
      *
      * <p>The backup may carry secrets (the settings.json backup can hold
-     * ANTHROPIC_AUTH_TOKEN — Security J), so it is created with owner-only
-     * (0600) permissions wherever POSIX is available: born 0600 at creation
-     * (closing the create-to-chmod window) and re-forced after the copy to
-     * cover pre-existing backup files, where the creation attribute is
-     * ignored. Windows falls back to a plain create (default ACLs).
+     * ANTHROPIC_AUTH_TOKEN — Security J). The staged copy is born owner-only
+     * (0600) wherever POSIX is available, because {@code createTempFile}
+     * creates it that way and the content is streamed into it rather than
+     * copied with the source's mode; the move carries that mode onto the
+     * backup. Windows keeps its default ACLs.
      *
      * @param target the file about to be replaced
      */
@@ -598,58 +632,59 @@ public final class SafeJsonFileOps {
         if (!Files.isRegularFile(target)) {
             return;
         }
-        if (!isValidJson(target)) {
+        if (!holdsJsonObject(target)) {
             LOG.warn("[SafeJsonFileOps] Not backing up " + target.getFileName()
-                    + " — its current content is not valid JSON, the last known good backup is kept");
+                    + " — its current content is not a JSON object, the last known good backup is kept");
             return;
         }
         Path backup = sibling(target, BACKUP_SUFFIX);
+        Path staged = null;
         try {
-            // Born 0600: the token-bearing copy is never world-readable, not
-            // even for the instant before a later chmod. (The attribute only
-            // applies when the file is newly created.)
+            staged = Files.createTempFile(backup.toAbsolutePath().getParent(),
+                    backup.getFileName().toString(), TEMP_SUFFIX);
             try (java.io.InputStream in = Files.newInputStream(target);
-                 java.io.OutputStream out = openOwnerOnly(backup)) {
+                 java.io.OutputStream out = Files.newOutputStream(staged,
+                         StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
                 in.transferTo(out);
             }
-            // A backup left behind with default permissions keeps them across
-            // TRUNCATE_EXISTING — force 0600 to cover that case too.
-            hardenOwnerOnly(backup);
+            hardenOwnerOnly(staged);
+            moveWithRetry(staged, backup);
         } catch (IOException e) {
             LOG.warn("[SafeJsonFileOps] Could not back up " + target + " before replacing: " + e.getMessage());
+        } finally {
+            deleteQuietly(staged);
         }
     }
 
     /**
-     * @param file the candidate config file
-     * @return true when the file parses as a JSON document
+     * Remove a leftover staged file, if any (best effort).
+     *
+     * @param staged the staged temp file, or {@code null} when none was created
      */
-    private static boolean isValidJson(Path file) {
-        try (java.io.Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            JsonParser.parseReader(reader);
-            return true;
-        } catch (IOException | RuntimeException e) {
-            return false;
+    private static void deleteQuietly(Path staged) {
+        if (staged == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(staged);
+        } catch (IOException cleanupError) {
+            LOG.debug("[SafeJsonFileOps] Could not delete staged temp file " + staged + ": " + cleanupError.getMessage());
         }
     }
 
-    /** Open the backup for writing — born 0600 on POSIX, default perms on Windows. */
-    private static java.io.OutputStream openOwnerOnly(Path backup) throws IOException {
-        try {
-            // FileChannel.open (unlike Files.newOutputStream) accepts creation
-            // attributes, so the backup is born 0600 — the secret never spends
-            // an instant world-readable before a later chmod.
-            java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(backup,
-                    java.util.EnumSet.of(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
-                            StandardOpenOption.WRITE),
-                    OWNER_ONLY_ATTR.get());
-            return java.nio.channels.Channels.newOutputStream(channel);
-        } catch (UnsupportedOperationException notPosix) {
-            // Non-POSIX filesystem (e.g. Windows): no permission attributes,
-            // mirror the best-effort policy of ClaudeSettingsManager.
-            return Files.newOutputStream(backup,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
-                    StandardOpenOption.WRITE);
+    /**
+     * Gson parses leniently: a truncated (0-byte) file reads as JSON null and a
+     * NUL-filled one as a bare string. Neither is a usable config, so only a
+     * JSON object counts.
+     *
+     * @param file the candidate config file
+     * @return true when the file parses as a JSON object
+     */
+    private static boolean holdsJsonObject(Path file) {
+        try (java.io.Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            return JsonParser.parseReader(reader).isJsonObject();
+        } catch (IOException | RuntimeException e) {
+            return false;
         }
     }
 

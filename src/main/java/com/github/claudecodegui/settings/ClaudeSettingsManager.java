@@ -356,6 +356,26 @@ public class ClaudeSettingsManager {
     }
 
     /**
+     * Remove one MCP server from the settings.json copy, leaving every other
+     * entry in place. Used when a delete happened outside ~/.claude.json, so a
+     * full sync from that file would speak about the wrong store.
+     *
+     * @param serverId the deleted server id
+     * @throws IOException when settings.json is unreadable or keeps changing
+     */
+    public void removeMcpServerFromClaudeSettings(String serverId) throws IOException {
+        mutateClaudeSettings(settings -> {
+            if (!settings.has("mcpServers") || !settings.get("mcpServers").isJsonObject()
+                    || !settings.getAsJsonObject("mcpServers").has(serverId)) {
+                return null;
+            }
+            settings.getAsJsonObject("mcpServers").remove(serverId);
+            LOG.info("[ClaudeSettingsManager] Removed MCP server from settings.json: " + serverId);
+            return settings;
+        });
+    }
+
+    /**
      * Apply CLI login mode.
      *
      * Historical behavior (REMOVED): this method used to write CCGUI_CLI_LOGIN_AUTHORIZED=1
