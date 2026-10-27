@@ -21,7 +21,7 @@ test('parseOptionalTurnCursor keeps an explicit turn zero', () => {
   }
 });
 
-test('parseOptionalTurnCursor accepts non-negative safe-integer cursors', () => {
+test('parseOptionalTurnCursor accepts non-negative integer cursors', () => {
   assert.equal(parseOptionalTurnCursor(1), 1);
   assert.equal(parseOptionalTurnCursor(42), 42);
   assert.equal(parseOptionalTurnCursor(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
@@ -44,11 +44,16 @@ test('parseOptionalTurnCursor rejects values that are neither strings nor number
   }
 });
 
-test('parseOptionalTurnCursor rejects integers outside the safe range', () => {
-  // These pass Number.isInteger, but buildSessionMessagesPagePayload reads them
-  // as a cursor beyond the history length and raises cursorReset, which makes the
-  // client discard its cached history for a value that was never a real cursor.
-  for (const raw of [1e21, Number.MAX_SAFE_INTEGER + 1, '1e21', '9007199254740993', Infinity, -Infinity, 'Infinity']) {
+test('parseOptionalTurnCursor leaves the upper bound to the payload builder', () => {
+  // Only buildSessionMessagesPagePayload knows the history length, so an
+  // oversized integer passes through and is answered there with cursorReset.
+  assert.equal(parseOptionalTurnCursor(1e21), 1e21);
+  assert.equal(parseOptionalTurnCursor('1e21'), 1e21);
+  assert.equal(parseOptionalTurnCursor(Number.MAX_SAFE_INTEGER + 1), Number.MAX_SAFE_INTEGER + 1);
+});
+
+test('parseOptionalTurnCursor rejects non-finite cursors', () => {
+  for (const raw of [Infinity, -Infinity, 'Infinity', '-Infinity']) {
     assert.equal(parseOptionalTurnCursor(raw), null, `expected null for ${JSON.stringify(raw)}`);
   }
 });
@@ -69,21 +74,26 @@ function writeTurnFixture(turnCount) {
   return { tempDir, file };
 }
 
-test('an unsafe cursor yields the latest page without asking the client to reset', () => {
+test('a cursor beyond the history is answered with the latest page and cursorReset', () => {
   const { tempDir, file } = writeTurnFixture(5);
   try {
-    // Documents why the tightening lives in the channel: handed to the payload
-    // builder unchanged, an unsafe integer reports cursorReset and forces a full
-    // reload. Parsed by the channel it degrades to "latest page", which is what
-    // a malformed cursor should do.
-    assert.equal(buildSessionMessagesPagePayload(file, 1e21, 30).cursorReset, true);
+    // The Java client replaces its transcript only when cursorReset is set and
+    // prepends the page otherwise, so a latest page returned without the flag
+    // would duplicate every visible message. The size of the cursor does not
+    // change that: 6 and 1e21 are equally beyond a five-turn history.
+    for (const raw of ['6', '1000', String(Number.MAX_SAFE_INTEGER), '9007199254740993', '1e21']) {
+      const page = buildSessionMessagesPagePayload(file, parseOptionalTurnCursor(raw), 30);
+      assert.equal(page.cursorReset, true, `expected cursorReset for ${raw}`);
+      assert.equal(page.fromTurn, 0);
+      assert.equal(page.toTurn, 5);
+      assert.equal(page.messages[0].message.content, 'q0');
+      assert.equal(page.messages[page.messages.length - 1].message.content, 'a4');
+    }
 
-    const page = buildSessionMessagesPagePayload(file, parseOptionalTurnCursor('1e21'), 30);
+    // A cursor equal to the history length is still in range.
+    const page = buildSessionMessagesPagePayload(file, parseOptionalTurnCursor('5'), 30);
     assert.equal(page.cursorReset, false);
-    assert.equal(page.fromTurn, 0);
     assert.equal(page.toTurn, 5);
-    assert.equal(page.messages[0].message.content, 'q0');
-    assert.equal(page.messages[page.messages.length - 1].message.content, 'a4');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

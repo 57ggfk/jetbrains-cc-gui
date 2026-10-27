@@ -24,23 +24,24 @@ import { listModels } from '../services/claude/models-service.js';
  * CLI argument.
  *
  * Returns null when the caller supplied no cursor (the caller then wants the
- * latest page) and when the value is not a usable turn index, so an unusable
+ * latest page) and when the value is not a non-negative integer, so an unusable
  * cursor degrades to the latest page instead of reaching the pagination layer.
  *
  * The distinction matters because Number(null) === 0 and Number('') === 0:
  * coercing before ruling out "absent" turns "no cursor" into "the page before
  * turn 0", which buildSessionMessagesPagePayload answers with an empty page.
- * Unsafe integers (1e21, 2^53 and above) are rejected as well: they pass
- * Number.isInteger, then buildSessionMessagesPagePayload reads them as a cursor
- * beyond the history length and raises cursorReset, so the client discards its
- * cached history and reloads from scratch for a malformed value.
+ *
+ * No upper bound is applied here: only buildSessionMessagesPagePayload knows
+ * the history length, and it answers any cursor beyond it with the latest page
+ * plus cursorReset. The Java client depends on that flag, because it replaces
+ * its transcript on a reset and prepends the page otherwise.
  *
  * @param {unknown} raw cursor value from stdin JSON or argv
- * @returns {number|null} non-negative safe-integer turn index, or null when absent/unusable
+ * @returns {number|null} non-negative integer turn index, or null when absent/unusable
  */
 export function parseOptionalTurnCursor(raw) {
   if (typeof raw === 'number') {
-    return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+    return Number.isInteger(raw) && raw >= 0 ? raw : null;
   }
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
@@ -48,7 +49,7 @@ export function parseOptionalTurnCursor(raw) {
       return null;
     }
     const parsed = Number(trimmed);
-    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
   }
   return null;
 }
@@ -116,8 +117,7 @@ export async function handleClaudeCommand(command, args, stdinData) {
       // the full-history getSession path when the page request fails.
       const sessionId = stdinData?.sessionId || args[0];
       const cwd = stdinData?.cwd || args[1] || null;
-      const beforeTurnRaw = stdinData?.beforeTurn ?? (args[2] !== '' && args[2] !== undefined ? args[2] : null);
-      const beforeTurn = parseOptionalTurnCursor(beforeTurnRaw);
+      const beforeTurn = parseOptionalTurnCursor(stdinData?.beforeTurn ?? args[2]);
       const parsedLimit = Number(stdinData?.limit ?? args[3]);
       const limit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : 30;
       await claudeGetSessionMessagesPage(sessionId, cwd, beforeTurn, limit);
