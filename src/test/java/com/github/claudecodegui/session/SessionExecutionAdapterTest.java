@@ -16,6 +16,32 @@ import static org.junit.Assert.assertTrue;
 /** Contract cases for actual backend adapter callbacks; no provider process is started. */
 public class SessionExecutionAdapterTest {
     @Test
+    public void recoveredCodexIdentityKeepsPendingQuestionsAndFollowingCallbacks() {
+        SessionState state = new SessionState();
+        state.setProvider("codex");
+        state.setSessionId("expired-thread");
+        Object owner = state.beginTurn();
+        CodexMessageHandler handler = new CodexMessageHandler(state, new CallbackHandler(), null, owner);
+        handler.onMessage("codex_runtime_event", "{\"kind\":\"interactionRequested\",\"interactionKey\":\"question\","
+                + "\"payload\":{\"method\":\"item/tool/requestUserInput\"}}");
+        SessionExecutionState.Snapshot waiting = state.getExecutionSnapshot();
+
+        handler.onMessage("session_id", "recovered-thread");
+
+        assertEquals("recovered-thread", state.getSessionId());
+        assertEquals(waiting, state.getExecutionSnapshot());
+        assertTrue(state.isCurrentTurn(owner));
+        assertTrue(state.isBusy());
+        handler.onMessage("codex_runtime_event", "{\"kind\":\"interactionResolved\",\"interactionKey\":\"question\"}");
+        handler.onMessage("content_delta", "Recovered reply");
+        assertEquals(0, state.getExecutionSnapshot().pendingInteractionCount());
+        assertEquals("Recovered reply", state.getMessages().get(0).content);
+        handler.onComplete(SDKResult.success("Recovered reply"));
+        assertEquals(SessionExecutionState.Outcome.SUCCEEDED, state.getExecutionSnapshot().outcome());
+        assertFalse(state.isBusy());
+    }
+
+    @Test
     public void claudeStreamEndWaitsForAnExplicitOutcome() {
         SessionState state = new SessionState();
         state.beginTurn();
@@ -154,7 +180,14 @@ public class SessionExecutionAdapterTest {
         state.beginTurn();
         ClaudeMessageHandler claude = claude(state);
         CodexMessageHandler codex = new CodexMessageHandler(state, new CallbackHandler());
-        state.setSessionId("replacement-history");
+        state.setRestoredSessionId("replacement-history");
+        SessionExecutionState.Snapshot restored = state.getExecutionSnapshot();
+        claude.onMessage("content_delta", "Old reply");
+        codex.onComplete(SDKResult.success("Old result"));
+        assertEquals(restored, state.getExecutionSnapshot());
+        assertEquals(SessionExecutionState.Phase.IDLE, restored.phase());
+        assertFalse(state.isBusy());
+        assertTrue(state.getMessages().isEmpty());
         state.beginTurn();
         SessionExecutionState.Snapshot current = state.getExecutionSnapshot();
         claude.onMessage("stream_end", "");
