@@ -56,6 +56,8 @@ describe('useChatInputImperativeHandle', () => {
         clearInput: pipeline.clearInput,
         hasContent: false,
         extractFileTags: pipeline.extractFileTags,
+        getAttachments: () => [],
+        setAttachments: vi.fn(),
       });
       return pipeline;
     });
@@ -77,7 +79,7 @@ describe('useChatInputImperativeHandle', () => {
     expect(onInput).toHaveBeenCalledExactlyOnceWith('replacement!');
   });
 
-  it('exposes getValue/setValue/hasContent', () => {
+  it('exposes getValue/setValue/hasContent and draft attachment access', () => {
     const editable = createEditable();
     const refObj: { current: ChatInputBoxHandle | null } = { current: null };
     const invalidateCache = vi.fn();
@@ -86,6 +88,11 @@ describe('useChatInputImperativeHandle', () => {
     const focusInput = vi.fn();
     const clearInput = vi.fn();
     const cancelPendingInput = vi.fn();
+    const attachment = { id: 'att-1', fileName: 'notes.txt', mediaType: 'text/plain', data: 'aGk=' };
+    let draftAttachments = [attachment];
+    const setAttachments = vi.fn((next: typeof draftAttachments) => {
+      draftAttachments = next;
+    });
 
     const selection = {
       removeAllRanges: vi.fn(),
@@ -106,6 +113,8 @@ describe('useChatInputImperativeHandle', () => {
         clearInput,
         hasContent: false,
         extractFileTags: () => [],
+        getAttachments: () => draftAttachments,
+        setAttachments,
       })
     );
 
@@ -125,6 +134,50 @@ describe('useChatInputImperativeHandle', () => {
     expect(focusInput).toHaveBeenCalled();
     refObj.current!.clear();
     expect(clearInput).toHaveBeenCalled();
+
+    expect(refObj.current!.getAttachments()).toEqual([attachment]);
+    const replacement = { id: 'att-2', fileName: 'pic.png', mediaType: 'image/png', data: 'aW1n' };
+    refObj.current!.setAttachments([replacement]);
+    expect(setAttachments).toHaveBeenCalledExactlyOnceWith([replacement]);
+    expect(refObj.current!.getAttachments()).toEqual([replacement]);
+  });
+
+  it('renders the rich references after setValue replaced the text', () => {
+    const editable = createEditable();
+    const refObj: { current: ChatInputBoxHandle | null } = { current: null };
+    const renderTags = vi.fn();
+
+    const selection = {
+      removeAllRanges: vi.fn(),
+      addRange: vi.fn(),
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue(selection as unknown as Selection);
+
+    renderHook(() =>
+      useChatInputImperativeHandle({
+        ref: refObj,
+        editableRef: { current: editable },
+        getTextContent: () => editable.innerText,
+        invalidateCache: vi.fn(),
+        cancelPendingInput: vi.fn(),
+        setHasContent: vi.fn(),
+        adjustHeight: vi.fn(),
+        focusInput: vi.fn(),
+        clearInput: vi.fn(),
+        hasContent: false,
+        extractFileTags: () => [],
+        getAttachments: () => [],
+        setAttachments: vi.fn(),
+        renderTags,
+      })
+    );
+
+    refObj.current!.setValue('@D:/code/demo.ts#L3 what is this');
+
+    // The text itself is written as plain text, so the tag rendering has to
+    // run afterwards to turn the @reference back into a rendered chip.
+    expect(editable.innerText).toBe('@D:/code/demo.ts#L3 what is this');
+    expect(renderTags).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import type { ForwardedRef, RefObject } from 'react';
 import { cutSelection } from '../../../hooks/useContextMenu.js';
-import type { ChatInputBoxHandle, FileTagInfo } from '../types.js';
+import type { Attachment, ChatInputBoxHandle, FileTagInfo } from '../types.js';
 import { useChatInputImperativeHandle } from './useChatInputImperativeHandle.js';
 
 interface InlineCompletionController {
@@ -26,6 +26,10 @@ interface UseChatInputSelectionControllerOptions {
   clearInput: () => void;
   hasContent: boolean;
   extractFileTags: () => FileTagInfo[];
+  getAttachments: () => Attachment[];
+  setAttachments: (attachments: Attachment[]) => void;
+  /** Renders the rich references (@file chips, quote chips) in the input. */
+  renderTags?: () => void;
   inlineCompletion: InlineCompletionController;
   handleInput: () => void;
   ctxMenu: ContextMenuSelectionState;
@@ -45,6 +49,9 @@ export function useChatInputSelectionController({
   clearInput,
   hasContent,
   extractFileTags,
+  getAttachments,
+  setAttachments,
+  renderTags,
   inlineCompletion,
   handleInput,
   ctxMenu,
@@ -107,6 +114,9 @@ export function useChatInputSelectionController({
     clearInput,
     hasContent,
     extractFileTags,
+    getAttachments,
+    setAttachments,
+    renderTags,
   });
 
   return {

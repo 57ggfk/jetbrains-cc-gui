@@ -9,6 +9,7 @@ import {
   useRewindHandlers,
   useHistoryLoader,
   useMessageQueue,
+  mergeQueuedMessageIntoDraft,
   useMessageProcessing,
   useMessageSender,
   useChatComputations,
@@ -142,6 +143,7 @@ export const useAppChatController = ({
     setSettingsInitialTab,
     addToast, clearToasts,
     setContextInfo,
+    setDraftInput,
   } = useUIState();
 
   const chatInputRef = useRef<ChatInputBoxHandle>(null);
@@ -312,9 +314,34 @@ export const useAppChatController = ({
     queue: messageQueue,
     enqueue: enqueueMessage,
     dequeue: dequeueMessage,
+    dequeueForEdit: dequeueQueuedMessageForEdit,
     clearQueue,
     reorder: reorderMessageQueue,
   } = useMessageQueue({ isLoading: loading || codexTurnActive || codexPlanExecutionPending || codexCompactionPending, onExecute: hookHandleSubmit });
+
+  /**
+   * Edit a queued message: dequeue it and restore its content and attachments
+   * into the input draft as if it had never been sent. An unsent draft that is
+   * still in the input is never overwritten — the queued message is appended
+   * after it and its attachments are merged in, with a toast explaining the
+   * merge.
+   */
+  const handleEditQueuedMessage = useCallback((id: string) => {
+    const removed = dequeueQueuedMessageForEdit(id);
+    if (!removed) return;
+    const input = chatInputRef.current;
+    const { content, attachments, merged } = mergeQueuedMessageIntoDraft(
+      { content: input?.getValue() ?? '', attachments: input?.getAttachments() ?? [] },
+      { content: removed.content, attachments: removed.attachments },
+    );
+    input?.setValue(content);
+    input?.setAttachments(attachments);
+    input?.focus();
+    setDraftInput(content);
+    if (merged) {
+      addToast(t('chat.queue.mergedIntoDraft', { defaultValue: 'Queued message added to the current draft' }), 'info');
+    }
+  }, [dequeueQueuedMessageForEdit, addToast, setDraftInput, t]);
 
   // Point the session-transition indirection at the real clearQueue.
   useEffect(() => {
@@ -423,7 +450,7 @@ export const useAppChatController = ({
     chatInputRef, messagesContainerRef, messagesEndRef, inputAreaRef, isAutoScrollingRef,
     // Message actions
     handleUndoFile, onDiscardAll, handleKeepAll,
-    handleSubmit, interruptSession, messageQueue, dequeueMessage, reorderMessageQueue,
+    handleSubmit, interruptSession, messageQueue, dequeueMessage, handleEditQueuedMessage, reorderMessageQueue,
     handleOpenRewindSelectDialog, handleNavigateToProviderSettings, wrappedHandleProviderSelect,
     codexPlan, codexPlanExecutionPending,
     codexCompactionPending,

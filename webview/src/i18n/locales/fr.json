@@ -44,6 +44,13 @@
     "currentMode": "Mode actuel : {{mode}}",
     "currentModel": "Modèle actuel : {{model}}",
     "removeAttachment": "Supprimer la pièce jointe",
+    "queue": {
+      "edit": "Modifier le message en file d'attente",
+      "remove": "Retirer de la file d'attente",
+      "reorderLabel": "Réordonner le message {{position}}",
+      "reorderHint": "Faire glisser pour réordonner, ou utiliser les flèches après avoir mis le focus",
+      "mergedIntoDraft": "Le message en file d'attente a été ajouté au brouillon en cours"
+    },
     "closePreview": "Fermer l'aperçu",
     "loadingDropdown": "Chargement...",
     "modelsLoadFailed": "Échec du chargement des modèles. Cliquez pour réessayer",

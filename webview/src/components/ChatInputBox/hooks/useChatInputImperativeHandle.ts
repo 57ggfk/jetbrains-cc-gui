@@ -1,6 +1,6 @@
 import { useImperativeHandle } from 'react';
 import type { ForwardedRef } from 'react';
-import type { ChatInputBoxHandle, FileTagInfo } from '../types.js';
+import type { Attachment, ChatInputBoxHandle, FileTagInfo } from '../types.js';
 
 export interface UseChatInputImperativeHandleOptions {
   ref: ForwardedRef<ChatInputBoxHandle>;
@@ -16,6 +16,16 @@ export interface UseChatInputImperativeHandleOptions {
   clearInput: () => void;
   hasContent: boolean;
   extractFileTags: () => FileTagInfo[];
+  /** Draft attachments currently staged on the input (queue edit restore reads them) */
+  getAttachments: () => Attachment[];
+  /** Replace the draft attachments (queue edit restore) */
+  setAttachments: (attachments: Attachment[]) => void;
+  /**
+   * Renders the rich references (@file chips, quote chips) inside the input.
+   * A programmatic value write is plain text, so this has to run afterwards to
+   * restore the rendered look of the draft.
+   */
+  renderTags?: () => void;
 }
 
 /**
@@ -36,6 +46,9 @@ export function useChatInputImperativeHandle({
   clearInput,
   hasContent,
   extractFileTags,
+  getAttachments,
+  setAttachments,
+  renderTags,
 }: UseChatInputImperativeHandleOptions): void {
   useImperativeHandle(
     ref,
@@ -52,6 +65,11 @@ export function useChatInputImperativeHandle({
         setHasContent(!!newValue.trim());
         adjustHeight();
         invalidateCache();
+        // The text was written as plain text, so the rich references it may
+        // contain (@file chips, quote chips) still have to be rendered. Without
+        // this a restored draft would show up as raw text instead of the
+        // rendered chips the user saw before the message was queued.
+        renderTags?.();
 
         if (newValue) {
           const range = document.createRange();
@@ -71,6 +89,8 @@ export function useChatInputImperativeHandle({
       },
       hasContent: () => hasContent,
       getFileTags: extractFileTags,
+      getAttachments,
+      setAttachments,
     }),
     [
       getTextContent,
@@ -84,6 +104,9 @@ export function useChatInputImperativeHandle({
       clearInput,
       hasContent,
       extractFileTags,
+      getAttachments,
+      setAttachments,
+      renderTags,
     ]
   );
 }

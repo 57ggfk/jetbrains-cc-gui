@@ -22,12 +22,58 @@ export interface UseMessageQueueReturn {
   enqueue: (content: string, attachments?: Attachment[]) => void;
   /** Remove message from queue by id */
   dequeue: (id: string) => void;
+  /**
+   * Remove a queued message and return it so its content and attachments can be
+   * restored into the input draft for editing. Messages around it keep their
+   * order; an unknown id returns undefined and leaves the queue untouched.
+   */
+  dequeueForEdit: (id: string) => QueuedMessage | undefined;
   /** Clear entire queue */
   clearQueue: () => void;
   /** Reorder the queue by an ordered list of ids (index 0 executes first) */
   reorder: (orderedIds: string[]) => void;
   /** Whether queue has items */
   hasQueuedMessages: boolean;
+}
+
+/** Input-draft payload produced when a queued message is edited */
+export interface QueuedDraftRestore {
+  /** Content to write back into the input draft */
+  content: string;
+  /** Attachments to restore on the input draft */
+  attachments: Attachment[];
+  /** True when a non-empty draft was kept and the queued message was merged into it */
+  merged: boolean;
+}
+
+/**
+ * Build the input-draft payload for editing a queued message.
+ *
+ * The queued message is restored as if it had never been sent. When the input
+ * already holds unsent content or attachments, nothing is overwritten: the
+ * queued message is appended after the current draft text and its attachments
+ * are merged in (deduplicated by id).
+ */
+export function mergeQueuedMessageIntoDraft(
+  current: { content: string; attachments: Attachment[] },
+  queued: { content: string; attachments?: Attachment[] },
+): QueuedDraftRestore {
+  const hasCurrentContent = current.content.trim().length > 0;
+  const content = hasCurrentContent
+    ? `${current.content.replace(/\s+$/, '')}\n\n${queued.content}`
+    : queued.content;
+  const seen = new Set(current.attachments.map(attachment => attachment.id));
+  const attachments = [...current.attachments];
+  for (const attachment of queued.attachments ?? []) {
+    if (seen.has(attachment.id)) continue;
+    seen.add(attachment.id);
+    attachments.push(attachment);
+  }
+  return {
+    content,
+    attachments,
+    merged: hasCurrentContent || current.attachments.length > 0,
+  };
 }
 
 /**
@@ -66,6 +112,17 @@ export function useMessageQueue({
   const dequeue = useCallback((id: string) => {
     setQueue(prev => prev.filter(item => item.id !== id));
   }, []);
+
+  // Remove a message for editing: the caller gets its payload back so the
+  // draft can be restored in the same interaction (same semantics as dequeue
+  // for the remaining items).
+  const dequeueForEdit = useCallback((id: string): QueuedMessage | undefined => {
+    const removed = queue.find(item => item.id === id);
+    if (removed) {
+      setQueue(prev => prev.filter(item => item.id !== id));
+    }
+    return removed;
+  }, [queue]);
 
   // Clear entire queue
   const clearQueue = useCallback(() => {
@@ -129,6 +186,7 @@ export function useMessageQueue({
     queue,
     enqueue,
     dequeue,
+    dequeueForEdit,
     clearQueue,
     reorder,
     hasQueuedMessages: queue.length > 0,

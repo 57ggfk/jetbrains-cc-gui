@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { useState } from 'react';
-import { useMessageQueue } from './useMessageQueue';
+import { useMessageQueue, mergeQueuedMessageIntoDraft } from './useMessageQueue';
+import type { QueuedMessage } from './useMessageQueue';
 import type { Attachment } from '../components/ChatInputBox/types';
 
 describe('useMessageQueue', () => {
@@ -223,5 +224,115 @@ describe('useMessageQueue', () => {
     });
     expect(onExecute).toHaveBeenCalledTimes(2);
     expect(onExecute).toHaveBeenLastCalledWith('next round', undefined);
+  });
+
+  it('dequeueForEdit removes the message and returns its content and attachments', () => {
+    const { result } = renderQueue(true);
+    const attachment: Attachment = { id: 'att-1', fileName: 'notes.txt', mediaType: 'text/plain', data: 'aGk=' };
+
+    act(() => {
+      result.current.queueApi.enqueue('first');
+      result.current.queueApi.enqueue('edit me', [attachment]);
+      result.current.queueApi.enqueue('third');
+    });
+
+    const target = result.current.queueApi.queue[1];
+    let removed: QueuedMessage | undefined;
+    act(() => {
+      removed = result.current.queueApi.dequeueForEdit(target.id);
+    });
+
+    expect(removed).toMatchObject({ content: 'edit me', attachments: [attachment] });
+    expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['first', 'third']);
+    expect(result.current.queueApi.hasQueuedMessages).toBe(true);
+  });
+
+  it('dequeueForEdit ignores unknown ids and leaves the queue untouched', () => {
+    const { result } = renderQueue(true);
+
+    act(() => {
+      result.current.queueApi.enqueue('only');
+    });
+
+    let removed: QueuedMessage | undefined;
+    act(() => {
+      removed = result.current.queueApi.dequeueForEdit('unknown-id');
+    });
+
+    expect(removed).toBeUndefined();
+    expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['only']);
+  });
+
+  it('does not execute a message taken out of the queue for editing', () => {
+    const { result, onExecute } = renderQueue(true);
+
+    act(() => {
+      result.current.queueApi.enqueue('kept for later');
+      result.current.queueApi.enqueue('edit me');
+    });
+    act(() => {
+      result.current.queueApi.dequeueForEdit(result.current.queueApi.queue[1].id);
+    });
+    act(() => {
+      result.current.setLoading(false);
+    });
+
+    expect(onExecute).toHaveBeenCalledExactlyOnceWith('kept for later', undefined);
+  });
+});
+
+describe('mergeQueuedMessageIntoDraft', () => {
+  const attachment: Attachment = { id: 'att-1', fileName: 'notes.txt', mediaType: 'text/plain', data: 'aGk=' };
+  const queuedAttachment: Attachment = { id: 'att-2', fileName: 'pic.png', mediaType: 'image/png', data: 'aW1n' };
+
+  it('restores the queued message as-is when the input draft is empty', () => {
+    const restore = mergeQueuedMessageIntoDraft(
+      { content: '   ', attachments: [] },
+      { content: 'queued message', attachments: [queuedAttachment] },
+    );
+
+    expect(restore).toEqual({ content: 'queued message', attachments: [queuedAttachment], merged: false });
+  });
+
+  it('appends the queued message after existing draft text and merges its attachments', () => {
+    const restore = mergeQueuedMessageIntoDraft(
+      { content: 'unsent draft', attachments: [attachment] },
+      { content: 'queued message', attachments: [queuedAttachment] },
+    );
+
+    expect(restore.content).toBe('unsent draft\n\nqueued message');
+    expect(restore.attachments).toEqual([attachment, queuedAttachment]);
+    expect(restore.merged).toBe(true);
+  });
+
+  it('trims trailing whitespace from the existing draft before joining', () => {
+    const restore = mergeQueuedMessageIntoDraft(
+      { content: 'unsent draft \n', attachments: [] },
+      { content: 'queued message' },
+    );
+
+    expect(restore.content).toBe('unsent draft\n\nqueued message');
+    expect(restore.merged).toBe(true);
+  });
+
+  it('deduplicates restored attachments by id', () => {
+    const restore = mergeQueuedMessageIntoDraft(
+      { content: '', attachments: [attachment] },
+      { content: 'queued message', attachments: [attachment, queuedAttachment] },
+    );
+
+    expect(restore.attachments).toEqual([attachment, queuedAttachment]);
+    expect(restore.merged).toBe(true);
+  });
+
+  it('flags a merge when only attachments are staged on the input', () => {
+    const restore = mergeQueuedMessageIntoDraft(
+      { content: '', attachments: [attachment] },
+      { content: 'queued message' },
+    );
+
+    expect(restore.content).toBe('queued message');
+    expect(restore.attachments).toEqual([attachment]);
+    expect(restore.merged).toBe(true);
   });
 });

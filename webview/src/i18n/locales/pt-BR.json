@@ -44,6 +44,13 @@
     "currentMode": "Modo atual: {{mode}}",
     "currentModel": "Modelo atual: {{model}}",
     "removeAttachment": "Remover anexo",
+    "queue": {
+      "edit": "Editar mensagem na fila",
+      "remove": "Remover da fila",
+      "reorderLabel": "Reordenar mensagem {{position}}",
+      "reorderHint": "Arraste para reordenar ou use as setas após focar",
+      "mergedIntoDraft": "A mensagem na fila foi adicionada ao rascunho atual"
+    },
     "closePreview": "Fechar visualização",
     "loadingDropdown": "Carregando...",
     "modelsLoadFailed": "Falha ao carregar modelos. Clique para tentar novamente",

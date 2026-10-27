@@ -893,6 +893,13 @@ export interface ChatInputBoxHandle {
   hasContent: () => boolean;
   /** Get file tags from input (for Codex context injection) */
   getFileTags: () => FileTagInfo[];
+  /** Get the draft attachments currently staged on the input */
+  getAttachments: () => Attachment[];
+  /**
+   * Replace the draft attachments (used to restore a queued message for
+   * editing). No-op when attachments are externally controlled.
+   */
+  setAttachments: (attachments: Attachment[]) => void;
 }
 
 // ============================================================
@@ -1023,6 +1030,11 @@ export interface ChatInputBoxProps {
   messageQueue?: QueuedMessage[];
   /** Remove message from queue callback */
   onRemoveFromQueue?: (id: string) => void;
+  /**
+   * Edit queued message callback: removes the message from the queue and
+   * restores its content and attachments into the input draft.
+   */
+  onEditFromQueue?: (id: string) => void;
   /** Reorder message queue callback (orderedIds[0] executes first) */
   onReorderQueue?: (orderedIds: string[]) => void;
 
