@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -288,7 +288,11 @@ export const useAppChatController = ({
     getMessageText, getContentBlocks,
     mergedMessages, sentAttachmentsRef,
   } = useMessageProcessing({ messages, currentSessionId, t });
-  getMessageTextRef.current = getMessageText;
+  // Keep the ref in sync after commit: writing it during render is unsafe under
+  // concurrent rendering, where a discarded render must not publish a value.
+  useLayoutEffect(() => {
+    getMessageTextRef.current = getMessageText;
+  }, [getMessageText]);
 
   // ── Message sender ──
   // Wrap handleProviderSelect to also clear messages and input (like creating a new session)

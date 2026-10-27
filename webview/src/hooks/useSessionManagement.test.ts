@@ -41,6 +41,7 @@ describe('useSessionManagement', () => {
     window.sendToJava = vi.fn();
     delete window.__pendingForkTitleRequest;
     delete window.__pendingForkTitle;
+    delete window.__forkInFlight;
     // Reset the "skip new-session confirm" preference between tests so cases
     // that exercise the localStorage path can't leak into ones that don't.
     localStorage.removeItem('skipNewSessionConfirm');
@@ -212,7 +213,7 @@ describe('useSessionManagement', () => {
     ]);
   });
 
-  it('sends one backend request when deleting multiple history sessions', () => {
+  it('dedupes ids and sends one backend request per provider when deleting multiple history sessions', () => {
     let historyData = {
       success: true,
       sessions: [
@@ -258,11 +259,15 @@ describe('useSessionManagement', () => {
 
     expect(historyData.sessions).toEqual([]);
     expect(historyData.total).toBe(0);
-    expect(window.sendToJava).toHaveBeenCalledTimes(1);
-    expect(lastBridgePayload('delete_sessions')).toEqual({
-      sessionIds: ['history-1', 'history-2'],
-      provider: 'claude',
-    });
+    // One request per provider; the duplicate id is dropped inside its group.
+    const deletePayloads = (window.sendToJava as any).mock.calls
+      .map((call: unknown[]) => call[0] as string)
+      .filter((entry: string) => entry.startsWith('delete_sessions:'))
+      .map((entry: string) => JSON.parse(entry.slice('delete_sessions:'.length)));
+    expect(deletePayloads).toEqual([
+      { sessionIds: ['history-1'], provider: 'claude' },
+      { sessionIds: ['history-2'], provider: 'codex' },
+    ]);
     expect(mocks.addToast).toHaveBeenCalledWith('history.sessionDeleted', 'success');
   });
 
@@ -369,10 +374,16 @@ describe('useSessionManagement', () => {
       result.current.deleteHistorySessions(['history-1', 'history-2']);
     });
 
-    expect(lastBridgePayload('delete_sessions')).toEqual({
-      sessionIds: ['history-1', 'history-2'],
-      provider: 'claude',
-    });
+    // Mixed providers are split into one request per provider: routing the whole
+    // batch through the first row's provider silently skips the other half.
+    const deletePayloads = (window.sendToJava as any).mock.calls
+      .map((call: unknown[]) => call[0] as string)
+      .filter((entry: string) => entry.startsWith('delete_sessions:'))
+      .map((entry: string) => JSON.parse(entry.slice('delete_sessions:'.length)));
+    expect(deletePayloads).toEqual([
+      { sessionIds: ['history-1'], provider: 'claude' },
+      { sessionIds: ['history-2'], provider: 'codex' },
+    ]);
     expect(window.sendToJava).toHaveBeenCalledWith('create_new_session:');
     expect(mocks.addToast).not.toHaveBeenCalledWith('history.sessionDeleted', 'success');
     expect(window.__pendingSessionTransitionToast).toEqual({
@@ -989,6 +1000,36 @@ describe('useSessionManagement', () => {
       // t() returns the key itself, so the suffix is the raw i18n key.
       title: 'My Session' + 'history.forkedTitleSuffix',
     });
+  });
+
+  it('forkHistorySession ignores a second click while the first fork is in flight', () => {
+    const mocks = createMocks();
+    const historyData = {
+      success: true,
+      sessions: [
+        { sessionId: 'history-1', title: 'My Session', provider: 'claude', messageCount: 1, lastTimestamp: Date.now() },
+      ],
+      total: 1,
+    } as unknown as HistoryData;
+
+    const { result } = renderHook(() =>
+      useSessionManagement({
+        messages: [],
+        loading: false,
+        historyData,
+        currentSessionId: null,
+        ...mocks,
+        t,
+      })
+    );
+
+    act(() => {
+      result.current.forkHistorySession('history-1');
+      result.current.forkHistorySession('history-1');
+    });
+
+    // A double click must not create two copies (and two racing title bindings).
+    expect(window.sendToJava).toHaveBeenCalledTimes(1);
   });
 
   it('forkHistorySession truncates the base title so the suffix survives', () => {

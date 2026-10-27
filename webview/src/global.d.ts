@@ -249,6 +249,9 @@ interface Window {
     title: string;
   };
 
+  /** True while a fork request is awaiting onForkResult; blocks double submits. */
+  __forkInFlight?: boolean;
+
   /**
    * Usage statistics update callback
    */

@@ -407,9 +407,29 @@ export function useSessionManagement({
       return;
     }
 
-    const deletedProvider = historyDataRef.current?.sessions?.find(s => uniqueSessionIds.includes(s.sessionId))?.provider
-      || currentProvider || 'claude';
-    sendBridgeEvent('delete_sessions', JSON.stringify({ sessionIds: uniqueSessionIds, provider: deletedProvider }));
+    // Group the selection by the provider recorded on each row and send one
+    // delete_sessions request per provider. A single request routes the whole
+    // batch through one provider, so a mixed selection would silently fail to
+    // delete the other half while the UI still reported success.
+    const knownSessions = historyDataRef.current?.sessions ?? [];
+    const idsByProvider = new Map<string, string[]>();
+    for (const sessionId of uniqueSessionIds) {
+      const provider = knownSessions.find(s => s.sessionId === sessionId)?.provider
+        || currentProvider
+        || 'claude';
+      const bucket = idsByProvider.get(provider);
+      if (bucket) {
+        bucket.push(sessionId);
+      } else {
+        idsByProvider.set(provider, [sessionId]);
+      }
+    }
+    for (const [provider, providerSessionIds] of idsByProvider) {
+      sendBridgeEvent('delete_sessions', JSON.stringify({
+        sessionIds: providerSessionIds,
+        provider,
+      }));
+    }
     let startedSessionTransition = false;
 
     if (historyData && historyData.sessions) {
@@ -543,6 +563,17 @@ export function useSessionManagement({
   // options.forkPointUuid narrows the fork to the conversation up to the end of that
   // assistant reply's turn (backend cuts before the next real user message).
   const forkHistorySession = useCallback((sessionId: string, options?: { forkPointUuid?: string }) => {
+    // One fork at a time: a double click would create two copies, and the two
+    // onForkResult callbacks would race over __pendingForkTitleRequest.
+    if (window.__forkInFlight) {
+      return;
+    }
+    window.__forkInFlight = true;
+    // Release the guard even if the backend callback never arrives.
+    setTimeout(() => {
+      window.__forkInFlight = false;
+    }, 15_000);
+
     const session = historyDataRef.current?.sessions?.find(s => s.sessionId === sessionId);
     const provider = session?.provider || currentProvider || 'claude';
 
