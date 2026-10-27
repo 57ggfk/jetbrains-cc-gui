@@ -3496,6 +3496,11 @@ public class ClaudeChatWindow {
             }
 
             @Override
+            public HistoryHandler getHistoryHandler() {
+                return historyHandler;
+            }
+
+            @Override
             public SessionLifecycleManager getSessionLifecycleManager() {
                 return sessionLifecycleManager;
             }
