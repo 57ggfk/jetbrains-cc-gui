@@ -120,7 +120,10 @@ class HistoryDeleteService {
             return;
         }
 
-        quiesceActiveSessionForDeletion(context.getSession(), sessionIds, currentProvider)
+        // Quiesce with the same provider the files are deleted under: a stale panel
+        // provider would skip the interrupt and let the CLI keep appending to a
+        // transcript this request is about to remove.
+        quiesceActiveSessionForDeletion(context.getSession(), sessionIds, effectiveProvider)
                 .thenRunAsync(() -> {
                     try {
                         LOG.info("[HistoryHandler] ========== Batch delete sessions start ==========");
@@ -156,7 +159,11 @@ class HistoryDeleteService {
                         LOG.info("[HistoryHandler] Batch delete completed - Main files: " + mainDeletedCount + "/" + sessionIds.size()
                                 + ", Agent files: " + agentFilesDeletedCount);
                         LOG.info("[HistoryHandler] Reloading history data...");
-                        historyLoadService.handleLoadHistoryData(currentProvider);
+                        // Reload the list the deleted rows came from, not the panel's
+                        // provider: on a stale panel (provider switched without
+                        // reopening the list) the panel value would replace the visible
+                        // list with a different provider's rows. Matches single delete.
+                        historyLoadService.handleLoadHistoryData(effectiveProvider);
                     } catch (Exception e) {
                         LOG.error("[HistoryHandler] Batch delete sessions failed: " + e.getMessage(), e);
                     }
