@@ -1,16 +1,12 @@
 package com.github.claudecodegui.handler;
 
 import com.github.claudecodegui.bridge.NodeDetector;
+import com.github.claudecodegui.bridge.NodeProcessRunner;
 import com.github.claudecodegui.bridge.ProcessManager;
 import com.github.claudecodegui.handler.core.HandlerContext;
-import com.github.claudecodegui.util.PlatformUtils;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Handles Node.js subprocess calls for favorites and session titles services.
@@ -164,65 +160,18 @@ public class NodeJsServiceCaller {
     }
 
     /**
-     * Execute a Node.js script via ProcessBuilder, enforce a timeout, and
-     * return the last line of stdout (expected to be JSON).
-     *
-     * <p>Stdout is drained on a daemon thread so the timeout below is the real
-     * deadline: the previous read-to-EOF-then-wait ordering let a hung child
-     * holding the pipe open block forever with the timeout never reached.
+     * Execute a Node.js script under a hard timeout and return the last line of
+     * stdout (expected to be JSON). See {@link NodeProcessRunner} for how the
+     * deadline is enforced.
      */
     String executeNodeScript(ProcessBuilder pb) throws Exception {
         // L8 fix: register with ProcessManager so cleanupAllProcesses sees this child.
         ProcessManager processManager = context.getClaudeSDKBridge().getProcessManager();
-        String channelId = ProcessManager.newChannelId("node-service");
-        Process process = null;
-        try {
-            process = pb.start();
-            processManager.registerProcess(channelId, process);
-
-            final Process started = process;
-            StringBuilder output = new StringBuilder();
-            Thread readerThread = new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(started.getInputStream(), StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        synchronized (output) {
-                            output.append(line).append("\n");
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-            });
-            readerThread.setDaemon(true);
-            readerThread.start();
-
-            boolean finished = process.waitFor(processTimeoutSeconds, TimeUnit.SECONDS);
-            if (!finished) {
-                PlatformUtils.terminateProcess(process);
-                throw new Exception("Node.js process timed out after " + processTimeoutSeconds + " seconds");
-            }
-            // Process exited; the reader hits EOF promptly — join for the final lines.
-            readerThread.join(2000L);
-
-            int exitCode = process.exitValue();
-            String outputText;
-            synchronized (output) {
-                outputText = output.toString();
-            }
-            if (exitCode != 0) {
-                throw new Exception("Node.js process exited with code " + exitCode + ": " + outputText);
-            }
-
-            String[] lines = outputText.split("\n");
-            return lines.length > 0 ? lines[lines.length - 1] : "{}";
-        } finally {
-            if (process != null) {
-                if (process.isAlive()) {
-                    PlatformUtils.terminateProcess(process);
-                }
-                processManager.unregisterProcess(channelId, process);
-            }
+        NodeProcessRunner.Result result =
+                NodeProcessRunner.run(pb, processManager, "node-service", null, processTimeoutSeconds);
+        if (result.exitCode() != 0) {
+            throw new Exception("Node.js process exited with code " + result.exitCode() + ": " + result.output());
         }
+        return result.lastLine();
     }
 }
