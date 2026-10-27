@@ -8,8 +8,8 @@ import test from 'node:test';
 import { getStdioServerTools } from './stdio-tools-getter.js';
 import { resolveWindowsCommand } from './process-launcher.js';
 
-test('resolves a bare Windows command to its executable shim', () => {
-  const result = resolveWindowsCommand(
+test('resolves a bare Windows command to its executable shim', async () => {
+  const result = await resolveWindowsCommand(
     'codegraph',
     {},
     'win32',
@@ -20,8 +20,8 @@ test('resolves a bare Windows command to its executable shim', () => {
   assert.equal(result.useShell, true);
 });
 
-test('keeps an executable Windows command out of the shell', () => {
-  const result = resolveWindowsCommand(
+test('keeps an executable Windows command out of the shell', async () => {
+  const result = await resolveWindowsCommand(
     'node',
     {},
     'win32',

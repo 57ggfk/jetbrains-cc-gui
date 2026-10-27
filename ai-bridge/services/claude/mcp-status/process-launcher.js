@@ -1,55 +1,30 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { hasUnsafeShellMetacharacters } from './command-validator.js';
 
+const execFileAsync = promisify(execFile);
 const WINDOWS_SHELL_EXTENSIONS = new Set(['.cmd', '.bat']);
 const WINDOWS_EXECUTABLE_EXTENSIONS = new Set(['.cmd', '.bat', '.exe']);
 const WINDOWS_SHELL_COMMANDS = new Set(['npx', 'npm', 'pnpm', 'yarn']);
 
-function findWindowsCommand(command, env) {
-  const lookupNames = [command];
-  const extension = path.win32.extname(command).toLowerCase();
-  const looksLikePath = command.includes('\\') || command.includes('/');
-  if (!extension) {
-    lookupNames.push(`${command}.exe`, `${command}.cmd`, `${command}.bat`);
-  }
-
-  const matches = new Set();
-  for (const lookupName of lookupNames) {
-    const result = spawnSync('where.exe', [lookupName], {
-      env,
-      encoding: 'utf8',
-      windowsHide: true,
-      // A hung lookup must not block the event loop; on timeout status is
-      // null and the candidate is skipped below.
-      timeout: 5000
+export async function findWindowsCommand(command, env, run = execFileAsync) {
+  try {
+    // where.exe already applies PATHEXT. One bounded asynchronous lookup keeps
+    // slow or offline PATH entries from blocking every MCP verification timer.
+    const result = await run('where.exe', [command], {
+      env, encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 64 * 1024
     });
-    if (result.status !== 0 || typeof result.stdout !== 'string') {
-      continue;
-    }
-    for (const candidate of result.stdout
-      .split(/\r?\n/)
-      .map((item) => item.trim())
-      .filter(Boolean)) {
-      if (!looksLikePath || candidate.toLowerCase().startsWith(command.toLowerCase())) {
-        matches.add(candidate);
-      }
-    }
+    return typeof result.stdout === 'string'
+      ? result.stdout.split(/\r?\n/).map(item => item.trim()).filter(Boolean)
+      : [];
+  } catch {
+    return [];
   }
-  return [...matches];
 }
 
-/**
- * Resolve a Windows command to an executable shim that Node can launch.
- * Node does not reliably resolve extensionless commands such as `codegraph`
- * to their `.cmd` shim when using child_process.spawn without a shell.
- *
- * @param {string} command - Configured command
- * @param {Object} env - Child process environment
- * @param {string} platform - Runtime platform, injectable for tests
- * @param {(command: string, env: Object) => string[]} lookup - PATH lookup
- * @returns {{ command: string, useShell: boolean }} Launch command details
- */
-export function resolveWindowsCommand(
+/** Resolve extensionless Windows commands to the executable selected by PATH. */
+export async function resolveWindowsCommand(
   command,
   env = process.env,
   platform = process.platform,
@@ -58,32 +33,36 @@ export function resolveWindowsCommand(
   if (platform !== 'win32' || typeof command !== 'string') {
     return { command, useShell: false };
   }
-
   const normalizedCommand = command.trim();
   const extension = path.win32.extname(normalizedCommand).toLowerCase();
-  if (WINDOWS_SHELL_EXTENSIONS.has(extension)) {
-    return { command: normalizedCommand, useShell: true };
+  if (WINDOWS_SHELL_EXTENSIONS.has(extension) || extension === '.exe') {
+    return { command: normalizedCommand, useShell: WINDOWS_SHELL_EXTENSIONS.has(extension) };
   }
-  if (extension === '.exe') {
-    return { command: normalizedCommand, useShell: false };
-  }
-
-  const candidates = lookup(normalizedCommand, env);
-  const resolvedCommand = candidates.find((candidate) => {
-    const candidateExtension = path.win32.extname(candidate).toLowerCase();
-    return WINDOWS_EXECUTABLE_EXTENSIONS.has(candidateExtension);
-  });
-
+  const candidates = await lookup(normalizedCommand, env);
+  const resolvedCommand = candidates.find(candidate =>
+    WINDOWS_EXECUTABLE_EXTENSIONS.has(path.win32.extname(candidate).toLowerCase()));
   if (resolvedCommand) {
-    const resolvedExtension = path.win32.extname(resolvedCommand).toLowerCase();
     return {
       command: resolvedCommand,
-      useShell: WINDOWS_SHELL_EXTENSIONS.has(resolvedExtension)
+      useShell: WINDOWS_SHELL_EXTENSIONS.has(path.win32.extname(resolvedCommand).toLowerCase())
     };
   }
-
   return {
     command: normalizedCommand,
     useShell: WINDOWS_SHELL_COMMANDS.has(normalizedCommand.toLowerCase())
   };
+}
+
+/** Node joins shell command/args without quoting; preserve each cmd.exe token. */
+export function prepareStdioLaunch(launch, args) {
+  if (!Array.isArray(args) || args.some(arg => typeof arg !== 'string')) {
+    throw new Error('Command args must be strings');
+  }
+  if (!launch.useShell) return { ...launch, args };
+  // Reject expansion/quoting syntax as well as chaining. Validate the resolved
+  // path too: it can come from a PATH directory rather than the configuration.
+  if ([launch.command, ...args].some(hasUnsafeShellMetacharacters)) {
+    throw new Error('Command or args contain unsafe shell metacharacters');
+  }
+  return { ...launch, command: `"${launch.command}"`, args: args.map(arg => `"${arg}"`) };
 }

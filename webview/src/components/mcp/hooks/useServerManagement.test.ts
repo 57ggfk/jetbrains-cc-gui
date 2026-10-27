@@ -37,7 +37,6 @@ describe('useServerManagement tool cache invalidation', () => {
     const setServerTools = vi.fn() as unknown as React.Dispatch<React.SetStateAction<ServerToolsState>>;
     const hook = renderHook(() => useServerManagement({
       isCodexMode: false,
-      servers: [server],
       messagePrefix: '',
       cacheKeys,
       setServerTools,
@@ -69,7 +68,6 @@ describe('useServerManagement tool cache invalidation', () => {
     const loadServerStatus = vi.fn();
     const hook = renderHook(() => useServerManagement({
       isCodexMode: true,
-      servers: [server],
       messagePrefix: 'codex_',
       cacheKeys,
       setServerTools: vi.fn() as unknown as React.Dispatch<React.SetStateAction<ServerToolsState>>,
@@ -94,15 +92,15 @@ describe('useServerManagement tool cache invalidation', () => {
     expect(loadServerStatus).not.toHaveBeenCalled();
   });
 
-  it('reloads tools for enabled servers during a full refresh', () => {
+  it('waits for the refreshed catalog before loading expanded tools', () => {
     const loadServerTools = vi.fn();
+    const loadServers = vi.fn();
     const hook = renderHook(() => useServerManagement({
       isCodexMode: true,
       messagePrefix: 'codex_',
       cacheKeys,
-      servers: [server, { ...server, id: 'disabled', enabled: false }],
       setServerTools: vi.fn() as unknown as React.Dispatch<React.SetStateAction<ServerToolsState>>,
-      loadServers: vi.fn(),
+      loadServers,
       loadServerStatus: vi.fn(),
       loadServerTools,
       onLog: vi.fn(),
@@ -114,7 +112,7 @@ describe('useServerManagement tool cache invalidation', () => {
       hook.result.current.handleRefresh();
     });
 
-    expect(loadServerTools).toHaveBeenCalledTimes(1);
-    expect(loadServerTools).toHaveBeenCalledWith(server, true);
+    expect(loadServers).toHaveBeenCalledWith(true);
+    expect(loadServerTools).not.toHaveBeenCalled();
   });
 });

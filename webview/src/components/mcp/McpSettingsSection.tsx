@@ -129,7 +129,6 @@ function McpProviderPanel({ currentProvider }: { currentProvider: McpProvider })
     handleToggleServer,
   } = useServerManagement({
     isCodexMode,
-    servers,
     messagePrefix,
     cacheKeys,
     setServerTools,
