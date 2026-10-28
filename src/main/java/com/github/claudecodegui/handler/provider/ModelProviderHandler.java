@@ -19,6 +19,8 @@ import com.intellij.util.concurrency.AppExecutorUtil;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Handles model and provider selection, reasoning effort, and slash command refresh.
@@ -26,6 +28,9 @@ import java.util.concurrent.CompletableFuture;
 public class ModelProviderHandler {
 
     private static final Logger LOG = Logger.getInstance(ModelProviderHandler.class);
+
+    private static final Pattern CAPACITY_SUFFIX_PATTERN =
+            Pattern.compile("\\s*\\[([0-9.]+)([kKmM])\\]\\s*$");
 
     static final Map<String, Integer> MODEL_CONTEXT_LIMITS = new HashMap<>();
     static {
@@ -510,8 +515,7 @@ public class ModelProviderHandler {
         if (model == null) {
             return null;
         }
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\s*\\[([0-9.]+)([kKmM])\\]\\s*$");
-        java.util.regex.Matcher matcher = pattern.matcher(model);
+        Matcher matcher = CAPACITY_SUFFIX_PATTERN.matcher(model);
 
         if (matcher.find()) {
             try {
