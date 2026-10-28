@@ -462,15 +462,16 @@ public class ModelProviderHandler {
 
     /**
      * A settings mapping replaces the model name but not the user's 1M choice.
-     * The bridge appends {@code [1m]} back before spawning the CLI, so the Java
-     * context-window calculation must see the same suffix.
+     * This mirrors {@code resolveModelFromSettings} in ai-bridge: the request owns
+     * the suffix, so any suffix carried by the mapped value is stripped first and
+     * re-appended only when the request asks for 1M.
      */
     static String preserveRequested1MContext(String requestedModel, String mappedModel) {
-        if (mappedModel == null || requestedModel == null
-                || !requestedModel.toLowerCase().endsWith("[1m]")) {
+        if (mappedModel == null || requestedModel == null) {
             return mappedModel;
         }
-        return mappedModel.toLowerCase().endsWith("[1m]") ? mappedModel : mappedModel + "[1m]";
+        String base = mappedModel.replaceFirst("(?i)\\[1m\\]$", "");
+        return requestedModel.toLowerCase().endsWith("[1m]") ? base + "[1m]" : base;
     }
 
     private static String readConfiguredEnvValue(JsonObject env, String key) {

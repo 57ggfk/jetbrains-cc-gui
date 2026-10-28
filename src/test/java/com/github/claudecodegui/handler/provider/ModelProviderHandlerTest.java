@@ -77,15 +77,23 @@ public class ModelProviderHandlerTest {
         assertEquals("deepseek-v3", resolved);
     }
 
+    /**
+     * The request owns the 1M choice, matching {@code resolveModelFromSettings}
+     * in ai-bridge: a suffix stored on the mapping value must not turn on 1M when
+     * the user did not ask for it.
+     */
     @Test
-    public void shouldUseResolvedModelForContextLimitWhenCapacitySuffixExists() {
+    public void shouldLetRequestOwnTheCapacitySuffixLikeTheBridge() {
         JsonObject env = new JsonObject();
         env.addProperty("ANTHROPIC_DEFAULT_SONNET_MODEL", "glm-4.7[1M]");
 
-        String resolved = ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-4-6", env);
+        String without1M = ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-4-6", env);
+        String with1M = ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-4-6[1m]", env);
 
-        assertEquals("glm-4.7[1M]", resolved);
-        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit(resolved));
+        assertEquals("glm-4.7", without1M);
+        assertEquals(200_000, ModelProviderHandler.getModelContextLimit(without1M));
+        assertEquals("glm-4.7[1m]", with1M);
+        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit(with1M));
     }
 
     /**
@@ -107,12 +115,16 @@ public class ModelProviderHandlerTest {
     }
 
     @Test
-    public void shouldNotDuplicateExisting1MSuffixFromMapping() {
+    public void shouldNormalizeExisting1MSuffixFromMapping() {
         JsonObject env = new JsonObject();
         env.addProperty("ANTHROPIC_DEFAULT_SONNET_MODEL", "deepseek-v4-pro[1M]");
 
-        assertEquals("deepseek-v4-pro[1M]",
+        // The mapped suffix is stripped and re-appended in the bridge's canonical
+        // lowercase form, so it is never duplicated.
+        assertEquals("deepseek-v4-pro[1m]",
                 ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-5[1m]", env));
+        assertEquals("deepseek-v4-pro",
+                ModelProviderHandler.resolveConfiguredClaudeModel("claude-sonnet-5", env));
     }
 
     @Test
