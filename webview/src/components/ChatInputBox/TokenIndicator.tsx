@@ -34,8 +34,9 @@ export const TokenIndicator = ({
     // Use the largest readable unit, matching the context usage dialog
     // e.g.: 1,000,000 -> 1M, 500,000 -> 500k
     if (value >= 1_000_000) {
-      const mValue = value / 1_000_000;
-      return Number.isInteger(mValue) ? `${mValue}M` : `${mValue.toFixed(1)}M`;
+      // Keep two decimals and trim trailing zeros so 1,050,000 -> 1.05M
+      // instead of rounding up to 1.1M; 1,000,000 stays 1M.
+      return `${(value / 1_000_000).toFixed(2).replace(/\.?0+$/, '')}M`;
     }
     if (value >= 1_000) {
       const kValue = value / 1_000;

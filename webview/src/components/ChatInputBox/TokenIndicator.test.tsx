@@ -23,4 +23,10 @@ describe('TokenIndicator', () => {
 
     expect(screen.getByText(/37.6k \/ 1M/)).toBeTruthy();
   });
+
+  it('keeps fractional million capacities without rounding up', () => {
+    render(<TokenIndicator percentage={1} usedTokens={10000} maxTokens={1050000} />);
+
+    expect(screen.getByText(/10k \/ 1.05M/)).toBeTruthy();
+  });
 });
