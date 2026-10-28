@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { useState } from 'react';
-import { useMessageQueue, mergeQueuedMessageIntoDraft } from './useMessageQueue';
+import { useMessageQueue } from './useMessageQueue';
 import type { QueuedMessage } from './useMessageQueue';
 import type { Attachment } from '../components/ChatInputBox/types';
 
@@ -278,61 +278,5 @@ describe('useMessageQueue', () => {
     });
 
     expect(onExecute).toHaveBeenCalledExactlyOnceWith('kept for later', undefined);
-  });
-});
-
-describe('mergeQueuedMessageIntoDraft', () => {
-  const attachment: Attachment = { id: 'att-1', fileName: 'notes.txt', mediaType: 'text/plain', data: 'aGk=' };
-  const queuedAttachment: Attachment = { id: 'att-2', fileName: 'pic.png', mediaType: 'image/png', data: 'aW1n' };
-
-  it('restores the queued message as-is when the input draft is empty', () => {
-    const restore = mergeQueuedMessageIntoDraft(
-      { content: '   ', attachments: [] },
-      { content: 'queued message', attachments: [queuedAttachment] },
-    );
-
-    expect(restore).toEqual({ content: 'queued message', attachments: [queuedAttachment], merged: false });
-  });
-
-  it('appends the queued message after existing draft text and merges its attachments', () => {
-    const restore = mergeQueuedMessageIntoDraft(
-      { content: 'unsent draft', attachments: [attachment] },
-      { content: 'queued message', attachments: [queuedAttachment] },
-    );
-
-    expect(restore.content).toBe('unsent draft\n\nqueued message');
-    expect(restore.attachments).toEqual([attachment, queuedAttachment]);
-    expect(restore.merged).toBe(true);
-  });
-
-  it('trims trailing whitespace from the existing draft before joining', () => {
-    const restore = mergeQueuedMessageIntoDraft(
-      { content: 'unsent draft \n', attachments: [] },
-      { content: 'queued message' },
-    );
-
-    expect(restore.content).toBe('unsent draft\n\nqueued message');
-    expect(restore.merged).toBe(true);
-  });
-
-  it('deduplicates restored attachments by id', () => {
-    const restore = mergeQueuedMessageIntoDraft(
-      { content: '', attachments: [attachment] },
-      { content: 'queued message', attachments: [attachment, queuedAttachment] },
-    );
-
-    expect(restore.attachments).toEqual([attachment, queuedAttachment]);
-    expect(restore.merged).toBe(true);
-  });
-
-  it('flags a merge when only attachments are staged on the input', () => {
-    const restore = mergeQueuedMessageIntoDraft(
-      { content: '', attachments: [attachment] },
-      { content: 'queued message' },
-    );
-
-    expect(restore.content).toBe('queued message');
-    expect(restore.attachments).toEqual([attachment]);
-    expect(restore.merged).toBe(true);
   });
 });

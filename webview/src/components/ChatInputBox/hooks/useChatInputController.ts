@@ -108,9 +108,10 @@ export function useChatInputController({
   // for editing. Controlled attachments stay owned by the parent, so replacing
   // them through the imperative handle is a no-op there.
   const getDraftAttachments = useCallback(() => attachments, [attachments]);
-  const setDraftAttachments = useCallback((next: Attachment[]) => {
-    if (externalAttachments !== undefined) return;
+  const setDraftAttachments = useCallback((next: Attachment[]): boolean => {
+    if (externalAttachments !== undefined) return false;
     setInternalAttachments(next);
+    return true;
   }, [externalAttachments, setInternalAttachments]);
 
   // Reset draft attachments + clear JCEF ghosting when the session changes, so
@@ -313,6 +314,7 @@ export function useChatInputController({
     invalidateCache,
     cancelPendingInput,
     invalidateImagePastes,
+    renderTags: renderTagsNowIfSafe,
   });
 
   useNativeEventCapture({

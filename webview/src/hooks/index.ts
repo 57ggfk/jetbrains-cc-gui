@@ -13,7 +13,12 @@ export { useHistoryLoader } from './useHistoryLoader';
 export { useFileChanges } from './useFileChanges';
 export { useSubagents } from './useSubagents';
 export { useCodexSubagentStatusPolling } from './useCodexSubagentStatusPolling';
-export { useMessageQueue, mergeQueuedMessageIntoDraft } from './useMessageQueue';
+export { useMessageQueue } from './useMessageQueue';
+export {
+  mergeQueuedMessageIntoDraft,
+  takeQueuedMessageForEdit,
+  writeQueuedMessageToDraft,
+} from './queuedMessageDraft';
 export { useThemeInit } from './useThemeInit';
 export { useContextActions } from './useContextActions';
 export { useMessageProcessing } from './useMessageProcessing';
@@ -24,7 +29,8 @@ export { useChatComputations } from './useChatComputations';
 export type { UseWindowCallbacksOptions, ContextInfo } from './useWindowCallbacks';
 export type { UseRewindHandlersOptions, UseRewindHandlersReturn } from './useRewindHandlers';
 export type { UseHistoryLoaderOptions } from './useHistoryLoader';
-export type { QueuedMessage, QueuedDraftRestore, UseMessageQueueOptions, UseMessageQueueReturn } from './useMessageQueue';
+export type { QueuedMessage, UseMessageQueueOptions, UseMessageQueueReturn } from './useMessageQueue';
+export type { QueuedDraftRestore, QueuedDraftTarget, QueuedDraftWrite } from './queuedMessageDraft';
 export type { ViewMode, UseModelProviderStateOptions } from './useModelProviderState';
 export type { UseMessageProcessingOptions } from './useMessageProcessing';
 export type { UseMessageSenderOptions } from './useMessageSender';

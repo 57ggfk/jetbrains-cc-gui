@@ -49,7 +49,8 @@
       "remove": "キューから削除",
       "reorderLabel": "メッセージ {{position}} を並べ替え",
       "reorderHint": "ドラッグで並べ替え、フォーカス後に矢印キーで調整",
-      "mergedIntoDraft": "キューのメッセージを現在の下書きに統合しました"
+      "mergedIntoDraft": "キューのメッセージを現在の下書きに統合しました",
+      "attachmentsNotRestored": "キューに入れたメッセージの添付ファイルを復元できませんでした"
     },
     "closePreview": "プレビューを閉じる",
     "loadingDropdown": "読み込み中...",

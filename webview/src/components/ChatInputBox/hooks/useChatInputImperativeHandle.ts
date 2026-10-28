@@ -18,8 +18,8 @@ export interface UseChatInputImperativeHandleOptions {
   extractFileTags: () => FileTagInfo[];
   /** Draft attachments currently staged on the input (queue edit restore reads them) */
   getAttachments: () => Attachment[];
-  /** Replace the draft attachments (queue edit restore) */
-  setAttachments: (attachments: Attachment[]) => void;
+  /** Replace the draft attachments (queue edit restore); false when externally controlled */
+  setAttachments: (attachments: Attachment[]) => boolean;
   /**
    * Renders the rich references (@file chips, quote chips) inside the input.
    * A programmatic value write is plain text, so this has to run afterwards to

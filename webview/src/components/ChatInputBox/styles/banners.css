@@ -329,6 +329,12 @@
   color: white;
 }
 
+.message-queue-edit:focus-visible,
+.message-queue-remove:focus-visible {
+  outline: 2px solid var(--button-primary);
+  outline-offset: 1px;
+}
+
 .message-queue-edit .codicon,
 .message-queue-remove .codicon {
   font-size: 12px;

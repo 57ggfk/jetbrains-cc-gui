@@ -897,9 +897,10 @@ export interface ChatInputBoxHandle {
   getAttachments: () => Attachment[];
   /**
    * Replace the draft attachments (used to restore a queued message for
-   * editing). No-op when attachments are externally controlled.
+   * editing). Returns false when attachments are externally controlled, so the
+   * caller can tell the user that nothing was restored.
    */
-  setAttachments: (attachments: Attachment[]) => void;
+  setAttachments: (attachments: Attachment[]) => boolean;
 }
 
 // ============================================================

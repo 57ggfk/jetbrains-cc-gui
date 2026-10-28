@@ -42,6 +42,24 @@ describe('MessageQueue', () => {
     expect(onEdit).not.toHaveBeenCalled();
   });
 
+  it('hides the edit action when no edit handler is wired', () => {
+    render(<MessageQueue queue={createQueue()} onRemove={vi.fn()} t={t} />);
+
+    expect(screen.queryAllByTitle('chat.queue.edit')).toHaveLength(0);
+    // The remove action stays available, so the row is still usable.
+    expect(screen.getAllByTitle('chat.queue.remove')).toHaveLength(2);
+  });
+
+  it('exposes accessible names and non-submit buttons', () => {
+    render(<MessageQueue queue={createQueue()} onRemove={vi.fn()} onEdit={vi.fn()} t={t} />);
+
+    const edit = screen.getAllByTitle('chat.queue.edit')[0];
+    expect(edit.getAttribute('aria-label')).toBe('chat.queue.edit');
+    expect(edit.getAttribute('type')).toBe('button');
+    // Icon-only buttons must not rely on the icon font for their name.
+    expect(edit.querySelector('.codicon-edit')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('shows nothing while the queue is empty', () => {
     const { container } = render(<MessageQueue queue={[]} onRemove={vi.fn()} onEdit={vi.fn()} t={t} />);
 

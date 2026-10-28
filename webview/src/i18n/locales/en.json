@@ -66,7 +66,8 @@
       "remove": "Remove from queue",
       "reorderLabel": "Reorder message {{position}}",
       "reorderHint": "Drag to reorder, or focus and use arrow keys",
-      "mergedIntoDraft": "Queued message added to the current draft"
+      "mergedIntoDraft": "Queued message added to the current draft",
+      "attachmentsNotRestored": "Attachments from the queued message were not restored"
     },
     "closePreview": "Close preview",
     "loadingDropdown": "Loading...",

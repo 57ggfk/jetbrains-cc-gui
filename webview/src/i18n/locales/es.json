@@ -49,7 +49,8 @@
       "remove": "Quitar de la cola",
       "reorderLabel": "Reordenar mensaje {{position}}",
       "reorderHint": "Arrastra para reordenar, o usa las flechas tras enfocar",
-      "mergedIntoDraft": "El mensaje en cola se añadió al borrador actual"
+      "mergedIntoDraft": "El mensaje en cola se añadió al borrador actual",
+      "attachmentsNotRestored": "Los archivos adjuntos del mensaje en cola no se restauraron"
     },
     "closePreview": "Cerrar vista previa",
     "loadingDropdown": "Cargando...",

@@ -9,7 +9,7 @@ import {
   useRewindHandlers,
   useHistoryLoader,
   useMessageQueue,
-  mergeQueuedMessageIntoDraft,
+  takeQueuedMessageForEdit,
   useMessageProcessing,
   useMessageSender,
   useChatComputations,
@@ -327,19 +327,20 @@ export const useAppChatController = ({
    * merge.
    */
   const handleEditQueuedMessage = useCallback((id: string) => {
-    const removed = dequeueQueuedMessageForEdit(id);
-    if (!removed) return;
-    const input = chatInputRef.current;
-    const { content, attachments, merged } = mergeQueuedMessageIntoDraft(
-      { content: input?.getValue() ?? '', attachments: input?.getAttachments() ?? [] },
-      { content: removed.content, attachments: removed.attachments },
+    // The message is only dequeued once a draft is there to receive it;
+    // dequeuing first would drop the message when the input is not mounted.
+    const restored = takeQueuedMessageForEdit(
+      chatInputRef.current,
+      dequeueQueuedMessageForEdit,
+      id,
     );
-    input?.setValue(content);
-    input?.setAttachments(attachments);
-    input?.focus();
-    setDraftInput(content);
-    if (merged) {
-      addToast(t('chat.queue.mergedIntoDraft', { defaultValue: 'Queued message added to the current draft' }), 'info');
+    if (!restored) return;
+    setDraftInput(restored.content);
+    if (!restored.attachmentsApplied && restored.queuedAttachmentCount > 0) {
+      addToast(t('chat.queue.attachmentsNotRestored'), 'warning');
+    }
+    if (restored.merged) {
+      addToast(t('chat.queue.mergedIntoDraft'), 'info');
     }
   }, [dequeueQueuedMessageForEdit, addToast, setDraftInput, t]);
 

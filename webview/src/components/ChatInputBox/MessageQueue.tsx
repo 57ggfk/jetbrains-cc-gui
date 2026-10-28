@@ -12,9 +12,10 @@ export interface MessageQueueProps {
   onRemove: (id: string) => void;
   /**
    * Edit item callback: the caller removes the message from the queue and
-   * restores its content and attachments into the input draft.
+   * restores its content and attachments into the input draft. The edit action
+   * is only rendered when a handler is provided.
    */
-  onEdit: (id: string) => void;
+  onEdit?: (id: string) => void;
   /** Reorder callback (orderedIds[0] executes first); drag is disabled when absent */
   onReorder?: (orderedIds: string[]) => void;
   /** Translation function */
@@ -118,19 +119,25 @@ export function MessageQueue({ queue, onRemove, onEdit, onReorder, t }: MessageQ
             <span className="message-queue-content" title={item.content}>
               {item.content}
             </span>
+            {onEdit && (
+              <button
+                type="button"
+                className="message-queue-edit"
+                aria-label={t('chat.queue.edit')}
+                title={t('chat.queue.edit')}
+                onClick={() => onEdit(item.id)}
+              >
+                <span className="codicon codicon-edit" aria-hidden="true" />
+              </button>
+            )}
             <button
-              className="message-queue-edit"
-              onClick={() => onEdit(item.id)}
-              title={t('chat.queue.edit')}
-            >
-              <span className="codicon codicon-edit" />
-            </button>
-            <button
+              type="button"
               className="message-queue-remove"
-              onClick={() => onRemove(item.id)}
+              aria-label={t('chat.queue.remove')}
               title={t('chat.queue.remove')}
+              onClick={() => onRemove(item.id)}
             >
-              <span className="codicon codicon-close" />
+              <span className="codicon codicon-close" aria-hidden="true" />
             </button>
           </div>
         );

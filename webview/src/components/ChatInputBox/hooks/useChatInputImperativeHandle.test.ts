@@ -90,8 +90,9 @@ describe('useChatInputImperativeHandle', () => {
     const cancelPendingInput = vi.fn();
     const attachment = { id: 'att-1', fileName: 'notes.txt', mediaType: 'text/plain', data: 'aGk=' };
     let draftAttachments = [attachment];
-    const setAttachments = vi.fn((next: typeof draftAttachments) => {
+    const setAttachments = vi.fn((next: typeof draftAttachments): boolean => {
       draftAttachments = next;
+      return true;
     });
 
     const selection = {
@@ -137,7 +138,8 @@ describe('useChatInputImperativeHandle', () => {
 
     expect(refObj.current!.getAttachments()).toEqual([attachment]);
     const replacement = { id: 'att-2', fileName: 'pic.png', mediaType: 'image/png', data: 'aW1n' };
-    refObj.current!.setAttachments([replacement]);
+    // The boolean tells the queue-edit restore whether the attachments landed.
+    expect(refObj.current!.setAttachments([replacement])).toBe(true);
     expect(setAttachments).toHaveBeenCalledExactlyOnceWith([replacement]);
     expect(refObj.current!.getAttachments()).toEqual([replacement]);
   });

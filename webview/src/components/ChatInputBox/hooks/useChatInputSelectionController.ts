@@ -27,7 +27,7 @@ interface UseChatInputSelectionControllerOptions {
   hasContent: boolean;
   extractFileTags: () => FileTagInfo[];
   getAttachments: () => Attachment[];
-  setAttachments: (attachments: Attachment[]) => void;
+  setAttachments: (attachments: Attachment[]) => boolean;
   /** Renders the rich references (@file chips, quote chips) in the input. */
   renderTags?: () => void;
   inlineCompletion: InlineCompletionController;

@@ -115,7 +115,9 @@ const ChatInputBox = forwardRef<ChatInputBoxHandle, ChatInputBoxProps>((props, r
 
   // 4. Imperative API
   useImperativeHandle(ref, () => ({
-    getValue, setValue, focus, clear, hasContent
+    getValue, setValue, focus, clear, hasContent,
+    getFileTags,
+    getAttachments, setAttachments,   // draft attachment access (queue edit restore)
   }));
 
   // 5. Render

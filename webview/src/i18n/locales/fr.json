@@ -49,7 +49,8 @@
       "remove": "Retirer de la file d'attente",
       "reorderLabel": "Réordonner le message {{position}}",
       "reorderHint": "Faire glisser pour réordonner, ou utiliser les flèches après avoir mis le focus",
-      "mergedIntoDraft": "Le message en file d'attente a été ajouté au brouillon en cours"
+      "mergedIntoDraft": "Le message en file d'attente a été ajouté au brouillon en cours",
+      "attachmentsNotRestored": "Les pièces jointes du message en file n ont pas été restaurées"
     },
     "closePreview": "Fermer l'aperçu",
     "loadingDropdown": "Chargement...",

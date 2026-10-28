@@ -96,7 +96,7 @@ export function ChatInputBoxHeader({
         <MessageQueue
           queue={messageQueue}
           onRemove={onRemoveFromQueue ?? (() => {})}
-          onEdit={onEditFromQueue ?? (() => {})}
+          onEdit={onEditFromQueue}
           onReorder={onReorderQueue}
           t={t}
         />

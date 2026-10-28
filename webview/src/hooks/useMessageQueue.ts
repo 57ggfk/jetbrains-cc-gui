@@ -36,46 +36,6 @@ export interface UseMessageQueueReturn {
   hasQueuedMessages: boolean;
 }
 
-/** Input-draft payload produced when a queued message is edited */
-export interface QueuedDraftRestore {
-  /** Content to write back into the input draft */
-  content: string;
-  /** Attachments to restore on the input draft */
-  attachments: Attachment[];
-  /** True when a non-empty draft was kept and the queued message was merged into it */
-  merged: boolean;
-}
-
-/**
- * Build the input-draft payload for editing a queued message.
- *
- * The queued message is restored as if it had never been sent. When the input
- * already holds unsent content or attachments, nothing is overwritten: the
- * queued message is appended after the current draft text and its attachments
- * are merged in (deduplicated by id).
- */
-export function mergeQueuedMessageIntoDraft(
-  current: { content: string; attachments: Attachment[] },
-  queued: { content: string; attachments?: Attachment[] },
-): QueuedDraftRestore {
-  const hasCurrentContent = current.content.trim().length > 0;
-  const content = hasCurrentContent
-    ? `${current.content.replace(/\s+$/, '')}\n\n${queued.content}`
-    : queued.content;
-  const seen = new Set(current.attachments.map(attachment => attachment.id));
-  const attachments = [...current.attachments];
-  for (const attachment of queued.attachments ?? []) {
-    if (seen.has(attachment.id)) continue;
-    seen.add(attachment.id);
-    attachments.push(attachment);
-  }
-  return {
-    content,
-    attachments,
-    merged: hasCurrentContent || current.attachments.length > 0,
-  };
-}
-
 /**
  * Hook for managing message queue
  * Automatically executes next message when loading completes
@@ -91,6 +51,13 @@ export function useMessageQueue({
   // drained the whole queue in one idle period, overlapping multiple sends on
   // the same Codex thread (writer-lock conflict).
   const dispatchedAtRef = useRef<number | null>(null);
+  // Mirror of the committed queue. A removal callback has to report what it
+  // took out, and reading `queue` from its closure would be one render behind.
+  const queueRef = useRef<QueuedMessage[]>(queue);
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   // Generate unique ID
   const generateId = useCallback(() => {
@@ -108,21 +75,22 @@ export function useMessageQueue({
     setQueue(prev => [...prev, newItem]);
   }, [generateId]);
 
-  // Remove message from queue
-  const dequeue = useCallback((id: string) => {
-    setQueue(prev => prev.filter(item => item.id !== id));
-  }, []);
-
   // Remove a message for editing: the caller gets its payload back so the
   // draft can be restored in the same interaction (same semantics as dequeue
-  // for the remaining items).
+  // for the remaining items). The ref keeps repeated calls in one tick safe —
+  // a state read would hand the same message out twice.
   const dequeueForEdit = useCallback((id: string): QueuedMessage | undefined => {
-    const removed = queue.find(item => item.id === id);
-    if (removed) {
-      setQueue(prev => prev.filter(item => item.id !== id));
-    }
+    const removed = queueRef.current.find(item => item.id === id);
+    if (!removed) return undefined;
+    queueRef.current = queueRef.current.filter(item => item.id !== id);
+    setQueue(prev => prev.filter(item => item.id !== id));
     return removed;
-  }, [queue]);
+  }, []);
+
+  // Remove message from queue (the removed payload is ignored here)
+  const dequeue = useCallback((id: string) => {
+    dequeueForEdit(id);
+  }, [dequeueForEdit]);
 
   // Clear entire queue
   const clearQueue = useCallback(() => {
