@@ -357,6 +357,54 @@ public class ModelProviderHandlerTest {
     }
 
     /**
+     * Non-Claude providers keep their pre-PR behavior: a model switch drops the
+     * provider-specific snapshot and the denominator stays on the static table.
+     * CLAUDE_CODE_MAX_CONTEXT_TOKENS is a Claude-only override.
+     */
+    @Test
+    public void handleSetModelClearsGrokContextUsageAndIgnoresClaudeOverride() throws Exception {
+        Path settings = Files.createTempFile("claude-settings", ".json");
+        Files.writeString(settings, """
+                {
+                  "env": {
+                    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "128000"
+                  }
+                }
+                """);
+        ClaudeContextWindowOverrideProvider.setInstanceForTests(
+                ClaudeContextWindowOverrideProvider.createForTests(settings)
+        );
+
+        try {
+            HandlerContext context = createHandlerContext();
+            ClaudeSession session = new ClaudeSession(null, null, null, null);
+            session.setProvider("grok");
+            session.setModel("grok-4");
+            JsonObject raw = new JsonObject();
+            JsonObject usage = new JsonObject();
+            usage.addProperty("input_tokens", 1000);
+            usage.addProperty("output_tokens", 500);
+            usage.addProperty("cached_read_tokens", 30000);
+            raw.add("usage", usage);
+            session.getState().addMessage(new ClaudeSession.Message(
+                    ClaudeSession.Message.Type.ASSISTANT, "restored", raw));
+            context.setSession(session);
+            context.setCurrentProvider("grok");
+            context.setCurrentModel("grok-4");
+            RecordingUsagePushService usagePushService = new RecordingUsagePushService(context);
+
+            new ModelProviderHandler(context, usagePushService).handleSetModel("grok-build");
+
+            assertFalse(raw.has("usage"));
+            assertTrue(usagePushService.cleared);
+            assertTrue(usagePushService.recalculated);
+            assertEquals(500_000, usagePushService.lastMaxTokens);
+        } finally {
+            ClaudeContextWindowOverrideProvider.setInstanceForTests(null);
+        }
+    }
+
+    /**
      * A set_model from the webview is an explicit user choice. A custom model id
      * that is also in the retired-migration table must reach the session verbatim
      * instead of being rewritten to its replacement (custom opus-4-8 -> opus-5).
@@ -404,6 +452,7 @@ public class ModelProviderHandlerTest {
     private static final class RecordingUsagePushService extends UsagePushService {
         private boolean cleared;
         private boolean recalculated;
+        private int lastMaxTokens = -1;
 
         private RecordingUsagePushService(HandlerContext context) {
             super(context);
@@ -417,6 +466,7 @@ public class ModelProviderHandlerTest {
         @Override
         public void pushUsageUpdateAfterModelChange(int newMaxTokens) {
             recalculated = true;
+            lastMaxTokens = newMaxTokens;
         }
     }
 

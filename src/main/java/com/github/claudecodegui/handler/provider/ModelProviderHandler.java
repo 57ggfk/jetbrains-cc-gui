@@ -124,24 +124,25 @@ public class ModelProviderHandler {
             context.setCurrentModel(model);
 
             String provider = context.getCurrentProvider();
-            boolean isCodex = "codex".equalsIgnoreCase(provider);
+            boolean isClaude = "claude".equalsIgnoreCase(provider);
 
             if (context.getSession() != null) {
                 // Explicit user pick from the webview: store verbatim so a custom
                 // model id is never rewritten by the retired-model migration.
                 context.getSession().setModelVerbatim(model);
-                // Codex usage snapshots embed the previous model's
-                // model_context_window, so they must be dropped on a model switch.
                 // Claude snapshots only carry token counts and the transcript is
                 // unchanged, so the current context survives the switch and only
-                // the capacity denominator needs recalculation.
-                if (modelChanged && isCodex) {
+                // the capacity denominator needs recalculation. Every other
+                // provider embeds provider-specific context metadata in its
+                // snapshot (Codex model_context_window, Grok cached_read_tokens,
+                // ...), so the stale snapshot must be dropped.
+                if (modelChanged && !isClaude) {
                     clearSessionUsage();
                 }
                 LOG.info("[ModelProviderHandler] Updated session model to canonical ID: " + model);
             }
 
-            if (modelChanged && isCodex) {
+            if (modelChanged && !isClaude) {
                 usagePushService.clearUsageDisplay();
             }
 
@@ -149,10 +150,12 @@ public class ModelProviderHandler {
                 com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
             }
 
-            String resolvedModelForUsage = isCodex ? model : resolveConfiguredClaudeModelFromSettings(model);
-            int newMaxTokens = isCodex
-                    ? getModelContextLimit(provider, model)
-                    : getClaudeContextLimit(resolvedModelForUsage);
+            String resolvedModelForUsage = isClaude
+                    ? resolveConfiguredClaudeModelFromSettings(model)
+                    : model;
+            int newMaxTokens = isClaude
+                    ? getClaudeContextLimit(resolvedModelForUsage)
+                    : getModelContextLimit(provider, model);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
                     + ", resolved model: " + resolvedModelForUsage);

@@ -745,8 +745,9 @@ public class ChatWindowDelegate {
             return SettingsHandler.getModelContextLimit(provider, model);
         }
 
+        boolean isClaude = "claude".equalsIgnoreCase(provider);
         String resolvedModel = model;
-        if (settingsService != null) {
+        if (isClaude && settingsService != null) {
             try {
                 JsonObject settings = settingsService.readClaudeSettings();
                 if (settings != null && settings.has("env") && settings.get("env").isJsonObject()) {
@@ -760,7 +761,9 @@ public class ChatWindowDelegate {
                         + e.getMessage());
             }
         }
-        return ModelProviderHandler.getClaudeContextLimit(resolvedModel);
+        return isClaude
+                ? ModelProviderHandler.getClaudeContextLimit(resolvedModel)
+                : SettingsHandler.getModelContextLimit(resolvedModel);
     }
 
     private void replayCurrentSessionStateToFrontend() {
