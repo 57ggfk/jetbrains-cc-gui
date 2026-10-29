@@ -1188,7 +1188,9 @@
       "claude-vscode": "Esta sessão foi criada pela extensão do VS Code e não é mostrada no CLI por padrão. Clique em 'Converter para CLI' para fazê-la aparecer na lista /resume do CLI do terminal",
       "remote": "Esta sessão foi criada por uma instância remota do Claude Code"
     },
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "sessionInUse": "Sessões em uso não podem ser excluídas.",
+    "deleteFailed": "Não foi possível excluir a sessão. Tente novamente."
   },
   "permission": {
     "dialogTitle": "Solicitação de Permissão",

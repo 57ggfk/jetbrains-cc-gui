@@ -51,10 +51,11 @@ describe('native history visibility', () => {
     for (const updatedAt of [1, 2]) {
       deliver({ requestType: 'codex_native_list_threads', data: [
         { id: 'thread', name: 'Active thread', updatedAt, status: { type: 'active' } },
-        { id: 'other-tab', name: 'Other tab', running: true },
+        { id: 'other-tab', name: 'Other tab', running: true, ownedElsewhere: true },
       ] });
       expect(history.data?.sessions).toMatchObject([
-        { sessionId: 'thread', running: true }, { sessionId: 'other-tab', running: true },
+        { sessionId: 'thread', running: true, ownedElsewhere: false },
+        { sessionId: 'other-tab', running: true, ownedElsewhere: true },
       ]);
     }
   });
