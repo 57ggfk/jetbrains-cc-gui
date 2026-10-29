@@ -993,6 +993,7 @@
         "working": "Working, please wait…",
         "importSuccess": "Import complete: {{imported}} added, {{skipped}} duplicate configurations skipped.",
         "exportSuccess": "Configuration exported.",
+        "exportPartial": "Providers exported: {{exported}}. Skipped because they failed validation: {{skipped}} ({{positions}}; numbering excludes local settings and CLI login entries).",
         "invalidFile": "Invalid file, unsupported version or invalid provider configuration. Nothing was imported.",
         "wrongEngine": "This file belongs to a different tab. Select the matching Claude Code / Codex tab.",
         "tooLarge": "File or configuration too large (8 MiB per file, up to 2000 providers).",

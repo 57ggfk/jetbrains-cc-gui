@@ -120,10 +120,86 @@ describe('ProviderBackupDialog', () => {
     vi.mocked(sendBridgeEvent).mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: 'Select backup file' }));
     act(() => vi.advanceTimersByTime(120_000));
+    expect(screen.queryByRole('alert')).toBeNull();
+    respond('processing');
+    act(() => vi.advanceTimersByTime(119_999));
+    expect(screen.queryByRole('alert')).toBeNull();
+    act(() => vi.advanceTimersByTime(1));
     expect(screen.getByRole('alert').textContent).toContain('Timed out');
     unmount();
     respond('success');
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not time out while the native file dialog is open and keeps Cancel available until processing', () => {
+    vi.useFakeTimers();
+    const { onClose, addToast } = mount('export');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    act(() => vi.advanceTimersByTime(10 * 60_000));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+    respond('processing');
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('status').textContent).toContain('Working');
+    respond('processing');
+    respond('success', { exported: 3, skipped: 0, skippedProviders: [] });
+    expect(addToast).toHaveBeenCalledExactlyOnceWith('Configuration exported.', 'success');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets Cancel and Escape close the dialog before processing starts, but not during processing', () => {
+    for (const close of [
+      () => fireEvent.click(screen.getByRole('button', { name: 'Cancel' })),
+      () => fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' }),
+    ]) {
+      const { onClose, unmount } = mount('import');
+      fireEvent.click(screen.getByRole('button', { name: 'Select backup file' }));
+      respond('processing');
+      close();
+      expect(onClose).not.toHaveBeenCalled();
+      respond('cancelled');
+      fireEvent.click(screen.getByRole('button', { name: 'Select backup file' }));
+      close();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
+  it('clears the processing timeout when the dialog unmounts', () => {
+    vi.useFakeTimers();
+    const { unmount } = mount('import');
+    fireEvent.click(screen.getByRole('button', { name: 'Select backup file' }));
+    expect(vi.getTimerCount()).toBe(0);
+    respond('processing');
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('starts the import timeout immediately because import opens no native dialog', () => {
+    vi.useFakeTimers();
+    mount('import');
+    fireEvent.click(screen.getByRole('button', { name: 'Select backup file' }));
+    respond('success', { selection: 'token', fileName: 'backup.json', encrypted: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => vi.advanceTimersByTime(120_000));
+    expect(screen.getByRole('alert').textContent).toContain('Timed out');
+  });
+
+  it('warns with safe positions when export skipped invalid saved providers', () => {
+    const { onClose, addToast } = mount('export', 'codex');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    respond('processing');
+    respond('success', { exported: 2, skipped: 25, skippedProviders: [2, 'secret', -1, 1.5, 5, 9] });
+    expect(addToast).toHaveBeenCalledExactlyOnceWith(
+      'Providers exported: 2. Skipped because they failed validation: 25 (#2, #5, #9, …; numbering excludes local settings and CLI login entries).',
+      'warning',
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('uses configured plugin language for native dialog titles and errors', async () => {

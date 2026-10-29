@@ -1,5 +1,6 @@
 package com.github.claudecodegui.settings;
 
+import com.github.claudecodegui.util.PlatformUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -7,10 +8,13 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -22,6 +26,24 @@ import static org.junit.Assert.*;
 /** Import must preserve the effective selection even after the real provider read/refresh path runs. */
 public class ProviderBackupSelectionTest {
     @Rule public TemporaryFolder folder = new TemporaryFolder();
+    private Field cachedHome;
+    private Object previousHome;
+    private Path configPath;
+
+    @Before
+    public void useIsolatedHome() throws Exception {
+        cachedHome = PlatformUtils.class.getDeclaredField("cachedRealHomeDir");
+        cachedHome.setAccessible(true);
+        previousHome = cachedHome.get(null);
+        cachedHome.set(null, folder.getRoot().getAbsolutePath());
+        configPath = folder.getRoot().toPath().resolve(".codemoss/config.json");
+        Files.createDirectories(configPath.getParent());
+    }
+
+    @After
+    public void restoreHome() throws Exception {
+        cachedHome.set(null, previousHome);
+    }
 
     @Test
     public void emptyClaudeListStaysInactiveAfterImportAndRefresh() throws Exception {
@@ -65,9 +87,9 @@ public class ProviderBackupSelectionTest {
 
     @Test
     public void nullSelectionIsPersistedAsInactiveBeforeTheFirstRefresh() throws Exception {
-        Path path = folder.newFile("config.json").toPath();
+        Path path = configPath;
         Files.writeString(path, config("claude", JsonNull.INSTANCE).toString());
-        var imported = ProviderBackupService.importPayload(path, "claude", payload(provider("claude", "new")));
+        var imported = new CodemossSettingsService().importProviderBackup("claude", payload(provider("claude", "new")));
         JsonObject stored = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
         assertEquals(1, imported.imported());
         assertEquals("", stored.getAsJsonObject("claude").get("current").getAsString());
@@ -78,10 +100,10 @@ public class ProviderBackupSelectionTest {
     public void duplicateOnlyLegacyImportDoesNotRewriteTheFile() throws Exception {
         JsonObject existing = provider("claude", "old");
         JsonObject original = config("claude", JsonNull.INSTANCE, existing);
-        Path path = folder.newFile("config.json").toPath();
+        Path path = configPath;
         Files.writeString(path, original.toString());
         var modified = Files.getLastModifiedTime(path);
-        var imported = ProviderBackupService.importPayload(path, "claude", payload(existing));
+        var imported = new CodemossSettingsService().importProviderBackup("claude", payload(existing));
         assertEquals(0, imported.imported());
         assertEquals(original.toString(), Files.readString(path));
         assertEquals(modified, Files.getLastModifiedTime(path));

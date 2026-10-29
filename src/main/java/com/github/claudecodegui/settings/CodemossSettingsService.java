@@ -581,6 +581,20 @@ public class CodemossSettingsService {
     }
 
     /**
+     * Add-only provider backup import through the same locked, pretty-printed and backed-up
+     * write path as every other setting. A duplicate-only import leaves the file untouched.
+     */
+    public ProviderBackupService.MergeResult importProviderBackup(String engine, JsonObject payload) throws IOException {
+        return withConfigTransaction(() -> {
+            ProviderBackupService.MergeResult result = ProviderBackupService.merge(readConfig(), engine, payload);
+            if (result.imported() > 0) {
+                writeConfig(result.config());
+            }
+            return result;
+        });
+    }
+
+    /**
      * Read the config file.
      */
     public JsonObject readConfig() throws IOException {

@@ -1,15 +1,21 @@
 package com.github.claudecodegui.settings;
 
+import com.github.claudecodegui.util.PlatformUtils;
+import com.github.claudecodegui.util.SafeJsonFileOps;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
@@ -20,6 +26,24 @@ import static org.junit.Assert.*;
 
 public class ProviderBackupServiceTest {
     @Rule public TemporaryFolder folder = new TemporaryFolder();
+    private Field cachedHome;
+    private Object previousHome;
+    private Path configPath;
+
+    @Before
+    public void useIsolatedHome() throws Exception {
+        cachedHome = PlatformUtils.class.getDeclaredField("cachedRealHomeDir");
+        cachedHome.setAccessible(true);
+        previousHome = cachedHome.get(null);
+        cachedHome.set(null, folder.getRoot().getAbsolutePath());
+        configPath = folder.getRoot().toPath().resolve(".codemoss/config.json");
+        Files.createDirectories(configPath.getParent());
+    }
+
+    @After
+    public void restoreHome() throws Exception {
+        cachedHome.set(null, previousHome);
+    }
 
     @Test
     public void ignoresIdentityDisplayMetadataAndJsonKeyOrder() throws Exception {
@@ -97,7 +121,7 @@ public class ProviderBackupServiceTest {
                 else provider.addProperty(field, value);
                 JsonObject config = config("codex", provider);
                 JsonObject original = config.deepCopy();
-                JsonObject exported = ProviderBackupService.exportPayload(config, "codex");
+                JsonObject exported = ProviderBackupService.exportPayload(config, "codex").payload();
                 JsonObject portable = exported.getAsJsonArray("providers").get(0).getAsJsonObject();
                 assertEquals(original, config);
                 if (value.equals("missing") || value.equals("null")) assertFalse(portable.has(field));
@@ -112,7 +136,7 @@ public class ProviderBackupServiceTest {
     @Test
     public void codexEmptyAuthSupportsEncryptedBackupRoundTrip() throws Exception {
         JsonObject config = config("codex", codex("a", "model = 'test-model'\n", ""));
-        JsonObject exported = ProviderBackupService.exportPayload(config, "codex");
+        JsonObject exported = ProviderBackupService.exportPayload(config, "codex").payload();
         char[] password = "test-only-password".toCharArray();
         byte[] bytes = ProviderBackupCodec.encode("codex", exported, password);
         JsonObject decoded = ProviderBackupCodec.decode(bytes, "codex", password);
@@ -156,26 +180,83 @@ public class ProviderBackupServiceTest {
     }
 
     @Test
-    public void exportValidationIdentifiesSavedProviderAndFieldWithoutLeakingValues() {
+    public void exportSkipsInvalidSavedProvidersAndReportsOnlyTheirPositions() throws Exception {
         for (String field : List.of("configToml", "authJson", "customModels", "messageEnvVars", "mcpEnvVars", "name", "remark")) {
             JsonObject good = codex("a", "", "{}");
-            JsonObject bad = codex("private-id", "", "{}");
-            bad.addProperty("name", "private-name");
-            if (field.equals("configToml") || field.equals("authJson")) bad.addProperty(field, "private-secret = [");
-            else bad.add(field, JsonParser.parseString("{\"private-secret\":true}"));
+            JsonObject bad = invalidCodex(field);
             JsonObject config = config("codex", good);
             JsonObject section = config.getAsJsonObject("codex");
             section.getAsJsonObject("providers").add("private-id", bad);
             section.getAsJsonObject("providers").add("__codex_cli_login__", new JsonObject());
-            section.add("providerOrder", JsonParser.parseString("[\"__codex_cli_login__\",\"a\",\"private-id\"]"));
+            section.getAsJsonObject("providers").add("b", codex("b", "model = 'b'\n", "{}"));
+            section.add("providerOrder", JsonParser.parseString("[\"__codex_cli_login__\",\"a\",\"private-id\",\"b\"]"));
+            JsonObject original = config.deepCopy();
+            var result = ProviderBackupService.exportPayload(config, "codex");
+            assertEquals(2, result.payload().getAsJsonArray("providers").size());
+            assertEquals(List.of(2), result.skippedProviders());
+            assertFalse(result.payload().toString().contains("private-"));
+            assertEquals(original, config);
+        }
+    }
+
+    @Test
+    public void exportFailsWithTheFirstInvalidPositionWhenNothingValidRemains() {
+        for (String field : List.of("configToml", "authJson", "customModels", "messageEnvVars", "mcpEnvVars", "name", "remark")) {
+            JsonObject config = config("codex", invalidCodex(field));
+            JsonObject section = config.getAsJsonObject("codex");
+            section.getAsJsonObject("providers").add("__codex_cli_login__", new JsonObject());
+            section.getAsJsonObject("providers").add("second", invalidCodex("name"));
+            section.add("providerOrder", JsonParser.parseString("[\"__codex_cli_login__\",\"private-id\",\"second\"]"));
             JsonObject original = config.deepCopy();
             var failure = assertThrows(ProviderBackupCodec.BackupException.class,
                     () -> ProviderBackupService.exportPayload(config, "codex"));
             assertEquals("invalidFile", failure.getMessage());
-            assertEquals(JsonParser.parseString("{\"providerIndex\":2,\"field\":\"" + field + "\"}"), failure.details());
+            assertEquals(JsonParser.parseString("{\"providerIndex\":1,\"field\":\"" + field + "\"}"), failure.details());
             assertFalse(failure.toString().contains("private-"));
             assertNull(failure.getCause());
             assertEquals(original, config);
+        }
+    }
+
+    @Test
+    public void exportCountsNonObjectEntriesAsSkippedPositions() throws Exception {
+        JsonObject config = config("claude", claude("a", "key"));
+        JsonObject section = config.getAsJsonObject("claude");
+        section.getAsJsonObject("providers").add("broken", new JsonPrimitive("private-value"));
+        section.getAsJsonObject("providers").add("b", claude("b", "other-key"));
+        section.add("providerOrder", JsonParser.parseString("[\"broken\",\"a\",\"b\"]"));
+        var result = ProviderBackupService.exportPayload(config, "claude");
+        assertEquals(2, result.payload().getAsJsonArray("providers").size());
+        assertEquals(List.of(1), result.skippedProviders());
+        assertFalse(result.payload().toString().contains("private-value"));
+    }
+
+    @Test
+    public void protectedEnvironmentNamesMatchTheProviderFormList() throws Exception {
+        String source = Files.readString(Path.of("webview/src/types/provider.ts"));
+        java.util.regex.Matcher block = java.util.regex.Pattern
+                .compile("CODEX_PROTECTED_ENV_KEYS[^=]*=\\s*new Set\\(\\[(.*?)\\]\\)", java.util.regex.Pattern.DOTALL)
+                .matcher(source);
+        assertTrue("CODEX_PROTECTED_ENV_KEYS not found in provider.ts", block.find());
+        java.util.Set<String> formKeys = new java.util.HashSet<>();
+        java.util.regex.Matcher name = java.util.regex.Pattern.compile("'([A-Z0-9_]+)'").matcher(block.group(1));
+        while (name.find()) formKeys.add(name.group(1));
+        assertEquals(formKeys, ProviderBackupService.PROTECTED_ENV_KEYS);
+    }
+
+    @Test
+    public void protectedEnvironmentNamesAreRejectedLikeTheProviderForm() {
+        for (String field : List.of("messageEnvVars", "mcpEnvVars")) {
+            for (String key : List.of("PATH", "codex_home", " HOME ")) {
+                JsonObject provider = codex("a", "", "{}");
+                provider.add(field, JsonParser.parseString("[{\"key\":\"" + key + "\",\"value\":\"x\"}]"));
+                var imported = assertThrows(ProviderBackupCodec.BackupException.class,
+                        () -> ProviderBackupService.merge(new JsonObject(), "codex", payload(provider)));
+                assertEquals(field, imported.details().get("field").getAsString());
+                var exported = assertThrows(ProviderBackupCodec.BackupException.class,
+                        () -> ProviderBackupService.exportPayload(config("codex", provider), "codex"));
+                assertEquals(field, exported.details().get("field").getAsString());
+            }
         }
     }
 
@@ -208,17 +289,42 @@ public class ProviderBackupServiceTest {
 
     @Test
     public void malformedEntryRejectsWholeImportAndLeavesFileUnchanged() throws Exception {
-        Path path = folder.newFile("config.json").toPath();
+        Path path = configPath;
         String original = config("claude", claude("a", "one")).toString();
         Files.writeString(path, original);
         JsonObject invalid = new JsonObject();
         invalid.addProperty("name", "invalid");
-        assertThrows(ProviderBackupCodec.BackupException.class, () -> ProviderBackupService.importPayload(
-                path, "claude", payload(claude("b", "two"), invalid)));
+        CodemossSettingsService service = new CodemossSettingsService();
+        assertThrows(ProviderBackupCodec.BackupException.class, () -> service.importProviderBackup(
+                "claude", payload(claude("b", "two"), invalid)));
         assertEquals(original, Files.readString(path));
         Files.writeString(path, "broken local config");
-        assertThrows(java.io.IOException.class, () -> ProviderBackupService.importPayload(path, "claude", payload(claude("c", "three"))));
+        assertThrows(java.io.IOException.class, () -> service.importProviderBackup("claude", payload(claude("c", "three"))));
         assertEquals("broken local config", Files.readString(path));
+    }
+
+    @Test
+    public void importUsesTheStandardPrettyPrintedWriteAndRefreshesTheUsualBackup() throws Exception {
+        String before = config("claude", claude("a", "one")).toString();
+        Files.writeString(configPath, before);
+        var result = new CodemossSettingsService().importProviderBackup("claude", payload(claude("b", "two")));
+        String written = Files.readString(configPath);
+        assertEquals(1, result.imported());
+        assertEquals(new GsonBuilder().setPrettyPrinting().serializeNulls().create().toJson(result.config()), written);
+        assertTrue(written.contains("\n  \""));
+        assertEquals(before, Files.readString(configPath.resolveSibling("config.json.bak")));
+        assertFalse(Files.exists(SafeJsonFileOps.sibling(configPath, SafeJsonFileOps.BACKUP_SUFFIX)));
+    }
+
+    @Test
+    public void importIntoAMissingConfigStartsFromTheDefaultConfiguration() throws Exception {
+        var result = new CodemossSettingsService().importProviderBackup("codex", payload(codex("a", "model = 'a'\n", "{}")));
+        JsonObject stored = JsonParser.parseString(Files.readString(configPath)).getAsJsonObject();
+        assertEquals(1, result.imported());
+        assertTrue(stored.has("version"));
+        assertEquals("", stored.getAsJsonObject("claude").get("current").getAsString());
+        assertEquals("", stored.getAsJsonObject("codex").get("current").getAsString());
+        assertEquals(1, stored.getAsJsonObject("codex").getAsJsonObject("providers").size());
     }
 
     @Test
@@ -229,7 +335,7 @@ public class ProviderBackupServiceTest {
         JsonObject existing = providers.getAsJsonObject("a");
         existing.addProperty("source", "cc-switch");
         existing.addProperty("isActive", true);
-        JsonArray exported = ProviderBackupService.exportPayload(config, "claude").getAsJsonArray("providers");
+        JsonArray exported = ProviderBackupService.exportPayload(config, "claude").payload().getAsJsonArray("providers");
         assertEquals(1, exported.size());
         assertFalse(exported.get(0).getAsJsonObject().has("id"));
         assertFalse(exported.get(0).getAsJsonObject().has("source"));
@@ -239,11 +345,12 @@ public class ProviderBackupServiceTest {
 
     @Test
     public void concurrentImportsAreSerializedAndDuplicateOnlyImportDoesNotRewrite() throws Exception {
-        Path path = folder.newFile("config.json").toPath();
+        Path path = configPath;
         Files.writeString(path, config("claude", claude("a", "one")).toString());
+        CodemossSettingsService service = new CodemossSettingsService();
         var executor = Executors.newFixedThreadPool(2);
         try {
-            Callable<ProviderBackupService.MergeResult> task = () -> ProviderBackupService.importPayload(path, "claude", payload(claude("b", "two")));
+            Callable<ProviderBackupService.MergeResult> task = () -> service.importProviderBackup("claude", payload(claude("b", "two")));
             var results = executor.invokeAll(List.of(task, task));
             assertEquals(1, results.get(0).get().imported() + results.get(1).get().imported());
             assertEquals(2, JsonParser.parseString(Files.readString(path)).getAsJsonObject().getAsJsonObject("claude").getAsJsonObject("providers").size());
@@ -267,13 +374,13 @@ public class ProviderBackupServiceTest {
 
     @Test
     public void importPreservesNullsInExistingAndUnrelatedConfigurationOnDisk() throws Exception {
-        Path path = folder.newFile("nulls-config.json").toPath();
+        Path path = configPath;
         JsonObject original = config("claude", claude("a", "one"));
         original.add("unrelated", JsonParser.parseString("{\"keep\":null,\"nested\":{\"keep\":null},\"array\":[null]}"));
         original.getAsJsonObject("claude").getAsJsonObject("providers").getAsJsonObject("a")
                 .getAsJsonObject("settingsConfig").add("model", JsonNull.INSTANCE);
         Files.writeString(path, original.toString());
-        var result = ProviderBackupService.importPayload(path, "claude", payload(claude("b", "two")));
+        var result = new CodemossSettingsService().importProviderBackup("claude", payload(claude("b", "two")));
         JsonObject stored = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
         assertEquals(1, result.imported());
         assertEquals(result.config(), stored);
@@ -284,11 +391,11 @@ public class ProviderBackupServiceTest {
 
     @Test
     public void importRestrictsExistingConfigWithBroadPosixPermissions() throws Exception {
-        Path path = folder.newFile("private-config.json").toPath();
+        Path path = Files.createFile(configPath);
         org.junit.Assume.assumeTrue("POSIX-only check", Files.getFileStore(path).supportsFileAttributeView("posix"));
         Files.writeString(path, "{}");
         Files.setPosixFilePermissions(path, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
-        var result = ProviderBackupService.importPayload(path, "claude", payload(claude("a", "synthetic-key")));
+        var result = new CodemossSettingsService().importProviderBackup("claude", payload(claude("a", "synthetic-key")));
         assertEquals(1, result.imported());
         assertEquals(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(path));
         assertEquals(result.config(), JsonParser.parseString(Files.readString(path)));
@@ -322,7 +429,7 @@ public class ProviderBackupServiceTest {
             JsonObject provider = claude("a", "synthetic-key");
             provider.add("settingsConfig", settings);
             JsonObject original = config("claude", provider);
-            JsonObject exported = ProviderBackupService.exportPayload(original, "claude");
+            JsonObject exported = ProviderBackupService.exportPayload(original, "claude").payload();
             for (char[] password : List.of(new char[0], "test-password".toCharArray())) {
                 // Payload adds an object, a providers array and a provider object;
                 // plaintext adds the envelope too. The leaf settings object also counts.
@@ -347,7 +454,7 @@ public class ProviderBackupServiceTest {
         JsonObject provider = claude("a", "one");
         provider.getAsJsonObject("settingsConfig").add("model", JsonNull.INSTANCE);
         JsonObject config = config("claude", provider);
-        JsonObject exported = ProviderBackupService.exportPayload(config, "claude");
+        JsonObject exported = ProviderBackupService.exportPayload(config, "claude").payload();
         byte[] bytes = ProviderBackupCodec.encode("claude", exported, "test-password".toCharArray());
         JsonObject decoded = ProviderBackupCodec.decode(bytes, "claude", "test-password".toCharArray());
         assertEquals(0, ProviderBackupService.merge(config, "claude", decoded).imported());
@@ -360,7 +467,7 @@ public class ProviderBackupServiceTest {
             provider.add(field, JsonParser.parseString("[{\"key\":\" HTTPS_PROXY \",\"value\":\"  unchanged value  \"}]"));
             JsonObject config = config("codex", provider);
             JsonObject original = config.deepCopy();
-            JsonObject exported = ProviderBackupService.exportPayload(config, "codex");
+            JsonObject exported = ProviderBackupService.exportPayload(config, "codex").payload();
             JsonObject entry = exported.getAsJsonArray("providers").get(0).getAsJsonObject().getAsJsonArray(field).get(0).getAsJsonObject();
             assertEquals("HTTPS_PROXY", entry.get("key").getAsString());
             assertEquals("  unchanged value  ", entry.get("value").getAsString());
@@ -410,6 +517,14 @@ public class ProviderBackupServiceTest {
         settings.add("env", env);
         provider.add("settingsConfig", settings);
         return provider;
+    }
+
+    private static JsonObject invalidCodex(String field) {
+        JsonObject bad = codex("private-id", "", "{}");
+        bad.addProperty("name", "private-name");
+        if (field.equals("configToml") || field.equals("authJson")) bad.addProperty(field, "private-secret = [");
+        else bad.add(field, JsonParser.parseString("{\"private-secret\":true}"));
+        return bad;
     }
 
     private static JsonObject codex(String id, String toml, String auth) {

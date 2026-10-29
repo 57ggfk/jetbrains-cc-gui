@@ -61,7 +61,7 @@ public class CodemossSettingsServiceConcurrencyTest {
             CountDownLatch importing = new CountDownLatch(1);
             Future<?> imported = executor.submit(() -> {
                 importing.countDown();
-                return ProviderBackupService.importPayload(configPath, "claude", backupPayload());
+                return service.importProviderBackup("claude", backupPayload());
             });
             await(importing);
             assertBlocked(imported);
@@ -86,7 +86,7 @@ public class CodemossSettingsServiceConcurrencyTest {
         var executor = Executors.newFixedThreadPool(2);
         try {
             Future<?> importing = executor.submit(() -> ConfigFileTransaction.call(configPath, () -> {
-                var result = ProviderBackupService.importPayload(configPath, "claude", backupPayload());
+                var result = service.importProviderBackup("claude", backupPayload());
                 imported.countDown();
                 await(releaseImport);
                 return result;
@@ -117,7 +117,7 @@ public class CodemossSettingsServiceConcurrencyTest {
                     () -> { service.setFontSizeLevel(3); return null; },
                     () -> { service.setCustomWorkingDirectory("project", folder.getRoot().getAbsolutePath()); return null; },
                     () -> { service.addCodexProvider(JsonParser.parseString("{\"id\":\"codex\",\"name\":\"Synthetic\"}").getAsJsonObject()); return null; },
-                    () -> { ProviderBackupService.importPayload(configPath, "claude", backupPayload()); return null; }
+                    () -> { service.importProviderBackup("claude", backupPayload()); return null; }
             );
             for (Future<Void> result : executor.invokeAll(actions)) result.get(5, TimeUnit.SECONDS);
             JsonObject saved = service.readConfig();

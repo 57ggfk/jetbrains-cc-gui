@@ -998,6 +998,7 @@
         "working": "正在处理，请稍候…",
         "importSuccess": "导入完成：新增 {{imported}} 条，跳过 {{skipped}} 条重复配置。",
         "exportSuccess": "配置已导出。",
+        "exportPartial": "已导出 {{exported}} 条供应商。跳过 {{skipped}} 条未通过校验的已保存供应商：{{positions}}（编号不计本地配置和 CLI 登录项）。",
         "invalidFile": "文件格式无效、版本不受支持或包含无效配置，未导入。",
         "wrongEngine": "文件所属类型与当前页签不一致，请切换到对应的 Claude Code / Codex 页签。",
         "tooLarge": "文件或配置过大（文件上限 8 MiB，最多 2000 条供应商）。",

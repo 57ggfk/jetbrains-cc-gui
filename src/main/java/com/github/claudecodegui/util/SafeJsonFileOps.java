@@ -212,7 +212,7 @@ public final class SafeJsonFileOps {
      * @throws IOException if the content cannot be staged or the replace keeps failing
      */
     public static void writeAtomically(Path target, ThrowingWriter writerFn) throws IOException {
-        writeAtomicallyInternal(target, writerFn, null, false);
+        writeAtomicallyInternal(target, writerFn, null);
     }
 
     /**
@@ -230,7 +230,7 @@ public final class SafeJsonFileOps {
      */
     public static void writeAtomicallyIfUnchanged(Path target, ContentSnapshot expected, ThrowingWriter writerFn)
             throws IOException {
-        writeAtomicallyInternal(target, writerFn, expected, false);
+        writeAtomicallyInternal(target, writerFn, expected);
     }
 
     /**
@@ -374,22 +374,6 @@ public final class SafeJsonFileOps {
      */
     public static void mutateJsonAtomically(Path file, int maxAttempts, long retryDelayMs, JsonMutation mutation)
             throws IOException {
-        mutateJsonAtomically(file, maxAttempts, retryDelayMs, mutation, false);
-    }
-
-    /**
-     * Like {@link #mutateJsonAtomically}, but stages sensitive content with owner-only
-     * POSIX permissions (0600) before writing it, without inheriting a broader target mode.
-     * Failure to set supported POSIX permissions aborts the write. Non-POSIX filesystems
-     * keep their inherited ACLs. A no-op mutation leaves the existing file untouched.
-     */
-    public static void mutatePrivateJsonAtomically(Path file, int maxAttempts, long retryDelayMs, JsonMutation mutation)
-            throws IOException {
-        mutateJsonAtomically(file, maxAttempts, retryDelayMs, mutation, true);
-    }
-
-    private static void mutateJsonAtomically(Path file, int maxAttempts, long retryDelayMs, JsonMutation mutation, boolean ownerOnly)
-            throws IOException {
         IOException lastError = null;
         int attempts = Math.max(1, maxAttempts);
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -401,7 +385,7 @@ public final class SafeJsonFileOps {
                 return;
             }
             try {
-                writeAtomicallyInternal(file, writer, expected, ownerOnly);
+                writeAtomicallyIfUnchanged(file, expected, writer);
                 return;
             } catch (ConflictException conflict) {
                 lastError = conflict;
@@ -522,10 +506,9 @@ public final class SafeJsonFileOps {
      * @param target   the file to replace (may be a symlink)
      * @param writerFn callback that writes the new content
      * @param expected fingerprint the target must still match, or {@code null} for an unconditional write
-     * @param ownerOnly restrict the staged file to 0600 on POSIX instead of inheriting the target's mode
      * @throws IOException on staging/backup/replace failure or a fingerprint mismatch
      */
-    private static void writeAtomicallyInternal(Path target, ThrowingWriter writerFn, ContentSnapshot expected, boolean ownerOnly)
+    private static void writeAtomicallyInternal(Path target, ThrowingWriter writerFn, ContentSnapshot expected)
             throws IOException {
         Path realTarget = resolveRealTarget(target);
         Path parent = realTarget.getParent();
@@ -537,13 +520,6 @@ public final class SafeJsonFileOps {
                 realTarget.getFileName().toString(),
                 TEMP_SUFFIX);
         try {
-            if (ownerOnly) {
-                try {
-                    Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"));
-                } catch (UnsupportedOperationException ignored) {
-                    // Non-POSIX filesystems use the directory's inherited ACLs, as before.
-                }
-            }
             try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
                 writerFn.writeTo(writer);
                 writer.flush();
@@ -560,9 +536,7 @@ public final class SafeJsonFileOps {
                         + " changed after it was read — the caller must re-read and re-apply its update");
             }
             backupExisting(realTarget);
-            if (!ownerOnly) {
-                copyPermissions(realTarget, tmp);
-            }
+            copyPermissions(realTarget, tmp);
             moveWithRetry(tmp, realTarget);
         } finally {
             deleteQuietly(tmp);

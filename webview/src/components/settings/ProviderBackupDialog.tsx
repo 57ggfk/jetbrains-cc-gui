@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { sendBridgeEvent, sendToJava } from '../../utils/bridge';
@@ -6,13 +7,18 @@ import styles from './ProviderBackupDialog.module.less';
 
 export type ProviderBackupMode = 'import' | 'export';
 type Action = ProviderBackupMode | 'select';
+/** 'dialog': a native file dialog may be open, so no timeout applies yet. */
+type Phase = 'idle' | 'dialog' | 'processing';
+type ToastType = 'info' | 'success' | 'warning' | 'error';
 interface Selection { selection: string; fileName: string; encrypted: boolean }
 interface Result extends Partial<Selection> {
   requestId: string;
   engine: string;
   status: string;
   imported?: number;
+  exported?: number;
   skipped?: number;
+  skippedProviders?: unknown;
   providerIndex?: number;
   field?: string;
 }
@@ -21,8 +27,9 @@ interface Props {
   engine: 'claude' | 'codex';
   mode: ProviderBackupMode;
   onClose: () => void;
-  addToast: (message: string, type: 'info' | 'success' | 'warning' | 'error') => void;
+  addToast: (message: string, type: ToastType) => void;
 }
+interface Pending { id: string; action: Action; timeout: ReturnType<typeof setTimeout> | null }
 
 const KEY = 'settings.provider.backup.';
 const ERROR_CODES = new Set([
@@ -34,7 +41,30 @@ const ERROR_FIELDS = new Map([
   ['settingsConfig', 'settingsConfig'], ['configToml', 'config.toml'], ['authJson', 'auth.json'],
   ['customModels', 'customModels'], ['messageEnvVars', 'messageEnvVars'], ['mcpEnvVars', 'mcpEnvVars'],
 ]);
+const PROCESSING_TIMEOUT_MS = 120_000;
 let nextRequestId = 0;
+
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+/** Only numeric saved-provider positions from the bridge are rendered. */
+function skippedPositions(result: Result, skipped: number): string {
+  const positions = Array.isArray(result.skippedProviders) ? result.skippedProviders.filter(count) : [];
+  const listed = positions.map(position => `#${position}`);
+  return [...listed, ...(skipped > positions.length ? ['…'] : [])].join(', ');
+}
+
+function successToast(t: TFunction, action: Action, result: Result): [string, ToastType] {
+  if (action === 'import') {
+    return [t(KEY + 'importSuccess', { imported: count(result.imported), skipped: count(result.skipped) }), 'success'];
+  }
+  const skipped = count(result.skipped);
+  if (skipped === 0) return [t(KEY + 'exportSuccess'), 'success'];
+  return [t(KEY + 'exportPartial', {
+    exported: count(result.exported), skipped, positions: skippedPositions(result, skipped),
+  }), 'warning'];
+}
 
 export default function ProviderBackupDialog({ engine, mode, onClose, addToast }: Props) {
   const { t } = useTranslation();
@@ -44,21 +74,37 @@ export default function ProviderBackupDialog({ engine, mode, onClose, addToast }
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [allowPlaintext, setAllowPlaintext] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<Phase>('idle');
+  const busy = phase !== 'idle';
   const [error, setError] = useState<BackupError | null>(null);
-  const pending = useRef<{ id: string; action: Action; timeout: ReturnType<typeof setTimeout> } | null>(null);
+  const pending = useRef<Pending | null>(null);
   const title = t(KEY + (mode === 'export' ? 'exportTitle' : 'importTitle'), {
     engine: engine === 'claude' ? 'Claude Code' : 'Codex',
   });
+
+  const expire = useCallback((id: string) => {
+    if (pending.current?.id !== id) return;
+    pending.current = null;
+    setPhase('idle');
+    setError({ code: 'timeout' });
+  }, []);
 
   useEffect(() => {
     const receive = (event: Event) => {
       const result = (event as CustomEvent<Result>).detail;
       const request = pending.current;
       if (!request || result?.requestId !== request.id || result.engine !== engine) return;
-      clearTimeout(request.timeout);
+      if (result.status === 'processing') {
+        // The native dialog has closed; only the remaining work is bounded by the timeout.
+        if (request.timeout === null) {
+          pending.current = { ...request, timeout: setTimeout(() => expire(request.id), PROCESSING_TIMEOUT_MS) };
+          setPhase('processing');
+        }
+        return;
+      }
+      if (request.timeout !== null) clearTimeout(request.timeout);
       pending.current = null;
-      setBusy(false);
+      setPhase('idle');
       if (result.status === 'cancelled') return;
       if (result.status !== 'success') {
         const exporting = request.action === 'export';
@@ -85,22 +131,19 @@ export default function ProviderBackupDialog({ engine, mode, onClose, addToast }
         if (request.action === 'import') {
           sendToJava(engine === 'claude' ? 'get_providers' : 'get_codex_providers');
         }
-        addToast(t(KEY + (request.action === 'import' ? 'importSuccess' : 'exportSuccess'), {
-          imported: result.imported ?? 0,
-          skipped: result.skipped ?? 0,
-        }), 'success');
+        addToast(...successToast(t, request.action, result));
         onClose();
       }
     };
     window.addEventListener('provider-backup-result', receive);
     return () => window.removeEventListener('provider-backup-result', receive);
-  }, [engine, addToast, onClose, t]);
+  }, [engine, addToast, onClose, t, expire]);
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
     dialogRef.current?.querySelector<HTMLElement>('button, input')?.focus();
     return () => {
-      if (pending.current) clearTimeout(pending.current.timeout);
+      if (pending.current?.timeout) clearTimeout(pending.current.timeout);
       pending.current = null;
       previousFocus?.focus();
     };
@@ -110,22 +153,19 @@ export default function ProviderBackupDialog({ engine, mode, onClose, addToast }
     if (pending.current) return;
     setError(null);
     const id = `backup-${Date.now()}-${++nextRequestId}`;
-    const timeout = setTimeout(() => {
-      if (pending.current?.id !== id) return;
-      pending.current = null;
-      setBusy(false);
-      setError({ code: 'timeout' });
-    }, 120_000);
+    // Select and export open a native dialog first; the user may take any time choosing a file.
+    const opensDialog = action !== 'import';
+    const timeout = opensDialog ? null : setTimeout(() => expire(id), PROCESSING_TIMEOUT_MS);
     pending.current = { id, action, timeout };
-    setBusy(true);
+    setPhase(opensDialog ? 'dialog' : 'processing');
     const sent = sendBridgeEvent('provider_backup', JSON.stringify({
       requestId: id, engine, action, dialogTitle: title,
       ...(action !== 'select' ? { password, selection: selection?.selection } : {}),
     }));
     if (!sent) {
-      clearTimeout(timeout);
+      if (timeout !== null) clearTimeout(timeout);
       pending.current = null;
-      setBusy(false);
+      setPhase('idle');
       setError({ code: 'failed' });
     }
   }
@@ -150,7 +190,7 @@ export default function ProviderBackupDialog({ engine, mode, onClose, addToast }
         onKeyDown={event => {
           if (event.key === 'Escape') {
             event.stopPropagation();
-            if (!pending.current) onClose();
+            if (phase !== 'processing') onClose();
           }
           if (event.key === 'Tab') {
             const controls = dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
@@ -190,9 +230,9 @@ export default function ProviderBackupDialog({ engine, mode, onClose, addToast }
           {error.providerIndex !== undefined ? <> {t(KEY + 'errorProvider', { index: error.providerIndex })}</> : null}
           {error.field ? <> {t(KEY + 'errorField', { field: error.field })}</> : null}
         </p>}
-        {busy && <p role="status">{t(KEY + 'working')}</p>}
+        {phase === 'processing' && <p role="status">{t(KEY + 'working')}</p>}
         <div className={styles.footer}>
-          <button type="button" disabled={busy} onClick={onClose}>{t('common.cancel')}</button>
+          <button type="button" disabled={phase === 'processing'} onClick={onClose}>{t('common.cancel')}</button>
           <button type="submit" disabled={busy} className={styles.primary}>
             {t(KEY + mode)}
           </button>

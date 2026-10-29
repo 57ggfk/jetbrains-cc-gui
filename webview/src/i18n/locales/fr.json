@@ -576,6 +576,7 @@
         "working": "Traitement en cours…",
         "importSuccess": "Importation terminée : {{imported}} ajouts, {{skipped}} configurations en double ignorées.",
         "exportSuccess": "Configuration exportée.",
+        "exportPartial": "Fournisseurs exportés : {{exported}}. Ignorés car non valides : {{skipped}} ({{positions}} ; numérotation hors paramètres locaux et connexions CLI).",
         "invalidFile": "Fichier, version ou configuration non valide. Aucune importation effectuée.",
         "wrongEngine": "Ce fichier correspond à un autre onglet. Choisissez l’onglet Claude Code ou Codex approprié.",
         "tooLarge": "Fichier ou configuration trop volumineux (8 MiB et 2000 fournisseurs maximum).",

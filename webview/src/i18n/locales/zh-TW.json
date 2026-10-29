@@ -593,6 +593,7 @@
         "working": "正在處理，請稍候…",
         "importSuccess": "匯入完成：新增 {{imported}} 筆，略過 {{skipped}} 筆重複設定。",
         "exportSuccess": "設定已匯出。",
+        "exportPartial": "已匯出 {{exported}} 筆供應商。略過 {{skipped}} 筆未通過驗證的已儲存供應商：{{positions}}（編號不含本機設定或 CLI 登入項目）。",
         "invalidFile": "檔案格式無效、版本不支援或包含無效設定，未匯入。",
         "wrongEngine": "檔案類型與目前分頁不符，請切換至對應的 Claude Code / Codex 分頁。",
         "tooLarge": "檔案或設定過大（檔案上限 8 MiB，最多 2000 筆供應商）。",

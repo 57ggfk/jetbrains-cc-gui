@@ -33,7 +33,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -323,104 +322,6 @@ public class SafeJsonFileOpsTest {
 
         assertEquals("the replace must preserve the existing mode",
                 mode, Files.getPosixFilePermissions(file));
-    }
-
-    @Test
-    public void privateMutationStagesOwnerOnlyBeforeWritingAndDoesNotInheritBroadMode() throws Exception {
-        Assume.assumeTrue("POSIX-only check", isPosix());
-        Path file = tempDir.resolve("private.json");
-        Files.writeString(file, "{}");
-        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
-        Set<PosixFilePermission> ownerOnly = PosixFilePermissions.fromString("rw-------");
-
-        SafeJsonFileOps.mutatePrivateJsonAtomically(file, 3, 1, current -> writer -> {
-            List<Path> staged = stagedTempFiles(tempDir);
-            assertEquals(1, staged.size());
-            assertEquals("permissions must be restricted before any content is written",
-                    ownerOnly, Files.getPosixFilePermissions(staged.get(0)));
-            writer.write("{\"token\":\"synthetic\"}");
-        });
-
-        assertEquals(ownerOnly, Files.getPosixFilePermissions(file));
-        assertEquals(ownerOnly, Files.getPosixFilePermissions(backupOf(file)));
-        assertEquals("{}", Files.readString(backupOf(file)));
-        assertEquals("{\"token\":\"synthetic\"}", Files.readString(file));
-        assertTrue(stagedTempFiles(tempDir).isEmpty());
-    }
-
-    @Test
-    public void defaultMutationStillPreservesExistingPosixPermissions() throws Exception {
-        Assume.assumeTrue("POSIX-only check", isPosix());
-        Path file = tempDir.resolve("shared.json");
-        Files.writeString(file, "{}");
-        Set<PosixFilePermission> originalMode = PosixFilePermissions.fromString("rw-r--r--");
-        Files.setPosixFilePermissions(file, originalMode);
-        SafeJsonFileOps.mutateJsonAtomically(file, 3, 1, current -> writer -> writer.write("{\"v\":1}"));
-        assertEquals(originalMode, Files.getPosixFilePermissions(file));
-    }
-
-    @Test
-    public void privateMutationFailureKeepsOriginalAndCleansStagedContent() throws Exception {
-        Path file = tempDir.resolve("private.json");
-        Files.writeString(file, "{\"original\":true}");
-        assertThrows(IOException.class, () -> SafeJsonFileOps.mutatePrivateJsonAtomically(file, 3, 1,
-                current -> writer -> {
-                    writer.write("{\"partial\":");
-                    throw new IOException("synthetic write failure");
-                }));
-        assertEquals("{\"original\":true}", Files.readString(file));
-        assertFalse(Files.exists(backupOf(file)));
-        assertTrue(stagedTempFiles(tempDir).isEmpty());
-    }
-
-    @Test
-    public void privateMutationRetriesConflictsWithoutLosingThePermissionPolicy() throws Exception {
-        Assume.assumeTrue("POSIX-only check", isPosix());
-        Path file = tempDir.resolve("private.json");
-        Files.writeString(file, "{\"external\":1}");
-        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
-        AtomicInteger rounds = new AtomicInteger();
-        SafeJsonFileOps.mutatePrivateJsonAtomically(file, 3, 1, current -> {
-            if (rounds.incrementAndGet() == 1) {
-                Files.writeString(file, "{\"external\":2}");
-            }
-            current.addProperty("token", "synthetic");
-            return writer -> writer.write(current.toString());
-        });
-        assertEquals(2, rounds.get());
-        JsonObject saved = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
-        assertEquals(2, saved.get("external").getAsInt());
-        assertEquals("synthetic", saved.get("token").getAsString());
-        assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(file));
-        assertTrue(stagedTempFiles(tempDir).isEmpty());
-    }
-
-    @Test
-    public void privateMutationPreservesSymlinkAndRestrictsItsTarget() throws Exception {
-        Assume.assumeTrue("POSIX-only check", isPosix());
-        Path real = tempDir.resolve("real.json");
-        Path link = tempDir.resolve("link.json");
-        Files.writeString(real, "{}");
-        Files.setPosixFilePermissions(real, PosixFilePermissions.fromString("rw-r--r--"));
-        Files.createSymbolicLink(link, real);
-        SafeJsonFileOps.mutatePrivateJsonAtomically(link, 3, 1, current -> writer -> writer.write("{\"v\":1}"));
-        assertTrue(Files.isSymbolicLink(link));
-        assertEquals("{\"v\":1}", Files.readString(real));
-        assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(real));
-    }
-
-    @Test
-    public void privateMutationWorksOnAFileSystemWithoutPosixPermissions() throws Exception {
-        Path archive = tempDir.resolve("non-posix.zip");
-        try (var zip = FileSystems.newFileSystem(archive, java.util.Map.of("create", "true"))) {
-            assertFalse(zip.supportedFileAttributeViews().contains("posix"));
-            Path file = zip.getPath("/private.json");
-            SafeJsonFileOps.mutatePrivateJsonAtomically(file, 3, 1, current -> writer -> writer.write("{\"v\":1}"));
-            SafeJsonFileOps.mutatePrivateJsonAtomically(file, 3, 1, current -> writer -> writer.write("{\"v\":2}"));
-            assertEquals("{\"v\":2}", Files.readString(file));
-            assertEquals("{\"v\":1}", Files.readString(backupOf(file)));
-            assertTrue(stagedTempFiles(zip.getPath("/")).isEmpty());
-        }
     }
 
     /** Writing through a symlink must update its target and leave the link in place. */

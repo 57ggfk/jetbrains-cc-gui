@@ -581,6 +581,7 @@
         "working": "処理中です。お待ちください…",
         "importSuccess": "インポート完了：{{imported}} 件追加、重複 {{skipped}} 件をスキップしました。",
         "exportSuccess": "設定をエクスポートしました。",
+        "exportPartial": "{{exported}} 件のプロバイダーをエクスポートしました。検証に失敗した保存済みプロバイダー {{skipped}} 件をスキップしました：{{positions}}（番号はローカル設定と CLI ログイン項目を除く）。",
         "invalidFile": "ファイル形式、バージョンまたは設定が無効です。インポートしていません。",
         "wrongEngine": "ファイルとタブの種類が異なります。対応する Claude Code / Codex タブを選択してください。",
         "tooLarge": "ファイルまたは設定が大きすぎます（最大 8 MiB、2000 プロバイダー）。",

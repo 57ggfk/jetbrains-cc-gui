@@ -624,6 +624,7 @@
         "working": "Processando, aguarde…",
         "importSuccess": "Importação concluída: {{imported}} adicionadas, {{skipped}} configurações duplicadas ignoradas.",
         "exportSuccess": "Configuração exportada.",
+        "exportPartial": "Provedores exportados: {{exported}}. Ignorados por falha na validação: {{skipped}} ({{positions}}; a numeração exclui configurações locais e entradas de login da CLI).",
         "invalidFile": "Arquivo, versão ou configuração inválidos. Nada foi importado.",
         "wrongEngine": "Este arquivo pertence a outra aba. Selecione a aba correspondente de Claude Code ou Codex.",
         "tooLarge": "Arquivo ou configuração muito grande (máximo de 8 MiB e 2000 provedores).",

@@ -1,8 +1,5 @@
 package com.github.claudecodegui.settings;
 
-import com.github.claudecodegui.util.SafeJsonFileOps;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
@@ -11,13 +8,12 @@ import org.tomlj.Toml;
 import org.tomlj.TomlParseResult;
 
 import java.io.IOException;
-import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 import static com.github.claudecodegui.settings.ProviderBackupCodec.BackupException;
@@ -28,7 +24,6 @@ import static com.github.claudecodegui.settings.ProviderBackupCodec.string;
 /** Add-only backup merge. Pure planning keeps validation/deduplication separate from persistence. */
 public final class ProviderBackupService {
     private static final int MAX_PROVIDERS = 2000;
-    private static final Gson GSON = new GsonBuilder().serializeNulls().create();
     // Match JavaScript String.trim(), including non-breaking spaces from pasted variable names.
     private static final Pattern ENV_NAME_WHITESPACE = Pattern.compile("^[\\s\\p{Z}\\uFEFF]+|[\\s\\p{Z}\\uFEFF]+$");
     private static final List<String> CLAUDE_FIELDS = List.of("settingsConfig", "customModels");
@@ -36,42 +31,64 @@ public final class ProviderBackupService {
             "configToml", "authJson", "customModels", "messageEnvVars", "mcpEnvVars");
     private static final Set<String> SPECIAL_IDS = Set.of(
             "__disabled__", "__local_settings_json__", "__cli_login__", "__codex_cli_login__");
+    // Same names the provider form rejects (CODEX_PROTECTED_ENV_KEYS in webview/src/types/provider.ts);
+    // ProviderBackupServiceTest fails if the two lists drift apart.
+    static final Set<String> PROTECTED_ENV_KEYS = Set.of(
+            "CODEX_USE_STDIN", "CODEX_MODEL", "CODEX_SANDBOX_MODE", "CODEX_SANDBOX", "CODEX_APPROVAL_POLICY",
+            "CODEX_CI", "CODEX_SANDBOX_NETWORK_DISABLED", "CODEX_HOME", "CLAUDE_SESSION_ID",
+            "CLAUDE_PERMISSION_DIR", "HOME", "PATH", "TMPDIR", "TEMP", "TMP", "IDEA_PROJECT_PATH",
+            "PROJECT_PATH", "CLAUDE_USE_STDIN");
 
     private ProviderBackupService() {}
 
     public record MergeResult(JsonObject config, int imported, int skipped) {}
 
-    public static JsonObject exportPayload(JsonObject config, String engine) throws IOException {
+    /** Valid providers ready for encoding, plus 1-based positions of saved entries that were left out. */
+    public record ExportResult(JsonObject payload, List<Integer> skippedProviders) {
+        public ExportResult {
+            skippedProviders = List.copyOf(skippedProviders);
+        }
+    }
+
+    public static ExportResult exportPayload(JsonObject config, String engine) throws IOException {
         checkEngine(engine);
         JsonObject section = objectOrEmpty(config, engine);
         JsonObject stored = objectOrEmpty(section, "providers");
         JsonArray providers = new JsonArray();
+        List<Integer> skipped = new ArrayList<>();
+        BackupException firstFailure = null;
+        // Position follows the saved-provider order, excluding virtual login entries.
+        int position = 0;
         for (String id : ProviderOrderHelper.getProviderOrder(section, stored.keySet())) {
-            if (SPECIAL_IDS.contains(id)) {
+            JsonElement entry = stored.get(id);
+            if (SPECIAL_IDS.contains(id) || (entry.isJsonObject() && isVirtual(entry.getAsJsonObject()))) {
                 continue;
             }
+            position++;
             try {
-                JsonObject provider = objectOrEmpty(stored, id);
-                if (isVirtual(provider)) {
-                    continue;
+                if (!entry.isJsonObject()) {
+                    throw new BackupException("invalidFile");
                 }
-                JsonObject portable = portableProvider(provider, engine);
+                JsonObject portable = portableProvider(entry.getAsJsonObject(), engine);
                 signature(portable, engine);
                 providers.add(portable);
             } catch (BackupException e) {
-                // Position follows the saved-provider order, excluding virtual login entries.
-                throw e.atProvider(providers.size() + 1);
+                // One damaged legacy entry must not block exporting the healthy ones.
+                skipped.add(position);
+                if (firstFailure == null) {
+                    firstFailure = e.atProvider(position);
+                }
             }
         }
         if (providers.isEmpty()) {
-            throw new BackupException("empty");
+            throw firstFailure != null ? firstFailure : new BackupException("empty");
         }
         if (providers.size() > MAX_PROVIDERS) {
             throw new BackupException("tooLarge");
         }
         JsonObject payload = new JsonObject();
         payload.add("providers", providers);
-        return payload;
+        return new ExportResult(payload, skipped);
     }
 
     public static MergeResult merge(JsonObject original, String engine, JsonObject payload) throws IOException {
@@ -131,21 +148,6 @@ public final class ProviderBackupService {
         section.add("providers", providers);
         config.add(engine, section);
         return new MergeResult(config, added, incoming.size() - added);
-    }
-
-    public static MergeResult importPayload(Path configPath, String engine, JsonObject payload) throws IOException {
-        return ConfigFileTransaction.call(configPath, () -> importPayloadLocked(configPath, engine, payload));
-    }
-
-    private static MergeResult importPayloadLocked(Path configPath, String engine, JsonObject payload) throws IOException {
-        AtomicReference<MergeResult> result = new AtomicReference<>();
-        SafeJsonFileOps.mutatePrivateJsonAtomically(configPath, 3, 50, current -> {
-            MergeResult plan = merge(current == null ? new JsonObject() : current, engine, payload);
-            result.set(plan);
-            // A duplicate-only import does not even rewrite the file or its backup.
-            return plan.imported() == 0 ? null : writer -> GSON.toJson(plan.config(), writer);
-        });
-        return result.get();
     }
 
     private static JsonObject portableProvider(JsonObject source, String engine) throws IOException {
@@ -292,8 +294,9 @@ public final class ProviderBackupService {
             }
             String key = string(entry.getAsJsonObject(), "key");
             String value = string(entry.getAsJsonObject(), "value");
+            String upperKey = key.toUpperCase(Locale.ROOT);
             if (!key.matches("[a-zA-Z_][a-zA-Z0-9_]*") || value.length() > 16 * 1024
-                    || !keys.add(key.toUpperCase(Locale.ROOT))) {
+                    || PROTECTED_ENV_KEYS.contains(upperKey) || !keys.add(upperKey)) {
                 throw new BackupException("invalidFile");
             }
             env.addProperty(key, value);

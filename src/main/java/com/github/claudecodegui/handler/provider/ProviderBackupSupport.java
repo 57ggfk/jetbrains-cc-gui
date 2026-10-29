@@ -5,6 +5,7 @@ import com.github.claudecodegui.settings.ProviderBackupCodec;
 import com.github.claudecodegui.settings.ProviderBackupService;
 import com.github.claudecodegui.util.SafeJsonFileOps;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileChooser.FileChooser;
@@ -30,6 +31,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Native file dialogs stay on EDT; parsing, cryptography and persistence stay off EDT. */
 final class ProviderBackupSupport {
     private static final Gson GSON = new Gson();
+    // Enough positions for the user to find damaged entries without flooding the toast.
+    private static final int MAX_REPORTED_SKIPPED = 20;
     private final HandlerContext context;
     private final AtomicBoolean busy = new AtomicBoolean();
     // At most one selected path per engine. The webview cannot ask us to read an arbitrary path.
@@ -120,13 +123,14 @@ final class ProviderBackupSupport {
                 throw new ProviderBackupCodec.BackupException("failed");
             }
             JsonObject config = SafeJsonFileOps.readJsonObjectStrict(configPath, 3, 50);
-            JsonObject payload = ProviderBackupService.exportPayload(config == null ? new JsonObject() : config, request.engine);
+            ProviderBackupService.ExportResult exported = ProviderBackupService.exportPayload(
+                    config == null ? new JsonObject() : config, request.engine);
             char[] password = password(request);
             byte[] bytes = null;
             try {
-                bytes = ProviderBackupCodec.encode(request.engine, payload, password);
+                bytes = ProviderBackupCodec.encode(request.engine, exported.payload(), password);
                 writeBackup(target, bytes);
-                return new JsonObject();
+                return exportSummary(exported);
             } finally {
                 Arrays.fill(password, '\0');
                 if (bytes != null) {
@@ -152,8 +156,8 @@ final class ProviderBackupSupport {
             if (context.isDisposed()) {
                 throw new ProviderBackupCodec.BackupException("cancelled");
             }
-            ProviderBackupService.MergeResult merged = ProviderBackupService.importPayload(
-                    Path.of(context.getSettingsService().getConfigPath()), request.engine, payload);
+            ProviderBackupService.MergeResult merged = context.getSettingsService()
+                    .importProviderBackup(request.engine, payload);
             selections.remove(request.engine, selection);
             JsonObject result = new JsonObject();
             result.addProperty("imported", merged.imported());
@@ -163,6 +167,17 @@ final class ProviderBackupSupport {
             Arrays.fill(password, '\0');
             Arrays.fill(bytes, (byte) 0);
         }
+    }
+
+    /** Counts and saved-provider positions only; never names or config values. */
+    static JsonObject exportSummary(ProviderBackupService.ExportResult exported) {
+        JsonObject result = new JsonObject();
+        result.addProperty("exported", exported.payload().getAsJsonArray("providers").size());
+        result.addProperty("skipped", exported.skippedProviders().size());
+        JsonArray positions = new JsonArray();
+        exported.skippedProviders().stream().limit(MAX_REPORTED_SKIPPED).forEach(positions::add);
+        result.add("skippedProviders", positions);
+        return result;
     }
 
     private static char[] password(Request request) {
@@ -178,6 +193,9 @@ final class ProviderBackupSupport {
     }
 
     private void run(Request request, HandlerContext.JsSender sender, Operation operation) {
+        // Any native dialog has closed by now. The webview starts its processing timeout on this
+        // signal, so time spent choosing a file never counts against the operation.
+        reply(sender, request, "processing", null);
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
                 if (context.isDisposed()) {
