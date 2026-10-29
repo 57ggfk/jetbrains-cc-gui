@@ -1492,7 +1492,9 @@
       "minutesAgo": "minutes ago",
       "secondsAgo": "seconds ago"
     },
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "sessionInUse": "In-use sessions cannot be deleted.",
+    "deleteFailed": "Failed to delete the session. Please try again."
   },
   "permission": {
     "dialogTitle": "Permission Request",
