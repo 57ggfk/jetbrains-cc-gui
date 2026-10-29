@@ -17,6 +17,9 @@ export class GrokEventNormalizer {
     this.error = error;
     this.assistantText = '';
     this.thinkingText = '';
+    this.textSegments = [];
+    this.thinkingSegments = [];
+    this.closedToolIds = new Set();
     this.streamStarted = false;
     this.messageStarted = false;
     this.streamEnded = false;
@@ -36,6 +39,11 @@ export class GrokEventNormalizer {
   begin() {
     this.toolCalls.clear();
     this.editSeq = 0;
+    this.textSegments = [];
+    this.thinkingSegments = [];
+    this.closedToolIds = new Set();
+    this.assistantText = '';
+    this.thinkingText = '';
     this.#emit('[MESSAGE_START]');
     this.messageStarted = true;
     this.#emit('[STREAM_START]');
@@ -84,9 +92,9 @@ export class GrokEventNormalizer {
     // This is what makes StatusPanel "编辑 +N -M" correct after Grok turns.
     this.#flushFileEditLedger({ assumeSuccess: true });
 
-    const text = (resultText != null && String(resultText).length > 0)
-      ? String(resultText)
-      : this.assistantText;
+    const text = this.textSegments.length > 0
+      ? this.assistantText
+      : ((resultText != null && String(resultText).length > 0) ? String(resultText) : this.assistantText);
 
     // Final assistant message block for history (Claude-like).
     // Attach lastUsage so Java message.usage survives even if a mid-turn [USAGE]
@@ -240,6 +248,22 @@ export class GrokEventNormalizer {
     }
   }
 
+  #closeSegmentsForTool(toolCallId) {
+    if (!toolCallId || this.closedToolIds.has(toolCallId)) {
+      return;
+    }
+    this.closedToolIds.add(toolCallId);
+    if (this.assistantText) {
+      this.textSegments.push(this.assistantText);
+      this.assistantText = '';
+    }
+    if (this.thinkingText) {
+      this.thinkingSegments.push(this.thinkingText);
+      this.thinkingText = '';
+    }
+    this.#emit('[BLOCK_RESET]');
+  }
+
   #handleToolUpdate(update) {
     const toolCallId =
       update.toolCallId ||
@@ -247,6 +271,7 @@ export class GrokEventNormalizer {
       update.id ||
       update.toolUseId ||
       `tool-${Date.now()}`;
+    this.#closeSegmentsForTool(toolCallId);
     const title = update.title || '';
     const kind = String(update.kind || update.toolKind || '').toLowerCase();
     const status = String(update.status || '').toLowerCase();
@@ -467,6 +492,9 @@ export class GrokEventNormalizer {
   }
 
   #emitToolUse(toolCallId, name, input) {
+    // Permission and fs_write reach here with no prior tool_call. Seal the
+    // open segment before the tool card; a later event for this id is a no-op.
+    this.#closeSegmentsForTool(toolCallId);
     this.#emit(
       `[MESSAGE] ${JSON.stringify({
         type: 'assistant',
@@ -483,7 +511,6 @@ export class GrokEventNormalizer {
         },
       })}`,
     );
-    this.#emit('[BLOCK_RESET]');
   }
 
   #emitLegacyToolIfNeeded(toolCallId, tc, forceResult) {
@@ -516,13 +543,23 @@ export class GrokEventNormalizer {
     }
   }
 
-  #buildContentBlocks(text) {
+  #buildContentBlocks(openText) {
     const blocks = [];
+    for (const thinking of this.thinkingSegments) {
+      if (thinking) {
+        blocks.push({ type: 'thinking', thinking });
+      }
+    }
     if (this.thinkingText) {
       blocks.push({ type: 'thinking', thinking: this.thinkingText });
     }
-    if (text) {
-      blocks.push({ type: 'text', text });
+    for (const text of this.textSegments) {
+      if (text) {
+        blocks.push({ type: 'text', text });
+      }
+    }
+    if (openText) {
+      blocks.push({ type: 'text', text: openText });
     }
     return blocks.length ? blocks : [{ type: 'text', text: '' }];
   }

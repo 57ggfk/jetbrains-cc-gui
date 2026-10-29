@@ -43,6 +43,10 @@ public class GrokMessageHandler implements MessageCallback {
     private boolean isStreaming = false;
     private boolean streamEndedThisTurn = false;
     private boolean isThinking = false;
+    /** False after a tool boundary so the next thought opens its own raw block. */
+    private boolean thinkingSegmentActive = false;
+    /** False after a tool boundary so the next text delta opens its own raw block. */
+    private boolean textSegmentActive = false;
 
     public GrokMessageHandler(SessionState state, CallbackHandler callbackHandler) {
         this.state = state;
@@ -311,9 +315,14 @@ public class GrokMessageHandler implements MessageCallback {
     }
 
     private void handleBlockReset() {
+        if (assistantContent.length() > 0 && !textSegmentActive) {
+            appendTextToRaw(assistantContent.toString());
+        }
         // New structural segment after tools — clear delta accumulator for next text block
         assistantContent.setLength(0);
         currentAssistantMessage = null;
+        thinkingSegmentActive = false;
+        textSegmentActive = false;
         try {
             callbackHandler.notifyBlockReset();
         } catch (Exception e) {
@@ -333,6 +342,7 @@ public class GrokMessageHandler implements MessageCallback {
 
         Message target = resolveAssistantMessageForStream();
         target.content = assistantContent.toString();
+        appendTextToRaw(content);
         callbackHandler.notifyContentDelta(content);
         if (!isStreaming) {
             callbackHandler.notifyMessageUpdate(state.getMessages());
@@ -606,14 +616,17 @@ public class GrokMessageHandler implements MessageCallback {
                 : new JsonArray();
 
         JsonObject thinkingBlock = null;
-        for (int i = content.size() - 1; i >= 0; i--) {
-            com.google.gson.JsonElement el = content.get(i);
-            if (el.isJsonObject() && el.getAsJsonObject().has("type")
-                    && "thinking".equals(el.getAsJsonObject().get("type").getAsString())) {
-                thinkingBlock = el.getAsJsonObject();
-                break;
+        if (thinkingSegmentActive) {
+            for (int i = content.size() - 1; i >= 0; i--) {
+                com.google.gson.JsonElement el = content.get(i);
+                if (el.isJsonObject() && el.getAsJsonObject().has("type")
+                        && "thinking".equals(el.getAsJsonObject().get("type").getAsString())) {
+                    thinkingBlock = el.getAsJsonObject();
+                    break;
+                }
             }
         }
+        thinkingSegmentActive = true;
         if (thinkingBlock == null) {
             thinkingBlock = new JsonObject();
             thinkingBlock.addProperty("type", "thinking");
@@ -627,9 +640,46 @@ public class GrokMessageHandler implements MessageCallback {
         raw.add("message", message);
     }
 
+    private void appendTextToRaw(String delta) {
+        ensureAssistantRaw();
+        JsonObject raw = currentAssistantMessage.raw;
+        JsonObject message = raw.has("message") && raw.get("message").isJsonObject()
+                ? raw.getAsJsonObject("message")
+                : new JsonObject();
+        JsonArray content = message.has("content") && message.get("content").isJsonArray()
+                ? message.getAsJsonArray("content")
+                : new JsonArray();
+
+        JsonObject textBlock = null;
+        if (textSegmentActive) {
+            for (int i = content.size() - 1; i >= 0; i--) {
+                com.google.gson.JsonElement el = content.get(i);
+                if (el.isJsonObject() && el.getAsJsonObject().has("type")
+                        && "text".equals(el.getAsJsonObject().get("type").getAsString())) {
+                    textBlock = el.getAsJsonObject();
+                    break;
+                }
+            }
+        }
+        textSegmentActive = true;
+        if (textBlock == null) {
+            textBlock = new JsonObject();
+            textBlock.addProperty("type", "text");
+            textBlock.addProperty("text", delta);
+            content.add(textBlock);
+        } else {
+            String prev = textBlock.has("text") ? textBlock.get("text").getAsString() : "";
+            textBlock.addProperty("text", prev + delta);
+        }
+        message.add("content", content);
+        raw.add("message", message);
+    }
+
     private void resetStreamingAccumulator() {
         assistantContent.setLength(0);
         currentAssistantMessage = null;
         assistantMessageForCurrentStream = null;
+        thinkingSegmentActive = false;
+        textSegmentActive = false;
     }
 }
