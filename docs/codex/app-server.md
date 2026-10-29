@@ -66,6 +66,25 @@ STOPPED → STARTING → INITIALIZING → READY → DRAINING → STOPPED
 - `READY` 时才派发 FIFO 操作；`#drainQueue` 在非 READY 时先 `ensureRuntime` 再继续。
 - 连接意外退出（EOF/崩溃）→ `#failRuntime` 一次性收尾：所有未结算 operation 标记 failed、队列清空、thread 状态回到 `unloaded`（**thread id 保留**）、child 关闭。恢复 = 重新 initialize + `thread/resume`，绝不自动重发 `turn/start`。
 
+### 恢复失败的诊断与受限重试
+
+`thread/resume` 是恢复接口名，不是“线程过期”的错误类型。当前本机运行时依赖其有效 `CODEX_HOME` 下的原生历史，不能因恢复失败就断定远端服务定期删除了线程。原生 RPC 错误正文未必包含接口名，service 在恢复失败时补充 `thread/resume:` 来源，同时保留原始错误、RPC code、dispatch phase 与 cause，供诊断与不确定请求的清理继续使用。
+
+只有原生明确以 `RPC_ERROR` / `-32600` 拒绝 `thread/resume`，且正文为 `thread <id> is closing; retry thread/resume after the thread is closed` 时，service 才在 250ms、750ms 后重试同一恢复请求，最多三次尝试。同一次恢复保留首次请求的提供商、配置和开发者指令，等待期间的启动配置变更仍在空闲边界重建后生效。并发 preconnect 与发送共用恢复 promise、诊断来源和重试预算；等待结束后再次校验 native client 身份、存活状态及请求方是否仍需要恢复。唯一的发送被取消或运行时更换后不再重试；独立的 preconnect 仍在等待时可以继续恢复，但已取消的发送不启动任务。旧恢复的收尾只清除原 native client 的启动标记，不能解除新运行时等待原生确认的停止守卫。超时、未知写入结果、writer 占用及其他错误均不自动重试，不自动新建线程、切换历史目录或重放任务。
+
+前端先识别具体原因，再使用通用恢复失败提示兜底；原始错误始终保留。诊断卡的说明步骤只显示操作指引，不自动执行命令：
+
+| 诊断 | 识别依据与处理指引 |
+| --- | --- |
+| 会话被占用 | `active writer`、`live local writer` 或 Java 返回的 `another window` / `another chat window`；在持有者处停止任务并关闭或释放会话，确认释放后重发，不删除锁文件或停止其他客户端 |
+| 会话仍在关闭 | 原生明确返回上述 closing 拒绝；受限重试仍失败时，等待原客户端释放后从历史重新打开 |
+| 原生历史找不到 | `no rollout found for thread/conversation id`；核对原 `CODEX_HOME`、本机/WSL 宿主和备份；只有历史确实无法找回时才另建会话并重新提供上下文 |
+| 会话已归档 | 原生明确说明 session/thread 已归档；先在原客户端取消归档，或按原始错误的命令操作，再刷新历史列表 |
+| 配置或必需 MCP 初始化失败 | 原生明确指出配置加载/解析或 required MCP 失败；修正对应配置、凭证或连接，不自动禁用必需服务 |
+| 未知恢复失败 | 保留具体原因；核对运行环境，只有原始错误指出版本不兼容时才按官方指引更新 CLI；已有回复或工具执行时先核实结果再重发 |
+
+十种语言同步维护诊断与处理步骤。`errorMatcher.test.ts` 验证分类优先级、无接口名前缀的原生错误、无关错误不误判及各语言步骤完整性；消息渲染直接使用这一诊断结果，不再重复匹配占用文案。手动压缩失败也保留原始错误，交由同一消息诊断展示处理步骤；已有 native callback 报错时仍不重复插入消息。诊断卡/消息渲染和压缩状态测试验证这些入口。`codex-appserver-service.test.js` 覆盖共享重试、重试参数保持不变、耗尽预算、取消/换代、旧重试不清除新启动守卫及不可重试错误不重复派发。
+
 ### 操作与派发阶段
 
 每个 operation 依次经过 `notWritten → writtenUnconfirmed → nativeTurnKnown → terminal`：
