@@ -100,6 +100,7 @@ public class ClaudeChatWindow {
     // clearPermissionDecisionMemory(), both of which must reach the instance
     // the bridges actually route permission requests to.
     private String permissionServiceKey = null;
+    private boolean permissionServiceDisposed = false;
 
     private volatile JBCefBrowser browser;
     // volatile: read from the daemon reader thread by the session_updated listener
@@ -321,6 +322,15 @@ public class ClaudeChatWindow {
         chatWindowDelegate.initializeHandlers();
         this.permissionServiceKey = chatWindowDelegate.setupPermissionService();
         this.sessionId = this.permissionServiceKey;
+        java.lang.ref.WeakReference<ClaudeChatWindow> executionOwner = new java.lang.ref.WeakReference<>(this);
+        PermissionService.getInstance(project, permissionServiceKey).setExecutionOwnerSupplier(() -> {
+            ClaudeChatWindow current = executionOwner.get();
+            if (current == null || current.disposed || current.project.isDisposed()) {
+                return null;
+            }
+            ClaudeSession owner = current.session;
+            return owner == null ? null : owner.getState().currentExecutionOwnership();
+        });
 
         this.sessionLifecycleManager = new SessionLifecycleManager(new SessionLifecycleManager.SessionHost() {
             @Override
@@ -3008,6 +3018,7 @@ public class ClaudeChatWindow {
                 handlerContext.setDisposed(true);
                 handlerContext.setBrowser(null);
             }
+            disposePermissionService();
             try {
                 webviewWatchdog.stop();
             } catch (Exception | LinkageError error) {
@@ -3085,18 +3096,7 @@ public class ClaudeChatWindow {
             titleEventListener = null;
         }
 
-        try {
-            if (this.permissionServiceKey != null && !this.permissionServiceKey.isEmpty()) {
-                PermissionService permissionService = PermissionService.getInstance(project, this.permissionServiceKey);
-                permissionService.unregisterDialogShower(project);
-                permissionService.unregisterAskUserQuestionDialogShower(project);
-                permissionService.unregisterPlanApprovalDialogShower(project);
-                PermissionService.removeInstance(this.permissionServiceKey);
-                LOG.info("Removed PermissionService instance for key: " + this.permissionServiceKey);
-            }
-        } catch (Exception e) {
-            LOG.warn("Failed to unregister dialog showers or remove session instance: " + e.getMessage());
-        }
+        disposePermissionService();
 
         LOG.info("Starting window resource cleanup, project: " + project.getName());
 
@@ -3165,6 +3165,31 @@ public class ClaudeChatWindow {
         }
 
         LOG.info("Window service cleanup completed, project: " + project.getName());
+    }
+
+    private void disposePermissionService() {
+        if (this.permissionServiceDisposed) {
+            return;
+        }
+        this.permissionServiceDisposed = true;
+        if (this.permissionServiceKey == null || this.permissionServiceKey.isEmpty()) {
+            return;
+        }
+        try {
+            PermissionService permissionService = PermissionService.getInstance(project, this.permissionServiceKey);
+            permissionService.unregisterDialogShower(project);
+            permissionService.unregisterAskUserQuestionDialogShower(project);
+            permissionService.unregisterPlanApprovalDialogShower(project);
+        } catch (Exception | LinkageError e) {
+            LOG.warn("Failed to unregister dialog showers: " + e.getMessage());
+        } finally {
+            try {
+                PermissionService.removeInstance(this.permissionServiceKey);
+                LOG.info("Removed PermissionService instance for key: " + this.permissionServiceKey);
+            } catch (Exception | LinkageError e) {
+                LOG.warn("Failed to remove session instance: " + e.getMessage());
+            }
+        }
     }
 
     // ==================== Host Interface Factories ====================

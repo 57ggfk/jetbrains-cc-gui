@@ -188,6 +188,8 @@ export function useHistoryLoader(options: UseHistoryLoaderOptions): void {
           sessionId,
           title,
           provider: 'codex',
+          running: active || row.running === true,
+          ownedElsewhere: row.ownedElsewhere === true,
           model: typeof row.model === 'string' ? row.model : undefined,
           messageCount: isKnownHistoryMessageCount(row.messageCount) ? row.messageCount
             : nativeRevision === previous?.nativeRevision && !active
