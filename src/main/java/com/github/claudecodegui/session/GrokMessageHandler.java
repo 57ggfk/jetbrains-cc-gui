@@ -606,6 +606,21 @@ public class GrokMessageHandler implements MessageCallback {
     }
 
     private void appendThinkingToRaw(String delta) {
+        appendStreamDeltaToRaw("thinking", "thinking", delta, thinkingSegmentActive);
+        thinkingSegmentActive = true;
+    }
+
+    private void appendTextToRaw(String delta) {
+        appendStreamDeltaToRaw("text", "text", delta, textSegmentActive);
+        textSegmentActive = true;
+    }
+
+    /**
+     * Grow the latest raw block of {@code type} with a streamed delta, or open a new
+     * block when the segment has not started yet (first delta after stream start or
+     * after a block reset), so each segment keeps its own block.
+     */
+    private void appendStreamDeltaToRaw(String type, String field, String delta, boolean segmentActive) {
         ensureAssistantRaw();
         JsonObject raw = currentAssistantMessage.raw;
         JsonObject message = raw.has("message") && raw.get("message").isJsonObject()
@@ -615,64 +630,29 @@ public class GrokMessageHandler implements MessageCallback {
                 ? message.getAsJsonArray("content")
                 : new JsonArray();
 
-        JsonObject thinkingBlock = null;
-        if (thinkingSegmentActive) {
-            for (int i = content.size() - 1; i >= 0; i--) {
-                com.google.gson.JsonElement el = content.get(i);
-                if (el.isJsonObject() && el.getAsJsonObject().has("type")
-                        && "thinking".equals(el.getAsJsonObject().get("type").getAsString())) {
-                    thinkingBlock = el.getAsJsonObject();
-                    break;
-                }
-            }
-        }
-        thinkingSegmentActive = true;
-        if (thinkingBlock == null) {
-            thinkingBlock = new JsonObject();
-            thinkingBlock.addProperty("type", "thinking");
-            thinkingBlock.addProperty("thinking", delta);
-            content.add(thinkingBlock);
+        JsonObject block = segmentActive ? findLastBlockOfType(content, type) : null;
+        if (block == null) {
+            block = new JsonObject();
+            block.addProperty("type", type);
+            block.addProperty(field, delta);
+            content.add(block);
         } else {
-            String prev = thinkingBlock.has("thinking") ? thinkingBlock.get("thinking").getAsString() : "";
-            thinkingBlock.addProperty("thinking", prev + delta);
+            String prev = block.has(field) ? block.get(field).getAsString() : "";
+            block.addProperty(field, prev + delta);
         }
         message.add("content", content);
         raw.add("message", message);
     }
 
-    private void appendTextToRaw(String delta) {
-        ensureAssistantRaw();
-        JsonObject raw = currentAssistantMessage.raw;
-        JsonObject message = raw.has("message") && raw.get("message").isJsonObject()
-                ? raw.getAsJsonObject("message")
-                : new JsonObject();
-        JsonArray content = message.has("content") && message.get("content").isJsonArray()
-                ? message.getAsJsonArray("content")
-                : new JsonArray();
-
-        JsonObject textBlock = null;
-        if (textSegmentActive) {
-            for (int i = content.size() - 1; i >= 0; i--) {
-                com.google.gson.JsonElement el = content.get(i);
-                if (el.isJsonObject() && el.getAsJsonObject().has("type")
-                        && "text".equals(el.getAsJsonObject().get("type").getAsString())) {
-                    textBlock = el.getAsJsonObject();
-                    break;
-                }
+    private static JsonObject findLastBlockOfType(JsonArray content, String type) {
+        for (int i = content.size() - 1; i >= 0; i--) {
+            com.google.gson.JsonElement el = content.get(i);
+            if (el.isJsonObject() && el.getAsJsonObject().has("type")
+                    && type.equals(el.getAsJsonObject().get("type").getAsString())) {
+                return el.getAsJsonObject();
             }
         }
-        textSegmentActive = true;
-        if (textBlock == null) {
-            textBlock = new JsonObject();
-            textBlock.addProperty("type", "text");
-            textBlock.addProperty("text", delta);
-            content.add(textBlock);
-        } else {
-            String prev = textBlock.has("text") ? textBlock.get("text").getAsString() : "";
-            textBlock.addProperty("text", prev + delta);
-        }
-        message.add("content", content);
-        raw.add("message", message);
+        return null;
     }
 
     private void resetStreamingAccumulator() {

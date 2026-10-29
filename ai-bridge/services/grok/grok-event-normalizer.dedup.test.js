@@ -369,3 +369,132 @@ describe('snapshot-delta dedup', () => {
     ]);
   });
 });
+
+describe('segment boundaries across tool calls', () => {
+  const sendUpdate = (n, update) =>
+    n.handleAcpEvent('notification', { method: 'session/update', params: { update } });
+  const say = (n, content) => sendUpdate(n, { sessionUpdate: 'agent_message_chunk', content });
+  const finishedGrep = { sessionUpdate: 'tool_call', toolCallId: 'call-grep', name: 'grep', status: 'completed' };
+  const finalContent = (lines) => {
+    const messages = lines
+      .filter((l) => l.startsWith('[MESSAGE] '))
+      .map((l) => JSON.parse(l.slice('[MESSAGE] '.length)));
+    return messages[messages.length - 1].message.content;
+  };
+
+  it('keeps genuine deltas intact when they start with a short sealed segment', () => {
+    const { n, lines } = recorder();
+    say(n, ' ');
+    sendUpdate(n, finishedGrep);
+    for (const token of ['The', ' file', ' is', ' clean', '.']) say(n, token);
+    n.finishSuccess('sess-short-sealed');
+
+    assert.deepEqual(deltas(lines, '[CONTENT_DELTA] '), [' ', 'The', ' file', ' is', ' clean', '.']);
+    assert.deepEqual(finalContent(lines), [
+      { type: 'text', text: ' ' },
+      { type: 'text', text: 'The file is clean.' },
+    ]);
+  });
+
+  it('keeps a post-tool sentence that repeats the pre-tool one', () => {
+    const { n, lines } = recorder();
+    say(n, 'Running the tests.');
+    sendUpdate(n, { ...finishedGrep, toolCallId: 'call-run-1' });
+    say(n, 'Running the tests.');
+    sendUpdate(n, { ...finishedGrep, toolCallId: 'call-run-2' });
+    say(n, 'All green.');
+    n.finishSuccess('sess-repeat-sentence');
+
+    assert.deepEqual(finalContent(lines), [
+      { type: 'text', text: 'Running the tests.' },
+      { type: 'text', text: 'Running the tests.' },
+      { type: 'text', text: 'All green.' },
+    ]);
+  });
+
+  it('still dedups per-segment snapshots after a tool call', () => {
+    const { n, lines } = recorder();
+    say(n, 'Checking the config.');
+    sendUpdate(n, finishedGrep);
+    say(n, 'Con');
+    say(n, 'Config ok.');
+    n.finishSuccess('sess-per-segment');
+
+    assert.deepEqual(deltas(lines, '[CONTENT_DELTA] '), ['Checking the config.', 'Con', 'fig ok.']);
+    assert.deepEqual(finalContent(lines), [
+      { type: 'text', text: 'Checking the config.' },
+      { type: 'text', text: 'Config ok.' },
+    ]);
+  });
+
+  it('seals prose said while a tool runs before that tool card', () => {
+    const { n, lines } = recorder();
+    say(n, 'Before.');
+    sendUpdate(n, { sessionUpdate: 'tool_call', toolCallId: 'call-slow', name: 'grep', status: 'in_progress' });
+    say(n, 'While running.');
+    sendUpdate(n, { sessionUpdate: 'tool_call_update', toolCallId: 'call-slow', status: 'completed' });
+    say(n, 'After.');
+    n.finishSuccess('sess-running');
+
+    const stream = lines
+      .filter((l) => /^\[(CONTENT_DELTA|BLOCK_RESET|MESSAGE|TOOL_RESULT)\]/.test(l))
+      .map((l) => l.split(' ')[0]);
+    assert.deepEqual(stream, [
+      '[CONTENT_DELTA]',
+      '[BLOCK_RESET]',
+      '[CONTENT_DELTA]',
+      '[BLOCK_RESET]',
+      '[MESSAGE]',
+      '[TOOL_RESULT]',
+      '[CONTENT_DELTA]',
+      '[MESSAGE]',
+    ]);
+    assert.deepEqual(finalContent(lines), [
+      { type: 'text', text: 'Before.' },
+      { type: 'text', text: 'While running.' },
+      { type: 'text', text: 'After.' },
+    ]);
+  });
+
+  it('dedups snapshots of the reply that follows a late tool card', () => {
+    const { n, lines } = recorder();
+    say(n, 'Before.');
+    sendUpdate(n, { sessionUpdate: 'tool_call', toolCallId: 'call-slow', name: 'grep', status: 'in_progress' });
+    say(n, 'While running.');
+    sendUpdate(n, { sessionUpdate: 'tool_call_update', toolCallId: 'call-slow', status: 'completed' });
+    // The reply after the tool result is snapshotted from its own start.
+    say(n, 'Af');
+    say(n, 'After.');
+    n.finishSuccess('sess-late-card-snapshot');
+
+    assert.deepEqual(deltas(lines, '[CONTENT_DELTA] '), ['Before.', 'While running.', 'Af', 'ter.']);
+    assert.deepEqual(finalContent(lines), [
+      { type: 'text', text: 'Before.' },
+      { type: 'text', text: 'While running.' },
+      { type: 'text', text: 'After.' },
+    ]);
+  });
+
+  it('keeps the whole reply, segment by segment, as the success envelope result', () => {
+    const { n, lines } = recorder();
+    say(n, 'Before.');
+    sendUpdate(n, finishedGrep);
+    say(n, 'After.');
+    n.finishSuccess('sess-envelope', n.assistantText);
+
+    const envelope = JSON.parse(lines.find((l) => l.startsWith('{')));
+    assert.equal(envelope.success, true);
+    assert.equal(envelope.result, 'Before.\n\nAfter.');
+  });
+
+  it('leaves whitespace-only segments out of the success envelope result', () => {
+    const { n, lines } = recorder();
+    say(n, ' ');
+    sendUpdate(n, finishedGrep);
+    say(n, 'Only answer.');
+    n.finishSuccess('sess-envelope-blank', n.assistantText);
+
+    const envelope = JSON.parse(lines.find((l) => l.startsWith('{')));
+    assert.equal(envelope.result, 'Only answer.');
+  });
+});

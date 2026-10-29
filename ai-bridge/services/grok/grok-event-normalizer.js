@@ -11,6 +11,9 @@
 
 import { extractUsageFromAcpEnvelope, normalizeUsageToSnakeCase } from './grok-utils.js';
 
+/** Paragraph break between reply segments in the plain-text success result. */
+const REPLY_SEGMENT_SEPARATOR = '\n\n';
+
 export class GrokEventNormalizer {
   constructor({ log = console.log, error = console.error } = {}) {
     this.log = log;
@@ -120,7 +123,11 @@ export class GrokEventNormalizer {
       JSON.stringify({
         success: true,
         sessionId: finalSessionId,
-        result: text,
+        // The whole reply rather than only its last segment, with the segments
+        // kept apart the way the final message keeps them in separate blocks.
+        result: [...this.textSegments, text]
+          .filter((segment) => segment.trim())
+          .join(REPLY_SEGMENT_SEPARATOR),
       })
     );
   }
@@ -253,6 +260,10 @@ export class GrokEventNormalizer {
       return;
     }
     this.closedToolIds.add(toolCallId);
+    this.#sealOpenSegments();
+  }
+
+  #sealOpenSegments() {
     if (this.assistantText) {
       this.textSegments.push(this.assistantText);
       this.assistantText = '';
@@ -492,9 +503,16 @@ export class GrokEventNormalizer {
   }
 
   #emitToolUse(toolCallId, name, input) {
-    // Permission and fs_write reach here with no prior tool_call. Seal the
-    // open segment before the tool card; a later event for this id is a no-op.
-    this.#closeSegmentsForTool(toolCallId);
+    // Seal the open segment before the tool card. Permission and fs_write reach
+    // here with no prior tool_call, so this may be the id's first event. For a
+    // tool announced earlier, only prose that arrived since then (while it ran,
+    // or before the turn-end ledger flush) is sealed: it belongs above the card,
+    // and the reply that follows the tool result starts a segment of its own.
+    if (this.closedToolIds.has(toolCallId) && (this.assistantText || this.thinkingText)) {
+      this.#sealOpenSegments();
+    } else {
+      this.#closeSegmentsForTool(toolCallId);
+    }
     this.#emit(
       `[MESSAGE] ${JSON.stringify({
         type: 'assistant',
