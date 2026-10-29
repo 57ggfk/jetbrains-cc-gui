@@ -29,4 +29,16 @@ describe('TokenIndicator', () => {
 
     expect(screen.getByText(/10k \/ 1.05M/)).toBeTruthy();
   });
+
+  it('promotes values that round to 1000k to 1M', () => {
+    render(<TokenIndicator percentage={100} usedTokens={999999} maxTokens={1000000} />);
+
+    expect(screen.getByText(/1M \/ 1M/)).toBeTruthy();
+  });
+
+  it('keeps one decimal for fractional thousands', () => {
+    render(<TokenIndicator percentage={14} usedTokens={37650} maxTokens={262144} />);
+
+    expect(screen.getByText(/37.7k \/ 262.1k/)).toBeTruthy();
+  });
 });

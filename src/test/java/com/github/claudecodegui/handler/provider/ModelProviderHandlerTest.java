@@ -78,6 +78,20 @@ public class ModelProviderHandlerTest {
     }
 
     /**
+     * The bridge only falls back to ANTHROPIC_MODEL inside a family branch; a
+     * {@code claude-*} id without a family name is sent unchanged.
+     */
+    @Test
+    public void shouldNotApplyMainModelToClaudeIdsWithoutFamily() {
+        JsonObject env = new JsonObject();
+        env.addProperty("ANTHROPIC_MODEL", "glm-4.7");
+
+        assertEquals("claude-custom-x", ModelProviderHandler.resolveConfiguredClaudeModel("claude-custom-x", env));
+        assertEquals("claude-custom-x[1M]",
+                ModelProviderHandler.resolveConfiguredClaudeModel("claude-custom-x[1M]", env));
+    }
+
+    /**
      * The request owns the 1M choice, matching {@code resolveModelFromSettings}
      * in ai-bridge: a suffix stored on the mapping value must not turn on 1M when
      * the user did not ask for it.
@@ -226,14 +240,118 @@ public class ModelProviderHandlerTest {
 
         try {
             assertEquals(512_000,
-                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash"));
+                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash", null));
             assertEquals(512_000,
-                    ModelProviderHandler.resolveContextLimit("claude", "deepseek-v4.1-flash"));
-            // The UI's [1m] choice is per-model and wins over the global override.
+                    ModelProviderHandler.resolveContextLimit("claude", "deepseek-v4.1-flash", null));
+            // The UI's [1m] choice is per-model and wins over a smaller global override.
             assertEquals(1_000_000,
-                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash[1m]"));
+                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash[1m]", null));
             assertEquals(500_000,
-                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash[500k]"));
+                    ModelProviderHandler.getClaudeContextLimit("deepseek-v4.1-flash[500k]", null));
+        } finally {
+            ClaudeContextWindowOverrideProvider.setInstanceForTests(null);
+        }
+    }
+
+    /**
+     * The CLI keeps a recognized Claude model's own window and only applies
+     * CLAUDE_CODE_MAX_CONTEXT_TOKENS to ids it does not know.
+     */
+    @Test
+    public void shouldIgnoreOverrideForClaudeModelIds() throws Exception {
+        withSettings("""
+                {
+                  "env": {
+                    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "128000"
+                  }
+                }
+                """, () -> {
+            assertEquals(200_000, ModelProviderHandler.getClaudeContextLimit("claude-haiku-4-5", null));
+            assertEquals(1_000_000, ModelProviderHandler.getClaudeContextLimit("claude-sonnet-5[1m]", null));
+            assertEquals(200_000, ModelProviderHandler.resolveContextLimit("claude", "claude-haiku-4-5", null));
+            assertEquals(128_000, ModelProviderHandler.getClaudeContextLimit("kimi-k3", null));
+        });
+    }
+
+    /**
+     * A [1m] opt-in is a floor: the CLI reports max(override, 1M) for an unknown model.
+     */
+    @Test
+    public void shouldKeepLargerOverrideForOneMillionOptIn() throws Exception {
+        withSettings("""
+                {
+                  "env": {
+                    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "2000000"
+                  }
+                }
+                """, () -> assertEquals(2_000_000,
+                ModelProviderHandler.getClaudeContextLimit("deepseek-v4-pro[1m]", null)));
+    }
+
+    /**
+     * With auto-compact disabled the CLI uses the override for every model, even over [1m].
+     */
+    @Test
+    public void shouldApplyOverrideToEveryModelWhenCompactIsDisabled() throws Exception {
+        withSettings("""
+                {
+                  "env": {
+                    "DISABLE_COMPACT": "1",
+                    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "128000"
+                  }
+                }
+                """, () -> {
+            assertEquals(128_000, ModelProviderHandler.getClaudeContextLimit("claude-haiku-4-5", null));
+            assertEquals(128_000, ModelProviderHandler.getClaudeContextLimit("deepseek-v4-pro[1m]", null));
+        });
+    }
+
+    /**
+     * Usage fallbacks receive the UI slot id. The family mapping must be applied
+     * first so the override is checked against the model the CLI actually gets.
+     */
+    @Test
+    public void resolveContextLimitAppliesFamilyMappingBeforeOverride() throws Exception {
+        withSettings("""
+                {
+                  "env": {
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k3",
+                    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144"
+                  }
+                }
+                """, () -> {
+            assertEquals(262_144, ModelProviderHandler.resolveContextLimit("claude", "claude-sonnet-5", null));
+            // Haiku is not mapped, so the CLI receives a Claude id and keeps its own window.
+            assertEquals(200_000, ModelProviderHandler.resolveContextLimit("claude", "claude-haiku-4-5", null));
+        });
+    }
+
+    @Test
+    public void shouldReadOverrideFromProjectSettingsOfSessionCwd() throws Exception {
+        Path project = Files.createTempDirectory("claude-project");
+        Files.createDirectories(project.resolve(".claude"));
+        Files.writeString(project.resolve(".claude").resolve("settings.local.json"), """
+                {
+                  "env": {
+                    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "384000"
+                  }
+                }
+                """);
+
+        withSettings("{}", () -> {
+            assertEquals(384_000, ModelProviderHandler.getClaudeContextLimit("kimi-k3", project.toString()));
+            assertEquals(200_000, ModelProviderHandler.getClaudeContextLimit("kimi-k3", null));
+        });
+    }
+
+    private static void withSettings(String json, Runnable assertions) throws Exception {
+        Path settings = Files.createTempFile("claude-settings", ".json");
+        Files.writeString(settings, json);
+        ClaudeContextWindowOverrideProvider.setInstanceForTests(
+                ClaudeContextWindowOverrideProvider.createForTests(settings)
+        );
+        try {
+            assertions.run();
         } finally {
             ClaudeContextWindowOverrideProvider.setInstanceForTests(null);
         }

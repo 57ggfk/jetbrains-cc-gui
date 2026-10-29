@@ -727,6 +727,7 @@ public class ChatWindowDelegate {
         usagePushService.pushCurrentUsageIfAvailable(resolveModelContextLimitForRecovery(
                 session.getProvider(),
                 session.getModel(),
+                session.getCwd(),
                 context.getSettingsService()
         ));
         usagePushService.refreshContextBar();
@@ -739,6 +740,7 @@ public class ChatWindowDelegate {
     static int resolveModelContextLimitForRecovery(
             String provider,
             String model,
+            String cwd,
             CodemossSettingsService settingsService
     ) {
         if ("codex".equalsIgnoreCase(provider)) {
@@ -762,7 +764,7 @@ public class ChatWindowDelegate {
             }
         }
         return isClaude
-                ? ModelProviderHandler.getClaudeContextLimit(resolvedModel)
+                ? ModelProviderHandler.getClaudeContextLimit(resolvedModel, cwd)
                 : SettingsHandler.getModelContextLimit(resolvedModel);
     }
 

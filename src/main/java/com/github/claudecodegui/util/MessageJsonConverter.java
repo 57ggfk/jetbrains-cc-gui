@@ -351,7 +351,8 @@ public class MessageJsonConverter {
 
             int usedTokens = TokenUsageUtils.extractContextTokens(lastUsage, currentProvider);
             int fallbackMaxTokens = ModelProviderHandler.resolveContextLimit(
-                    currentProvider, handlerContext.getCurrentModel());
+                    currentProvider, handlerContext.getCurrentModel(),
+                    ModelProviderHandler.sessionCwd(handlerContext));
             int maxTokens = TokenUsageUtils.extractMaxTokens(lastUsage, fallbackMaxTokens);
             int percentage = Math.min(100, maxTokens > 0 ? (int) ((usedTokens * 100.0) / maxTokens) : 0);
 

@@ -1037,7 +1037,7 @@ public class SessionMessageOrchestrator {
 
             int usedTokens = TokenUsageUtils.extractContextTokens(lastUsage, state.getProvider());
             int fallbackMaxTokens = ModelProviderHandler.resolveContextLimit(
-                    state.getProvider(), state.getModel());
+                    state.getProvider(), state.getModel(), state.getCwd());
             int maxTokens = TokenUsageUtils.extractMaxTokens(lastUsage, fallbackMaxTokens);
             usageDisplay.show(usedTokens, maxTokens);
             LOG.debug("Restored token usage from history: " + usedTokens + " / " + maxTokens);

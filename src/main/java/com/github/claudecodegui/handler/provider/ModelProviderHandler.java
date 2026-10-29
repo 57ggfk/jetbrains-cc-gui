@@ -17,7 +17,9 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.concurrency.AppExecutorUtil;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,6 +33,8 @@ public class ModelProviderHandler {
 
     private static final Pattern CAPACITY_SUFFIX_PATTERN =
             Pattern.compile("\\s*\\[([0-9.]+)([kKmM])\\]\\s*$");
+    private static final Pattern ONE_MILLION_SUFFIX_PATTERN =
+            Pattern.compile("(?i)\\[1m\\]\\s*$");
 
     static final Map<String, Integer> MODEL_CONTEXT_LIMITS = new HashMap<>();
     static {
@@ -159,7 +163,7 @@ public class ModelProviderHandler {
                     ? resolveConfiguredClaudeModelFromSettings(model)
                     : model;
             int newMaxTokens = isClaude
-                    ? getClaudeContextLimit(resolvedModelForUsage)
+                    ? getClaudeContextLimit(resolvedModelForUsage, sessionCwd(context))
                     : getModelContextLimit(provider, model);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
@@ -446,23 +450,34 @@ public class ModelProviderHandler {
             return baseModel;
         }
 
-        String mainModel = readConfiguredEnvValue(env, "ANTHROPIC_MODEL");
-        String mappedModel = null;
-        if (lowerBaseModel.contains("fable")) {
-            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_FABLE_MODEL");
-        } else if (lowerBaseModel.contains("opus")) {
-            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_OPUS_MODEL");
-        } else if (lowerBaseModel.contains("haiku")) {
-            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_HAIKU_MODEL");
-        } else if (lowerBaseModel.contains("sonnet")) {
-            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_DEFAULT_SONNET_MODEL");
+        String familyKey = familyModelEnvKey(lowerBaseModel);
+        if (familyKey == null) {
+            // Like the bridge, an id without a family name is sent as-is; the
+            // ANTHROPIC_MODEL fallback only applies inside a family.
+            return baseModel;
         }
 
+        String mappedModel = readConfiguredEnvValue(env, familyKey);
         if (mappedModel == null) {
-            mappedModel = mainModel != null ? mainModel : baseModel;
+            mappedModel = readConfiguredEnvValue(env, "ANTHROPIC_MODEL");
         }
+        return mappedModel == null ? baseModel : preserveRequested1MContext(baseModel, mappedModel);
+    }
 
-        return preserveRequested1MContext(baseModel, mappedModel);
+    private static String familyModelEnvKey(String lowerModel) {
+        if (lowerModel.contains("fable")) {
+            return "ANTHROPIC_DEFAULT_FABLE_MODEL";
+        }
+        if (lowerModel.contains("opus")) {
+            return "ANTHROPIC_DEFAULT_OPUS_MODEL";
+        }
+        if (lowerModel.contains("haiku")) {
+            return "ANTHROPIC_DEFAULT_HAIKU_MODEL";
+        }
+        if (lowerModel.contains("sonnet")) {
+            return "ANTHROPIC_DEFAULT_SONNET_MODEL";
+        }
+        return null;
     }
 
     /**
@@ -541,31 +556,72 @@ public class ModelProviderHandler {
     }
 
     /**
-     * Context window for a Claude model.
+     * Context window the Claude CLI uses for the model id it receives.
      *
-     * <p>Capacity suffixes chosen in the UI ({@code [1m]}, {@code [500k]}) are
-     * per-model and win over the global {@code CLAUDE_CODE_MAX_CONTEXT_TOKENS}
-     * override, matching the CLI's own accounting. The override then wins over the
-     * static model table.</p>
+     * <p>Mirrors the CLI's own resolution:</p>
+     * <ul>
+     *   <li>With {@code DISABLE_COMPACT} set, {@code CLAUDE_CODE_MAX_CONTEXT_TOKENS} applies
+     *       to every model and wins even over {@code [1m]}.</li>
+     *   <li>Otherwise {@code CLAUDE_CODE_MAX_CONTEXT_TOKENS} only applies to ids the CLI does not
+     *       treat as Claude models; a {@code claude-*} id keeps its built-in window.</li>
+     *   <li>A {@code [1m]} opt-in yields at least 1M and never shrinks a larger override.</li>
+     *   <li>Other capacity suffixes such as {@code [500k]} are a plugin convention and win
+     *       over the override.</li>
+     *   <li>The static model table is the last fallback.</li>
+     * </ul>
+     *
+     * @param cliModel model id after the settings mapping, as sent to the CLI
+     * @param cwd      session working directory for project-level settings, or null
      */
-    public static int getClaudeContextLimit(String model) {
-        Integer suffixLimit = parseCapacitySuffix(model);
-        if (suffixLimit != null) {
-            return suffixLimit;
+    public static int getClaudeContextLimit(String cliModel, String cwd) {
+        ClaudeContextWindowOverrideProvider overrides = ClaudeContextWindowOverrideProvider.getInstance();
+        OptionalInt configured = overrides.getOverride(cwd);
+        if (configured.isPresent() && overrides.isCompactDisabled(cwd)) {
+            return configured.getAsInt();
         }
-        return ClaudeContextWindowOverrideProvider.getInstance()
-                .getOverride()
-                .orElseGet(() -> getModelContextLimit(model));
+        OptionalInt override = isCliRecognizedClaudeModel(cliModel) ? OptionalInt.empty() : configured;
+        Integer suffixLimit = parseCapacitySuffix(cliModel);
+        if (suffixLimit == null) {
+            return override.orElseGet(() -> getModelContextLimit(cliModel));
+        }
+        return ONE_MILLION_SUFFIX_PATTERN.matcher(cliModel).find()
+                ? Math.max(suffixLimit, override.orElse(0))
+                : suffixLimit;
+    }
+
+    /**
+     * The CLI ignores {@code CLAUDE_CODE_MAX_CONTEXT_TOKENS} for ids it recognizes as
+     * Claude models, which in practice means any {@code claude-*} id.
+     */
+    static boolean isCliRecognizedClaudeModel(String model) {
+        return model != null && model.trim().toLowerCase(Locale.ROOT).startsWith("claude-");
     }
 
     /**
      * Provider-aware context window used by usage display fallbacks.
+     *
+     * <p>For Claude, {@code selectedModel} is the UI id; the settings family mapping is
+     * applied first so the window belongs to the model the bridge actually sends.</p>
+     *
+     * @param cwd session working directory for project-level settings, or null
      */
-    public static int resolveContextLimit(String provider, String model) {
-        if ("claude".equalsIgnoreCase(provider)) {
-            return getClaudeContextLimit(model);
+    public static int resolveContextLimit(String provider, String selectedModel, String cwd) {
+        if (!"claude".equalsIgnoreCase(provider)) {
+            return getModelContextLimit(provider, selectedModel);
         }
-        return getModelContextLimit(provider, model);
+        JsonObject env = ClaudeContextWindowOverrideProvider.getInstance().getUserSettingsEnv();
+        String cliModel = env == null ? selectedModel : resolveConfiguredClaudeModel(selectedModel, env);
+        return getClaudeContextLimit(cliModel, cwd);
+    }
+
+    /**
+     * @return the active session's working directory, or null when there is no session yet
+     */
+    public static String sessionCwd(HandlerContext context) {
+        if (context == null || context.getSession() == null) {
+            return null;
+        }
+        return context.getSession().getCwd();
     }
 
     private void clearSessionUsage() {

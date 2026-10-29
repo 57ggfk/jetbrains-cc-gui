@@ -62,6 +62,7 @@ public class ChatWindowDelegateTest {
         int limit = ChatWindowDelegate.resolveModelContextLimitForRecovery(
                 "codex",
                 "gpt-5.6-sol",
+                null,
                 null
         );
 
@@ -90,6 +91,7 @@ public class ChatWindowDelegateTest {
             int limit = ChatWindowDelegate.resolveModelContextLimitForRecovery(
                     "grok",
                     "grok-build",
+                    null,
                     null
             );
 
