@@ -177,6 +177,7 @@ GUI 的 env_key 查找使用实际 CODEX_HOME/config.toml，只读 TOML provider
 ## 编辑、命令、图片和 compact 的显示
 
 - `apply_patch`（直接或旧 exec 的静态实参）与 `fileChange` 共用 Claude 的编辑标题、操作栏、diff 和默认展开设置，展示全部文件、增删行和真实状态，变化类型及移动路径保留在悬停说明。真实错误为红色状态，详情收进展开区域。混合/部分动态 wrapper 中可确认的 literal 补丁也可预览；缺少单独结果时为灰色 unknown，完整 wrapper 与输出保留。历史只用于显示，不执行补丁；hunk 只在聊天中预览，不冒充完整 old/new 文件内容。
+- 原生 `fileChange` 的 `add` / `delete` 将完整正文放在 `diff`，只有 `update` 的 `diff` 是补丁；旧回执可显式提供 `content` 或 `unified_diff`。新增、删除正文按实际类型逐行展示和统计，保留字面量 `+` / `-`、独立 `\r`、空行与原始末尾换行；展示时只将 CRLF 规范化为 LF，不能把 Markdown 列表或 diff 示例误读为修改指令。工具卡片、批准预览及编辑账本使用同一解析结果，流式快照与 `apply_patch` 历史回放的增删行数保持一致。
 - `commandExecution` 的原生类型不保证提供“执行原因/summary”；已有 description/summary/title 被保留，原生批准 `reason` 与旧 `justification` 单列为批准理由。`commandActions` 的读取、列目录和搜索可形成动作摘要；legacy 历史回执的 `parsed_cmd` 沿用相同显示规则（兼容 `list_files` / `listFiles`）。缺少动作摘要时直接显示命令，历史回放不再生成 `Read last lines`、`Run node` 等通用英文标签，保证批量命令的单行展示与流式一致；旧字面量数组回放同样保留 Bash 工具类型，不再按命令文本改成 Read 或 Glob。不能把前一段思考或命令名编造成执行动机。
 - `dynamicToolCall` 使用原生 namespace/tool/arguments，文本和图片结果保留为标准结果块数组。inProgress 不显示已完成，终态和 success=false 按实际状态显示。通用卡片展开可查看已有结果正文/图片，混合 wrapper 的实际错误输出也可查看。
 - MCP 的 content 保持块数组，原生 image/data/mimeType 映射为共用图片 source，structuredContent 单独保留为可读块；实时与旧历史回执共用显示约定。网页 item/started 即可显示，在所属 operation 中断或失败后补配对终态，避免持续 pending。
