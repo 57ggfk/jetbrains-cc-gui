@@ -857,6 +857,18 @@ public class HistoryMessageInjector {
                 this.acceptConverted(stashed);
                 return;
             }
+            // A wrapper can close after the next turn has started; its fallback cards keep the turn that opened it.
+            String currentTurnId = this.nativeTurnId;
+            this.nativeTurnId = replay.lifecycleTurnId();
+            try {
+                this.acceptReplayFallback(replay, output);
+            } finally {
+                this.nativeTurnId = currentTurnId;
+            }
+            this.acceptConverted(stashed);
+        }
+
+        private void acceptReplayFallback(CodexKnownExecReplay replay, JsonObject output) {
             if (replay.keepsOriginalWrapper()) {
                 // A rejected ownership/index mapping must not be retried by looser legacy heuristics.
                 this.acceptOpaqueExecRecord(replay.original(), replay.callId(), false);
@@ -878,7 +890,6 @@ public class HistoryMessageInjector {
                     this.acceptLegacy(output);
                 }
             }
-            this.acceptConverted(stashed);
         }
 
         private void acceptOpaqueExecRecord(JsonObject record, String callId, boolean result) {
