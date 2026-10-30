@@ -552,6 +552,7 @@ export class CodexAppServerService extends EventEmitter {
     // Launch changes belong to the idle rebuild, not to an in-flight recovery.
     const params = {
       threadId,
+      excludeTurns: true,
       config: this.launchOptions?.nativeConfig ?? undefined,
       modelProvider: this.launchOptions?.modelProvider ?? undefined,
       developerInstructions: this.launchOptions?.developerInstructions ?? undefined,
@@ -2037,7 +2038,7 @@ export class CodexAppServerService extends EventEmitter {
       while (current !== root) {
         if (!current || seen.has(current) || seen.size >= 32 || Date.now() >= deadline) return false;
         seen.add(current);
-        const response = await client.request('thread/read', { threadId: current },
+        const response = await client.request('thread/read', { threadId: current, includeTurns: false, excludeTurns: true },
           { timeoutMs: Math.max(1, deadline - Date.now()) });
         if (this.client !== client || !client.alive || this.state === 'draining') return false;
         const nativeThread = response?.thread;
@@ -2127,6 +2128,11 @@ export class CodexAppServerService extends EventEmitter {
     ]);
     if (!allowed.has(method)) {
       throw new ClassifiedError('UNSUPPORTED', `unsupported Codex read-only method: ${method}`);
+    }
+    if (method === 'thread/read' && params.includeTurns !== true && params.excludeTurns === undefined) {
+      // New paginated CLIs require an explicit metadata-only read. Older CLIs
+      // still use includeTurns; retain it until full native reads are retired.
+      params = { ...params, includeTurns: false, excludeTurns: true };
     }
     await this.ensureRuntime();
     const response = await this.client.request(method, params, { timeoutMs: 30_000 });
