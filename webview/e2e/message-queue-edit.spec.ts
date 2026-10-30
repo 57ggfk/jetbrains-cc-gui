@@ -161,12 +161,27 @@ test('editing a queued message brings its attachments back', async ({ page }) =>
   expect(await draftText(page)).toBe('with an image');
 });
 
+/**
+ * Switches the active provider through the toolbar selector. Picking a Beta
+ * provider shows a one-time notice that has to be confirmed before the
+ * selection is applied.
+ */
+async function selectProvider(page: Page, providerId: string) {
+  await page.locator('.button-area-left .selector-button').nth(1).click();
+  await page.locator(`[data-provider-id="${providerId}"]`).click();
+
+  const confirm = page.locator('.alert-dialog .confirm-button');
+  if (await confirm.isVisible().catch(() => false)) {
+    await confirm.click();
+  }
+
+  await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', providerId);
+}
+
 test('queueing and editing behave the same on a non-Claude provider', async ({ page }) => {
   // The queue is driven by the shared busy state, not by the active provider,
   // so a Codex turn has to behave exactly like a Claude one.
-  await page.locator('.button-area-left .selector-button').nth(1).click();
-  await page.locator('[data-provider-id="codex"]').click();
-  await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', 'codex');
+  await selectProvider(page, 'codex');
 
   await startTurn(page);
   await queueMessage(page, 'queued on codex');
@@ -176,6 +191,25 @@ test('queueing and editing behave the same on a non-Claude provider', async ({ p
   await expect(page.locator('.message-queue')).toHaveCount(0);
   expect(await draftText(page)).toBe('queued on codex');
 });
+
+for (const providerId of ['pi', 'opencode'] as const) {
+  test(`queueing and editing work on the ${providerId} provider`, async ({ page }) => {
+    await selectProvider(page, providerId);
+
+    await startTurn(page);
+    await queueMessage(page, `queued on ${providerId}`);
+
+    await page.locator('.message-queue-edit').first().click();
+
+    await expect(page.locator('.message-queue')).toHaveCount(0);
+    expect(await draftText(page)).toBe(`queued on ${providerId}`);
+
+    // The restored draft is sent through the provider that is active now.
+    await endTurn(page);
+    await editable(page).press('Enter');
+    await expect.poll(() => sentMessages(page)).toEqual([`queued on ${providerId}`]);
+  });
+}
 
 test('removing a queued message leaves the rest of the queue alone', async ({ page }) => {
   await startTurn(page);
