@@ -67,7 +67,8 @@
       "reorderLabel": "重新排序消息 {{position}}",
       "reorderHint": "拖动可排序，聚焦后可用方向键调整",
       "mergedIntoDraft": "排队消息已合并到当前草稿",
-      "attachmentsNotRestored": "排队消息的附件未能回填到草稿"
+      "attachmentsNotRestored": "排队消息的附件未能回填到草稿",
+      "editBlockedAttachments": "该消息的附件无法回填，已保留在队列中"
     },
     "closePreview": "关闭预览",
     "loadingDropdown": "加载中...",

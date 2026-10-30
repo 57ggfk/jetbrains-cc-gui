@@ -23,6 +23,12 @@ export interface QueuedDraftTarget {
   setValue: (content: string) => void;
   /** Returns false when the target cannot take the attachments (externally controlled) */
   setAttachments: (attachments: Attachment[]) => boolean;
+  /**
+   * Capability probe for the step above: false means no attachment can ever be
+   * restored, so an edit that would drop them is refused up front. Targets that
+   * do not implement it are treated as capable.
+   */
+  canApplyAttachments?: () => boolean;
   focus: () => void;
 }
 
@@ -32,6 +38,29 @@ export interface QueuedDraftWrite extends QueuedDraftRestore {
   /** How many attachments the queued message itself carried */
   queuedAttachmentCount: number;
 }
+
+/** Queue access needed by the edit flow: look first, remove only when it is safe. */
+export interface QueuedEditSource {
+  /** Read a queued message without removing it */
+  peek: (id: string) => QueuedMessage | undefined;
+  /** Remove a queued message and hand it over */
+  take: (id: string) => QueuedMessage | undefined;
+}
+
+/**
+ * Outcome of an attempt to edit a queued message.
+ *
+ * Everything but `restored` leaves the queue and the draft untouched, so the
+ * caller can report the reason without having to put anything back.
+ */
+export type QueuedEditResult =
+  | { status: 'restored'; write: QueuedDraftWrite }
+  /** No input to restore into: dequeuing would drop the message for good. */
+  | { status: 'no-target' }
+  /** The id is unknown (already sent, or already edited). */
+  | { status: 'not-found' }
+  /** The target cannot take attachments, so the message stays queued. */
+  | { status: 'attachments-blocked' };
 
 /**
  * Build the input-draft payload for editing a queued message.
@@ -88,16 +117,22 @@ export function writeQueuedMessageToDraft(
 /**
  * Take a queued message out of the queue and restore it into the draft.
  *
- * The target is checked before the message is dequeued: without a draft to
- * restore into, dequeuing would drop the message for good.
+ * Nothing is removed until the restore is known to be safe: without a draft to
+ * restore into, or when the target cannot take the message's attachments,
+ * dequeuing would drop the message for good.
  */
 export function takeQueuedMessageForEdit(
   target: QueuedDraftTarget | null | undefined,
-  dequeueForEdit: (id: string) => QueuedMessage | undefined,
+  source: QueuedEditSource,
   id: string,
-): QueuedDraftWrite | null {
-  if (!target) return null;
-  const removed = dequeueForEdit(id);
-  if (!removed) return null;
-  return writeQueuedMessageToDraft(target, removed);
+): QueuedEditResult {
+  if (!target) return { status: 'no-target' };
+  const queued = source.peek(id);
+  if (!queued) return { status: 'not-found' };
+  if ((queued.attachments?.length ?? 0) > 0 && target.canApplyAttachments?.() === false) {
+    return { status: 'attachments-blocked' };
+  }
+  const removed = source.take(id);
+  if (!removed) return { status: 'not-found' };
+  return { status: 'restored', write: writeQueuedMessageToDraft(target, removed) };
 }

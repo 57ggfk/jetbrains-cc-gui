@@ -47,11 +47,28 @@ function createTarget(options: {
       state.attachments = next;
       return true;
     }),
+    canApplyAttachments: () => options.acceptsAttachments !== false,
     focus: vi.fn(() => {
       calls.push('focus');
     }),
   };
   return { target, state, calls };
+}
+
+/** Minimal queue the edit flow reads from and removes messages from. */
+function createSource(messages: QueuedMessage[]) {
+  const items = [...messages];
+  return {
+    source: {
+      peek: vi.fn((id: string) => items.find(item => item.id === id)),
+      take: vi.fn((id: string) => {
+        const index = items.findIndex(item => item.id === id);
+        if (index < 0) return undefined;
+        return items.splice(index, 1)[0];
+      }),
+    },
+    items,
+  };
 }
 
 describe('mergeQueuedMessageIntoDraft', () => {
@@ -152,26 +169,52 @@ describe('writeQueuedMessageToDraft', () => {
 
 describe('takeQueuedMessageForEdit', () => {
   it('dequeues only after the target exists', () => {
-    const dequeueForEdit = vi.fn(() => queuedMessage());
+    const { source } = createSource([queuedMessage()]);
     const { target } = createTarget();
 
-    expect(takeQueuedMessageForEdit(null, dequeueForEdit, 'queue-1')).toBeNull();
-    expect(takeQueuedMessageForEdit(undefined, dequeueForEdit, 'queue-1')).toBeNull();
+    expect(takeQueuedMessageForEdit(null, source, 'queue-1')).toEqual({ status: 'no-target' });
+    expect(takeQueuedMessageForEdit(undefined, source, 'queue-1')).toEqual({ status: 'no-target' });
     // Without a draft to restore into, dequeuing would lose the message.
-    expect(dequeueForEdit).not.toHaveBeenCalled();
+    expect(source.take).not.toHaveBeenCalled();
 
-    const restored = takeQueuedMessageForEdit(target, dequeueForEdit, 'queue-1');
+    const outcome = takeQueuedMessageForEdit(target, source, 'queue-1');
 
-    expect(dequeueForEdit).toHaveBeenCalledExactlyOnceWith('queue-1');
-    expect(restored?.content).toBe('queued message');
+    expect(source.take).toHaveBeenCalledExactlyOnceWith('queue-1');
+    expect(outcome.status).toBe('restored');
+    expect(outcome).toMatchObject({ write: { content: 'queued message' } });
   });
 
   it('leaves the queue alone when the message is already gone', () => {
-    const dequeueForEdit = vi.fn((): QueuedMessage | undefined => undefined);
+    const { source } = createSource([]);
     const { target } = createTarget();
 
-    expect(takeQueuedMessageForEdit(target, dequeueForEdit, 'missing')).toBeNull();
+    expect(takeQueuedMessageForEdit(target, source, 'missing')).toEqual({ status: 'not-found' });
     expect(target.setValue).not.toHaveBeenCalled();
     expect(target.focus).not.toHaveBeenCalled();
+  });
+
+  it('keeps the message queued when its attachments could never be restored', () => {
+    const { source, items } = createSource([queuedMessage({ attachments: [queuedAttachment] })]);
+    const { target, state } = createTarget({ acceptsAttachments: false });
+
+    const outcome = takeQueuedMessageForEdit(target, source, 'queue-1');
+
+    // Refused before anything is removed, so the message is still queued and
+    // the draft was never touched.
+    expect(outcome).toEqual({ status: 'attachments-blocked' });
+    expect(items).toHaveLength(1);
+    expect(source.take).not.toHaveBeenCalled();
+    expect(state.content).toBe('');
+  });
+
+  it('still restores a message without attachments to a target that refuses them', () => {
+    const { source, items } = createSource([queuedMessage()]);
+    const { target, state } = createTarget({ acceptsAttachments: false });
+
+    const outcome = takeQueuedMessageForEdit(target, source, 'queue-1');
+
+    expect(outcome.status).toBe('restored');
+    expect(items).toHaveLength(0);
+    expect(state.content).toBe('queued message');
   });
 });

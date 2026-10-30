@@ -113,6 +113,11 @@ export function useChatInputController({
     setInternalAttachments(next);
     return true;
   }, [externalAttachments, setInternalAttachments]);
+  // Lets a caller vet a restore before it removes anything from the queue.
+  const canApplyDraftAttachments = useCallback(
+    () => externalAttachments === undefined,
+    [externalAttachments],
+  );
 
   // Reset draft attachments + clear JCEF ghosting when the session changes, so
   // attachments don't drift into a new conversation and leave stale thumbnails.
@@ -276,6 +281,7 @@ export function useChatInputController({
     extractFileTags,
     getAttachments: getDraftAttachments,
     setAttachments: setDraftAttachments,
+    canApplyAttachments: canApplyDraftAttachments,
     renderTags: renderTagsNowIfSafe,
     inlineCompletion,
     handleInput,

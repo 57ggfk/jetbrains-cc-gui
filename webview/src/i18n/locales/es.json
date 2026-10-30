@@ -50,7 +50,8 @@
       "reorderLabel": "Reordenar mensaje {{position}}",
       "reorderHint": "Arrastra para reordenar, o usa las flechas tras enfocar",
       "mergedIntoDraft": "El mensaje en cola se añadió al borrador actual",
-      "attachmentsNotRestored": "Los archivos adjuntos del mensaje en cola no se restauraron"
+      "attachmentsNotRestored": "Los archivos adjuntos del mensaje en cola no se restauraron",
+      "editBlockedAttachments": "Sus archivos adjuntos no se pueden restaurar aquí, el mensaje se queda en la cola"
     },
     "closePreview": "Cerrar vista previa",
     "loadingDropdown": "Cargando...",

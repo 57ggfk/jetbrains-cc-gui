@@ -50,7 +50,8 @@
       "reorderLabel": "Reordenar mensagem {{position}}",
       "reorderHint": "Arraste para reordenar ou use as setas após focar",
       "mergedIntoDraft": "A mensagem na fila foi adicionada ao rascunho atual",
-      "attachmentsNotRestored": "Os anexos da mensagem na fila não foram restaurados"
+      "attachmentsNotRestored": "Os anexos da mensagem na fila não foram restaurados",
+      "editBlockedAttachments": "Seus anexos não podem ser restaurados aqui, a mensagem permanece na fila"
     },
     "closePreview": "Fechar visualização",
     "loadingDropdown": "Carregando...",

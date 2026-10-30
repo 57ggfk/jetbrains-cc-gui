@@ -50,7 +50,8 @@
       "reorderLabel": "Réordonner le message {{position}}",
       "reorderHint": "Faire glisser pour réordonner, ou utiliser les flèches après avoir mis le focus",
       "mergedIntoDraft": "Le message en file d'attente a été ajouté au brouillon en cours",
-      "attachmentsNotRestored": "Les pièces jointes du message en file n ont pas été restaurées"
+      "attachmentsNotRestored": "Les pièces jointes du message en file n ont pas été restaurées",
+      "editBlockedAttachments": "Ses pièces jointes ne peuvent pas être restaurées ici, le message reste dans la file d'attente"
     },
     "closePreview": "Fermer l'aperçu",
     "loadingDropdown": "Chargement...",

@@ -901,6 +901,11 @@ export interface ChatInputBoxHandle {
    * caller can tell the user that nothing was restored.
    */
   setAttachments: (attachments: Attachment[]) => boolean;
+  /**
+   * Whether `setAttachments` can take attachments at all — false when the
+   * parent owns them. Lets a caller vet a restore before it removes anything.
+   */
+  canApplyAttachments: () => boolean;
 }
 
 // ============================================================

@@ -20,6 +20,8 @@ export interface UseChatInputImperativeHandleOptions {
   getAttachments: () => Attachment[];
   /** Replace the draft attachments (queue edit restore); false when externally controlled */
   setAttachments: (attachments: Attachment[]) => boolean;
+  /** Whether attachments are owned by this input; defaults to true when absent */
+  canApplyAttachments?: () => boolean;
   /**
    * Renders the rich references (@file chips, quote chips) inside the input.
    * A programmatic value write is plain text, so this has to run afterwards to
@@ -48,8 +50,12 @@ export function useChatInputImperativeHandle({
   extractFileTags,
   getAttachments,
   setAttachments,
+  canApplyAttachments,
   renderTags,
 }: UseChatInputImperativeHandleOptions): void {
+  // Treat a missing probe as "capable": the plain uncontrolled input is the
+  // common case, and refusing a restore there would be worse than trying.
+  const attachmentsEnabled = canApplyAttachments ?? (() => true);
   useImperativeHandle(
     ref,
     () => ({
@@ -91,6 +97,7 @@ export function useChatInputImperativeHandle({
       getFileTags: extractFileTags,
       getAttachments,
       setAttachments,
+      canApplyAttachments: attachmentsEnabled,
     }),
     [
       getTextContent,
@@ -106,6 +113,7 @@ export function useChatInputImperativeHandle({
       extractFileTags,
       getAttachments,
       setAttachments,
+      attachmentsEnabled,
       renderTags,
     ]
   );

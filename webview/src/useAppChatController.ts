@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -315,26 +315,33 @@ export const useAppChatController = ({
     enqueue: enqueueMessage,
     dequeue: dequeueMessage,
     dequeueForEdit: dequeueQueuedMessageForEdit,
+    peekQueuedMessage,
     clearQueue,
     reorder: reorderMessageQueue,
   } = useMessageQueue({ isLoading: loading || codexTurnActive || codexPlanExecutionPending || codexCompactionPending, onExecute: hookHandleSubmit });
+
+  // The edit flow has to look at a queued message before it removes it.
+  const queuedEditSource = useMemo(
+    () => ({ peek: peekQueuedMessage, take: dequeueQueuedMessageForEdit }),
+    [peekQueuedMessage, dequeueQueuedMessageForEdit],
+  );
 
   /**
    * Edit a queued message: dequeue it and restore its content and attachments
    * into the input draft as if it had never been sent. An unsent draft that is
    * still in the input is never overwritten — the queued message is appended
    * after it and its attachments are merged in, with a toast explaining the
-   * merge.
+   * merge. Nothing is removed while the restore could still fail.
    */
   const handleEditQueuedMessage = useCallback((id: string) => {
-    // The message is only dequeued once a draft is there to receive it;
-    // dequeuing first would drop the message when the input is not mounted.
-    const restored = takeQueuedMessageForEdit(
-      chatInputRef.current,
-      dequeueQueuedMessageForEdit,
-      id,
-    );
-    if (!restored) return;
+    const outcome = takeQueuedMessageForEdit(chatInputRef.current, queuedEditSource, id);
+    if (outcome.status === 'attachments-blocked') {
+      // The message keeps its place: restoring it here would drop its files.
+      addToast(t('chat.queue.editBlockedAttachments'), 'warning');
+      return;
+    }
+    if (outcome.status !== 'restored') return;
+    const restored = outcome.write;
     setDraftInput(restored.content);
     if (!restored.attachmentsApplied && restored.queuedAttachmentCount > 0) {
       addToast(t('chat.queue.attachmentsNotRestored'), 'warning');
@@ -342,7 +349,7 @@ export const useAppChatController = ({
     if (restored.merged) {
       addToast(t('chat.queue.mergedIntoDraft'), 'info');
     }
-  }, [dequeueQueuedMessageForEdit, addToast, setDraftInput, t]);
+  }, [queuedEditSource, addToast, setDraftInput, t]);
 
   // Point the session-transition indirection at the real clearQueue.
   useEffect(() => {
