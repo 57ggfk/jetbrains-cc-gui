@@ -90,6 +90,7 @@ public class WebviewInitializer {
         Map<String, MarkerCliBridge> getCliBridges();
         JPanel getMainPanel();
         HtmlLoader getHtmlLoader();
+        default String getDraftCacheKey() { return null; }
         HandlerContext getHandlerContext();
         JBCefBrowser getBrowser();
         JBCefOSRHandlerFactory getOsrHandlerFactory();
@@ -1583,11 +1584,19 @@ public class WebviewInitializer {
                 ? host.getHandlerContext().getSession() : null;
         String tabProvider = session != null ? session.getProvider() : null;
         String tabModel = session != null ? session.getModel() : null;
-        return htmlLoader.injectInitialPageState(
+        String initializedHtml = htmlLoader.injectInitialPageState(
                 htmlContent,
                 tabProvider,
                 tabModel,
                 SessionState.discoverUserDshPresetIds());
+        // The window key survives renderer/browser recreation and keeps different tabs isolated.
+        String draftKey = host.getDraftCacheKey();
+        if (draftKey != null) {
+            String script = "<script>window.__CCGUI_DRAFT_CACHE_KEY__="
+                    + new com.google.gson.Gson().toJson(draftKey) + ";</script>";
+            initializedHtml = initializedHtml.replace("</head>", script + "</head>");
+        }
+        return initializedHtml;
     }
 
     /**

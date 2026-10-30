@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ToastAction, ToastMessage } from '../components/Toast';
 import type { SettingsTab } from '../components/settings/SettingsSidebar';
 import type { ProviderManageTab } from '../components/settings/ProviderTabSection';
@@ -6,8 +6,54 @@ import type { ContextInfo, ViewMode } from '../hooks';
 import { APP_VERSION } from '../version/version';
 import { DEFAULT_STATUS } from './MessagesContext';
 import { forceWebviewRepaint } from '../utils/forceWebviewRepaint';
+import { expandQuoteTokens } from '../components/ChatInputBox/utils/quoteRegistry';
 
 const LAST_SEEN_VERSION_KEY = 'lastSeenChangelogVersion';
+const DRAFT_CACHE_NAME = 'ccgui-drafts-v1';
+const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+let draftWrites = Promise.resolve();
+
+function draftCacheUrl(): string | null {
+  const key = window.__CCGUI_DRAFT_CACHE_KEY__;
+  return key ? `https://cc-gui-webview.local/drafts/${encodeURIComponent(key)}` : null;
+}
+
+/** Cache Storage is shared by JCEF's file-backed documents; localStorage may be split by file URL. */
+async function readDraftCache(): Promise<string> {
+  const url = draftCacheUrl();
+  if (!url) return '';
+  try {
+    const cache = await caches.open(DRAFT_CACHE_NAME);
+    const response = await cache.match(url);
+    if (!response) return '';
+    const cached = await response.json();
+    if (typeof cached?.text === 'string' && typeof cached.savedAt === 'number'
+      && Date.now() - cached.savedAt <= DRAFT_MAX_AGE_MS) return cached.text;
+    await cache.delete(url);
+  } catch {
+    // A denied or unavailable browser cache must not disable editing.
+  }
+  return '';
+}
+
+function writeDraftCache(text: string): void {
+  const url = draftCacheUrl();
+  if (!url) return;
+  // Quote chips use an in-memory registry; persist their Markdown before the document disappears.
+  const snapshot = expandQuoteTokens(text);
+  draftWrites = draftWrites.then(async () => {
+    const cache = await caches.open(DRAFT_CACHE_NAME);
+    if (snapshot) {
+      await cache.put(url, new Response(JSON.stringify({ text: snapshot, savedAt: Date.now() }), {
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      const keys = await cache.keys();
+      await Promise.all(keys.slice(0, -32).map((key) => cache.delete(key)));
+    } else {
+      await cache.delete(url);
+    }
+  }).catch(() => {});
+}
 
 export interface UIStateContextValue {
   // Navigation
@@ -64,8 +110,39 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
     return lastSeen !== APP_VERSION;
   });
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
-  const [draftInput, setDraftInput] = useState<string>('');
+  const [draftInput, updateDraftInput] = useState<string>('');
+  const [draftReady, setDraftReady] = useState(!window.__CCGUI_DRAFT_CACHE_KEY__);
+  const draftRef = useRef(draftInput);
+  const setDraftInput = useCallback<React.Dispatch<React.SetStateAction<string>>>((value) => {
+    const next = typeof value === 'function' ? value(draftRef.current) : value;
+    draftRef.current = next;
+    updateDraftInput(next);
+    if (!next || document.visibilityState === 'hidden') writeDraftCache(next);
+  }, []);
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!window.__CCGUI_DRAFT_CACHE_KEY__) return;
+    let disposed = false;
+    void readDraftCache().then((text) => {
+      if (disposed) return;
+      draftRef.current = text;
+      updateDraftInput(text);
+      setDraftReady(true);
+    });
+    return () => { disposed = true; };
+  }, []);
+  useEffect(() => {
+    if (!draftReady) return;
+    const timer = window.setTimeout(() => writeDraftCache(draftInput), 200);
+    return () => window.clearTimeout(timer);
+  }, [draftInput, draftReady]);
+  useEffect(() => {
+    if (!draftReady) return;
+    const persist = () => writeDraftCache(draftRef.current);
+    window.addEventListener('pagehide', persist);
+    return () => window.removeEventListener('pagehide', persist);
+  }, [draftReady]);
 
   const addToast = useCallback((message: string, type: ToastMessage['type'] = 'info', action?: ToastAction) => {
     if (message === DEFAULT_STATUS || !message) return;
@@ -111,7 +188,7 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <UIStateContext.Provider value={value}>{children}</UIStateContext.Provider>;
+  return <UIStateContext.Provider value={value}>{draftReady ? children : null}</UIStateContext.Provider>;
 }
 
 export function useUIState(): UIStateContextValue {

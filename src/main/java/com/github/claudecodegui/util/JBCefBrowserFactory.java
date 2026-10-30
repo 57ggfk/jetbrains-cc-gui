@@ -69,6 +69,12 @@ public final class JBCefBrowserFactory {
         // Utility class, do not instantiate
     }
 
+    /** Gateway's backend proxy has no local paint callbacks; out-of-process JCEF still does. */
+    public static boolean isRemoteDevelopmentBrowser(CefBrowser browser) {
+        return browser != null
+                && "com.jetbrains.rdserver.cef.BackendCefBrowser".equals(browser.getClass().getName());
+    }
+
     /**
      * Create a JBCefBrowser instance.
      * Automatically selects the appropriate OSR setting based on the current platform and IDEA version.
