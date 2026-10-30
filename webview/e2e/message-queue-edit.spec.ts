@@ -161,6 +161,22 @@ test('editing a queued message brings its attachments back', async ({ page }) =>
   expect(await draftText(page)).toBe('with an image');
 });
 
+test('queueing and editing behave the same on a non-Claude provider', async ({ page }) => {
+  // The queue is driven by the shared busy state, not by the active provider,
+  // so a Codex turn has to behave exactly like a Claude one.
+  await page.locator('.button-area-left .selector-button').nth(1).click();
+  await page.locator('[data-provider-id="codex"]').click();
+  await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', 'codex');
+
+  await startTurn(page);
+  await queueMessage(page, 'queued on codex');
+
+  await page.locator('.message-queue-edit').first().click();
+
+  await expect(page.locator('.message-queue')).toHaveCount(0);
+  expect(await draftText(page)).toBe('queued on codex');
+});
+
 test('removing a queued message leaves the rest of the queue alone', async ({ page }) => {
   await startTurn(page);
   await queueMessage(page, 'first queued');
