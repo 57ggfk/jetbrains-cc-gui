@@ -263,6 +263,37 @@ describe('useMessageQueue', () => {
     expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['only']);
   });
 
+  it('dequeueForEdit sees the order applied by reorder', () => {
+    const { result } = renderQueue(true);
+
+    let removed: QueuedMessage | undefined;
+    act(() => {
+      result.current.queueApi.enqueue('first');
+      result.current.queueApi.enqueue('second');
+    });
+    const [a, b] = result.current.queueApi.queue;
+    act(() => {
+      result.current.queueApi.reorder([b.id, a.id]);
+      removed = result.current.queueApi.dequeueForEdit(b.id);
+    });
+
+    expect(removed).toMatchObject({ content: 'second' });
+    expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['first']);
+  });
+
+  it('peekQueuedMessage does not remove and reports unknown ids', () => {
+    const { result } = renderQueue(true);
+
+    let peeked: QueuedMessage | undefined;
+    act(() => {
+      result.current.queueApi.enqueue('stays');
+      peeked = result.current.queueApi.peekQueuedMessage('unknown-id');
+    });
+
+    expect(peeked).toBeUndefined();
+    expect(result.current.queueApi.queue.map(m => m.content)).toEqual(['stays']);
+  });
+
   it('does not execute a message taken out of the queue for editing', () => {
     const { result, onExecute } = renderQueue(true);
 

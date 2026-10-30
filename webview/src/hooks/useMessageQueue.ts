@@ -28,12 +28,33 @@ export interface UseMessageQueueReturn {
    * order; an unknown id returns undefined and leaves the queue untouched.
    */
   dequeueForEdit: (id: string) => QueuedMessage | undefined;
+  /** Read a queued message without removing it */
+  peekQueuedMessage: (id: string) => QueuedMessage | undefined;
   /** Clear entire queue */
   clearQueue: () => void;
   /** Reorder the queue by an ordered list of ids (index 0 executes first) */
   reorder: (orderedIds: string[]) => void;
   /** Whether queue has items */
   hasQueuedMessages: boolean;
+}
+
+/**
+ * Rebuild the queue in the order of `orderedIds` (index 0 executes next).
+ * Kept outside the hook so the ordering rules can be tested without React.
+ */
+function applyQueueOrder(queue: QueuedMessage[], orderedIds: string[]): QueuedMessage[] {
+  const byId = new Map(queue.map(item => [item.id, item]));
+  const seen = new Set<string>();
+  const ordered: QueuedMessage[] = [];
+  for (const id of orderedIds) {
+    const item = byId.get(id);
+    if (item && !seen.has(id)) {
+      ordered.push(item);
+      seen.add(id);
+    }
+  }
+  const remaining = queue.filter(item => !seen.has(item.id));
+  return [...ordered, ...remaining];
 }
 
 /**
@@ -72,6 +93,9 @@ export function useMessageQueue({
       attachments,
       queuedAt: Date.now(),
     };
+    // The mirror has to move with the queue: an edit that lands before the
+    // next render would otherwise look into a snapshot without this item.
+    queueRef.current = [...queueRef.current, newItem];
     setQueue(prev => [...prev, newItem]);
   }, [generateId]);
 
@@ -87,6 +111,12 @@ export function useMessageQueue({
     return removed;
   }, []);
 
+  /** Read a queued message without removing it (used to vet an edit first) */
+  const peekQueuedMessage = useCallback(
+    (id: string): QueuedMessage | undefined => queueRef.current.find(item => item.id === id),
+    [],
+  );
+
   // Remove message from queue (the removed payload is ignored here)
   const dequeue = useCallback((id: string) => {
     dequeueForEdit(id);
@@ -94,6 +124,7 @@ export function useMessageQueue({
 
   // Clear entire queue
   const clearQueue = useCallback(() => {
+    queueRef.current = [];
     setQueue([]);
   }, []);
 
@@ -104,20 +135,9 @@ export function useMessageQueue({
    *   their original order so no message is ever dropped.
    */
   const reorder = useCallback((orderedIds: string[]) => {
-    setQueue(prev => {
-      const byId = new Map(prev.map(item => [item.id, item]));
-      const seen = new Set<string>();
-      const ordered: QueuedMessage[] = [];
-      for (const id of orderedIds) {
-        const item = byId.get(id);
-        if (item && !seen.has(id)) {
-          ordered.push(item);
-          seen.add(id);
-        }
-      }
-      const remaining = prev.filter(item => !seen.has(item.id));
-      return [...ordered, ...remaining];
-    });
+    const ordered = applyQueueOrder(queueRef.current, orderedIds);
+    queueRef.current = ordered;
+    setQueue(ordered);
   }, []);
 
   // Auto-execute next message whenever the chat is idle. Dequeue and execute
@@ -146,7 +166,9 @@ export function useMessageQueue({
     }
     const nextMessage = queue[0];
     dispatchedAtRef.current = Date.now();
-    setQueue(prev => prev.slice(1));
+    const remaining = queue.slice(1);
+    queueRef.current = remaining;
+    setQueue(remaining);
     onExecute(nextMessage.content, nextMessage.attachments);
   }, [isLoading, queue, onExecute]);
 
@@ -155,6 +177,7 @@ export function useMessageQueue({
     enqueue,
     dequeue,
     dequeueForEdit,
+    peekQueuedMessage,
     clearQueue,
     reorder,
     hasQueuedMessages: queue.length > 0,
