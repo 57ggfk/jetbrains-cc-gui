@@ -40,7 +40,8 @@ export interface UseMessageQueueReturn {
 
 /**
  * Rebuild the queue in the order of `orderedIds` (index 0 executes next).
- * Kept outside the hook so the ordering rules can be tested without React.
+ * Kept out of the hook so the ordering rules read on their own; the hook still
+ * has to move the queue mirror with the result.
  */
 function applyQueueOrder(queue: QueuedMessage[], orderedIds: string[]): QueuedMessage[] {
   const byId = new Map(queue.map(item => [item.id, item]));
