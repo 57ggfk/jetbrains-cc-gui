@@ -1527,6 +1527,11 @@
     "codexDeliveryUnconfirmed": "Codex has not confirmed your choice yet ({{error}}). It may still take effect, so do not answer again; if the conversation does not continue, click Stop and send your message again."
   },
   "askUserQuestion": {
+    "configWarning": "Codex reported a configuration warning. Review the details.",
+    "configWarningTitle": "Codex configuration warning",
+    "apiDeprecationWarning": "Codex reported an API compatibility notice. Review the details.",
+    "apiDeprecationTitle": "Codex API compatibility notice",
+    "warningDetails": "View details",
     "title": "Claude has some questions for you",
     "progress": "Question {{current}} / {{total}}",
     "multiSelectHint": "You can select multiple options",
