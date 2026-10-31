@@ -6,54 +6,12 @@ import type { ContextInfo, ViewMode } from '../hooks';
 import { APP_VERSION } from '../version/version';
 import { DEFAULT_STATUS } from './MessagesContext';
 import { forceWebviewRepaint } from '../utils/forceWebviewRepaint';
-import { expandQuoteTokens } from '../components/ChatInputBox/utils/quoteRegistry';
+import { draftCacheKey, mirrorDraft, pruneDrafts, readDraft, writeDraft } from './draftStorage';
 
 const LAST_SEEN_VERSION_KEY = 'lastSeenChangelogVersion';
-const DRAFT_CACHE_NAME = 'ccgui-drafts-v1';
-const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-let draftWrites = Promise.resolve();
-
-function draftCacheUrl(): string | null {
-  const key = window.__CCGUI_DRAFT_CACHE_KEY__;
-  return key ? `https://cc-gui-webview.local/drafts/${encodeURIComponent(key)}` : null;
-}
-
-/** Cache Storage is shared by JCEF's file-backed documents; localStorage may be split by file URL. */
-async function readDraftCache(): Promise<string> {
-  const url = draftCacheUrl();
-  if (!url) return '';
-  try {
-    const cache = await caches.open(DRAFT_CACHE_NAME);
-    const response = await cache.match(url);
-    if (!response) return '';
-    const cached = await response.json();
-    if (typeof cached?.text === 'string' && typeof cached.savedAt === 'number'
-      && Date.now() - cached.savedAt <= DRAFT_MAX_AGE_MS) return cached.text;
-    await cache.delete(url);
-  } catch {
-    // A denied or unavailable browser cache must not disable editing.
-  }
-  return '';
-}
-
-function writeDraftCache(text: string): void {
-  const url = draftCacheUrl();
-  if (!url) return;
-  // Quote chips use an in-memory registry; persist their Markdown before the document disappears.
-  const snapshot = expandQuoteTokens(text);
-  draftWrites = draftWrites.then(async () => {
-    const cache = await caches.open(DRAFT_CACHE_NAME);
-    if (snapshot) {
-      await cache.put(url, new Response(JSON.stringify({ text: snapshot, savedAt: Date.now() }), {
-        headers: { 'Content-Type': 'application/json' },
-      }));
-      const keys = await cache.keys();
-      await Promise.all(keys.slice(0, -32).map((key) => cache.delete(key)));
-    } else {
-      await cache.delete(url);
-    }
-  }).catch(() => {});
-}
+const DRAFT_SAVE_DEBOUNCE_MS = 200;
+/** A stalled browser storage backend must not keep the whole chat blank. */
+const DRAFT_RESTORE_TIMEOUT_MS = 1000;
 
 export interface UIStateContextValue {
   // Navigation
@@ -111,35 +69,53 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
   });
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
   const [draftInput, updateDraftInput] = useState<string>('');
-  const [draftReady, setDraftReady] = useState(!window.__CCGUI_DRAFT_CACHE_KEY__);
+  const [draftReady, setDraftReady] = useState(() => !draftCacheKey());
   const draftRef = useRef(draftInput);
+  // Until the user (or a programmatic edit) changes the draft, storage holds the authoritative copy.
+  const draftDirtyRef = useRef(false);
   const setDraftInput = useCallback<React.Dispatch<React.SetStateAction<string>>>((value) => {
     const next = typeof value === 'function' ? value(draftRef.current) : value;
     draftRef.current = next;
+    draftDirtyRef.current = true;
     updateDraftInput(next);
-    if (!next || document.visibilityState === 'hidden') writeDraftCache(next);
+    // Synchronous, so a reload that cuts the async Cache Storage write short keeps the text.
+    mirrorDraft(next);
+    if (!next || document.visibilityState === 'hidden') void writeDraft(next);
   }, []);
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!window.__CCGUI_DRAFT_CACHE_KEY__) return;
-    let disposed = false;
-    void readDraftCache().then((text) => {
-      if (disposed) return;
-      draftRef.current = text;
-      updateDraftInput(text);
+    if (!draftCacheKey()) return;
+    let settled = false;
+    let timer: number | undefined;
+    const finish = (text: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (!draftDirtyRef.current) {
+        draftRef.current = text;
+        updateDraftInput(text);
+      }
       setDraftReady(true);
-    });
-    return () => { disposed = true; };
+    };
+    timer = window.setTimeout(() => finish(''), DRAFT_RESTORE_TIMEOUT_MS);
+    void readDraft().then(finish);
+    void pruneDrafts();
+    return () => {
+      settled = true;
+      window.clearTimeout(timer);
+    };
   }, []);
   useEffect(() => {
-    if (!draftReady) return;
-    const timer = window.setTimeout(() => writeDraftCache(draftInput), 200);
+    if (!draftReady || !draftDirtyRef.current) return;
+    const timer = window.setTimeout(() => void writeDraft(draftInput), DRAFT_SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [draftInput, draftReady]);
   useEffect(() => {
     if (!draftReady) return;
-    const persist = () => writeDraftCache(draftRef.current);
+    const persist = () => {
+      if (draftDirtyRef.current) void writeDraft(draftRef.current);
+    };
     window.addEventListener('pagehide', persist);
     return () => window.removeEventListener('pagehide', persist);
   }, [draftReady]);

@@ -282,6 +282,35 @@ test('denied client draft storage does not prevent typing or sending', async ({ 
   await expect(input).toBeEmpty();
 });
 
+test('a reload right after typing keeps the latest draft and a cleared draft stays cleared', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__CCGUI_DRAFT_CACHE_KEY__ = 'fast-reload';
+  });
+  await page.reload();
+  const input = page.locator('.input-editable');
+  await input.fill('typed just before reload');
+  // No wait: the debounced Cache Storage write cannot finish before the document unloads.
+  await page.reload();
+  await expect(input).toHaveText('typed just before reload');
+
+  await input.fill('');
+  await page.reload();
+  await expect(input).toBeEmpty();
+});
+
+test('a stalled draft store does not keep the chat blank', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__CCGUI_DRAFT_CACHE_KEY__ = 'storage-stalled';
+    const open = caches.open.bind(caches);
+    caches.open = (name) => name === 'ccgui-drafts-v1' ? new Promise(() => {}) : open(name);
+  });
+  await page.reload();
+  const input = page.locator('.input-editable');
+  await input.fill('typed after the restore timeout');
+  await input.press('Enter');
+  await expect.poll(() => sentMessages(page)).toEqual(['typed after the restore timeout']);
+});
+
 test('remote tab repaint preserves input selection and IME composition without changing zoom', async ({ page }) => {
   const input = page.locator('.input-editable');
   await input.fill('中文 English');
