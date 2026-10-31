@@ -64,6 +64,8 @@
     "queue": {
       "edit": "编辑排队消息",
       "remove": "从队列移除",
+      "editLabel": "编辑排队消息 {{position}}",
+      "removeLabel": "从队列移除消息 {{position}}",
       "reorderLabel": "重新排序消息 {{position}}",
       "reorderHint": "拖动可排序，聚焦后可用方向键调整",
       "mergedIntoDraft": "排队消息已合并到当前草稿",

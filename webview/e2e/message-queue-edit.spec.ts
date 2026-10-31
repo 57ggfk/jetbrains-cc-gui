@@ -211,6 +211,48 @@ for (const providerId of ['pi', 'opencode'] as const) {
   });
 }
 
+/** Queues `text` followed by an inline quote chip holding `quote`. */
+async function queueQuotedMessage(page: Page, text: string, quote: string) {
+  await editable(page).click();
+  await editable(page).pressSequentially(`${text} `);
+  await page.evaluate((quoteText) => window.addQuotedSnippet?.(JSON.stringify({ text: quoteText })), quote);
+  await expect(editable(page).locator('.quote-tag')).toHaveCount(1);
+  await editable(page).press('Enter');
+  await expect(page.locator('.message-queue')).toContainText(text);
+}
+
+/**
+ * Typing renders the input's tags, and that pass forgets every quote the input
+ * no longer shows. Waits past the tag-rendering debounce so it has run.
+ */
+async function typeNextMessage(page: Page, text: string) {
+  await editable(page).pressSequentially(text);
+  await page.waitForTimeout(600);
+}
+
+test('a queued message keeps its quote while the next message is typed', async ({ page }) => {
+  await startTurn(page);
+  await queueQuotedMessage(page, 'explain this', 'quoted line');
+  await typeNextMessage(page, 'next message');
+
+  await endTurn(page);
+
+  await expect.poll(() => sentMessages(page)).toEqual([expect.stringContaining('> quoted line')]);
+});
+
+test('editing a queued message brings its quote chip back', async ({ page }) => {
+  await startTurn(page);
+  await queueQuotedMessage(page, 'explain this', 'quoted line');
+  await typeNextMessage(page, 'next message');
+
+  await page.locator('.message-queue-edit').first().click();
+
+  await expect(editable(page).locator('.quote-tag')).toHaveCount(1);
+  await endTurn(page);
+  await editable(page).press('Enter');
+  await expect.poll(() => sentMessages(page)).toEqual([expect.stringContaining('> quoted line')]);
+});
+
 test('removing a queued message leaves the rest of the queue alone', async ({ page }) => {
   await startTurn(page);
   await queueMessage(page, 'first queued');

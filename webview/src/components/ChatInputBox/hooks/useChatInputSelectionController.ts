@@ -30,6 +30,8 @@ interface UseChatInputSelectionControllerOptions {
   setAttachments: (attachments: Attachment[]) => boolean;
   /** Whether attachments are owned by this input; defaults to true when absent */
   canApplyAttachments?: () => boolean;
+  /** Whether a pasted image is still landing in the draft; defaults to false when absent */
+  hasPendingImagePastes?: () => boolean;
   /** Renders the rich references (@file chips, quote chips) in the input. */
   renderTags?: () => void;
   inlineCompletion: InlineCompletionController;
@@ -54,6 +56,7 @@ export function useChatInputSelectionController({
   getAttachments,
   setAttachments,
   canApplyAttachments,
+  hasPendingImagePastes,
   renderTags,
   inlineCompletion,
   handleInput,
@@ -120,6 +123,7 @@ export function useChatInputSelectionController({
     getAttachments,
     setAttachments,
     canApplyAttachments,
+    hasPendingImagePastes,
     renderTags,
   });
 

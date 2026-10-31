@@ -282,6 +282,7 @@ export function useChatInputController({
     getAttachments: getDraftAttachments,
     setAttachments: setDraftAttachments,
     canApplyAttachments: canApplyDraftAttachments,
+    hasPendingImagePastes,
     renderTags: renderTagsNowIfSafe,
     inlineCompletion,
     handleInput,

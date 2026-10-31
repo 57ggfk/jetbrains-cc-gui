@@ -142,6 +142,36 @@ describe('useChatInputImperativeHandle', () => {
     expect(refObj.current!.setAttachments([replacement])).toBe(true);
     expect(setAttachments).toHaveBeenCalledExactlyOnceWith([replacement]);
     expect(refObj.current!.getAttachments()).toEqual([replacement]);
+    // Without a paste tracker nothing can be pending.
+    expect(refObj.current!.hasPendingImagePastes()).toBe(false);
+  });
+
+  it('reports image pastes that have not reached the draft yet', () => {
+    const refObj: { current: ChatInputBoxHandle | null } = { current: null };
+    let pending = true;
+
+    renderHook(() =>
+      useChatInputImperativeHandle({
+        ref: refObj,
+        editableRef: { current: createEditable() },
+        getTextContent: () => '',
+        invalidateCache: vi.fn(),
+        cancelPendingInput: vi.fn(),
+        setHasContent: vi.fn(),
+        adjustHeight: vi.fn(),
+        focusInput: vi.fn(),
+        clearInput: vi.fn(),
+        hasContent: false,
+        extractFileTags: () => [],
+        getAttachments: () => [],
+        setAttachments: vi.fn(),
+        hasPendingImagePastes: () => pending,
+      })
+    );
+
+    expect(refObj.current!.hasPendingImagePastes()).toBe(true);
+    pending = false;
+    expect(refObj.current!.hasPendingImagePastes()).toBe(false);
   });
 
   it('renders the rich references after setValue replaced the text', () => {

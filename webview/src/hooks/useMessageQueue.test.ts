@@ -1,8 +1,14 @@
 import { act, renderHook } from '@testing-library/react';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { useMessageQueue } from './useMessageQueue';
 import type { QueuedMessage } from './useMessageQueue';
 import type { Attachment } from '../components/ChatInputBox/types';
+import {
+  expandQuoteTokens,
+  makeQuoteToken,
+  pruneQuoteRegistry,
+  registerQuote,
+} from '../components/ChatInputBox/utils/quoteRegistry';
 
 describe('useMessageQueue', () => {
   const renderQueue = (initialLoading: boolean) => {
@@ -309,5 +315,68 @@ describe('useMessageQueue', () => {
     });
 
     expect(onExecute).toHaveBeenCalledExactlyOnceWith('kept for later', undefined);
+  });
+
+  it('never dispatches a message taken for editing just as the turn ended', () => {
+    // A click can land after the idle render commits but before its passive
+    // effects run; a layout effect fires in exactly that window.
+    const onExecute = vi.fn();
+    const taken: Array<QueuedMessage | undefined> = [];
+    const { result, rerender } = renderHook(({ isLoading }: { isLoading: boolean }) => {
+      const queueApi = useMessageQueue({ isLoading, onExecute });
+      const { queue, dequeueForEdit } = queueApi;
+      useLayoutEffect(() => {
+        if (!isLoading && taken.length === 0 && queue.length > 0) {
+          taken.push(dequeueForEdit(queue[0].id));
+        }
+      }, [isLoading, queue, dequeueForEdit]);
+      return queueApi;
+    }, { initialProps: { isLoading: true } });
+
+    act(() => {
+      result.current.enqueue('edit me');
+      result.current.enqueue('send me');
+    });
+    rerender({ isLoading: false });
+
+    // The edited message is in the draft now, so sending it too would send it twice.
+    expect(taken.map(message => message?.content)).toEqual(['edit me']);
+    expect(onExecute).toHaveBeenCalledExactlyOnceWith('send me', undefined);
+    expect(result.current.queue).toEqual([]);
+  });
+
+  it('sends the quotes of a queued message even after the input dropped them', () => {
+    const { result, onExecute } = renderQueue(true);
+    const id = registerQuote('quoted line');
+    let sent = '';
+    onExecute.mockImplementation((content: string) => {
+      sent = expandQuoteTokens(content);
+    });
+
+    act(() => {
+      result.current.queueApi.enqueue(`see ${makeQuoteToken(id)}`);
+    });
+    // Typing the next message renders the input's tags, which prunes every
+    // quote that is not in the input - including the queued one.
+    pruneQuoteRegistry(new Set());
+    act(() => {
+      result.current.setLoading(false);
+    });
+
+    expect(sent).toBe('see > quoted line\n');
+  });
+
+  it('hands the quote text over with a message taken for editing', () => {
+    const { result } = renderQueue(true);
+    const id = registerQuote('quoted line');
+
+    act(() => {
+      result.current.queueApi.enqueue(`see ${makeQuoteToken(id)}`);
+      result.current.queueApi.enqueue('no quote here');
+    });
+    const [quoted, plain] = result.current.queueApi.queue;
+
+    expect(quoted.quotes).toEqual({ [id]: 'quoted line' });
+    expect(plain).not.toHaveProperty('quotes');
   });
 });

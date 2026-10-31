@@ -7,6 +7,7 @@ import {
 import type { QueuedDraftTarget } from './queuedMessageDraft';
 import type { QueuedMessage } from './useMessageQueue';
 import type { Attachment } from '../components/ChatInputBox/types';
+import { getQuote, makeQuoteToken, pruneQuoteRegistry, registerQuote } from '../components/ChatInputBox/utils/quoteRegistry';
 
 const attachment: Attachment = { id: 'att-1', fileName: 'notes.txt', mediaType: 'text/plain', data: 'aGk=' };
 const queuedAttachment: Attachment = { id: 'att-2', fileName: 'pic.png', mediaType: 'image/png', data: 'aW1n' };
@@ -28,6 +29,7 @@ function createTarget(options: {
   content?: string;
   attachments?: Attachment[];
   acceptsAttachments?: boolean;
+  pendingImages?: boolean;
 } = {}) {
   const calls: string[] = [];
   const state = {
@@ -48,6 +50,7 @@ function createTarget(options: {
       return true;
     }),
     canApplyAttachments: () => options.acceptsAttachments !== false,
+    hasPendingImagePastes: () => options.pendingImages === true,
     focus: vi.fn(() => {
       calls.push('focus');
     }),
@@ -112,6 +115,16 @@ describe('mergeQueuedMessageIntoDraft', () => {
     expect(restore.merged).toBe(true);
   });
 
+  it('treats a draft holding only invisible characters as empty', () => {
+    // JCEF can leave zero-width characters behind in a visually empty editor.
+    const restore = mergeQueuedMessageIntoDraft(
+      { content: '\u200B\uFEFF\n', attachments: [] },
+      { content: 'queued message' },
+    );
+
+    expect(restore).toEqual({ content: 'queued message', attachments: [], merged: false });
+  });
+
   it('flags a merge when only attachments are staged on the input', () => {
     const restore = mergeQueuedMessageIntoDraft(
       { content: '', attachments: [attachment] },
@@ -156,6 +169,22 @@ describe('writeQueuedMessageToDraft', () => {
     expect(state.attachments).toEqual([]);
     expect(restored.attachmentsApplied).toBe(false);
     expect(restored.queuedAttachmentCount).toBe(1);
+  });
+
+  it('brings back the quotes the input pruned while the message waited', () => {
+    const id = registerQuote('quoted line');
+    const quotes = { [id]: 'quoted line' };
+    pruneQuoteRegistry(new Set());
+    const { target } = createTarget();
+    let quoteAtWrite: string | undefined;
+    target.setValue = vi.fn(() => {
+      quoteAtWrite = getQuote(id)?.text;
+    });
+
+    writeQueuedMessageToDraft(target, queuedMessage({ content: `see ${makeQuoteToken(id)}`, quotes }));
+
+    // setValue renders the chips, so the quote has to be known before it runs.
+    expect(quoteAtWrite).toBe('quoted line');
   });
 
   it('counts only the queued message attachments', () => {
@@ -204,6 +233,20 @@ describe('takeQueuedMessageForEdit', () => {
     expect(outcome).toEqual({ status: 'attachments-blocked' });
     expect(items).toHaveLength(1);
     expect(source.take).not.toHaveBeenCalled();
+    expect(state.content).toBe('');
+  });
+
+  it('keeps the message queued while an image is still being added to the draft', () => {
+    const { source, items } = createSource([queuedMessage()]);
+    const { target, state } = createTarget({ pendingImages: true });
+
+    const outcome = takeQueuedMessageForEdit(target, source, 'queue-1');
+
+    // Writing the draft now would cancel that paste and lose the image.
+    expect(outcome).toEqual({ status: 'images-pending' });
+    expect(items).toHaveLength(1);
+    expect(source.take).not.toHaveBeenCalled();
+    expect(target.setValue).not.toHaveBeenCalled();
     expect(state.content).toBe('');
   });
 

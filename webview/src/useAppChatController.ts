@@ -341,6 +341,11 @@ export const useAppChatController = ({
       addToast(t('chat.queue.editBlockedAttachments'), 'warning');
       return;
     }
+    if (outcome.status === 'images-pending') {
+      // Same wait as submit: writing the draft now would cancel the paste.
+      addToast(t('chat.pasteImagePreparing'), 'info');
+      return;
+    }
     if (outcome.status !== 'restored') return;
     const restored = outcome.write;
     setDraftInput(restored.content);

@@ -47,6 +47,8 @@
     "queue": {
       "edit": "대기열 메시지 편집",
       "remove": "대기열에서 제거",
+      "editLabel": "대기열 메시지 {{position}} 편집",
+      "removeLabel": "대기열 메시지 {{position}} 제거",
       "reorderLabel": "메시지 {{position}} 순서 변경",
       "reorderHint": "드래그로 순서 변경, 포커스 후 화살표 키로 조정",
       "mergedIntoDraft": "대기열 메시지가 현재 초안에 병합되었습니다",

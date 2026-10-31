@@ -54,8 +54,11 @@ describe('MessageQueue', () => {
     render(<MessageQueue queue={createQueue()} onRemove={vi.fn()} onEdit={vi.fn()} t={t} />);
 
     const edit = screen.getAllByTitle('chat.queue.edit')[0];
-    expect(edit.getAttribute('aria-label')).toBe('chat.queue.edit');
+    // The name carries the row's position so a screen reader can tell rows apart.
+    expect(edit.getAttribute('aria-label')).toBe('chat.queue.editLabel:2');
     expect(edit.getAttribute('type')).toBe('button');
+    expect(screen.getAllByTitle('chat.queue.remove').map(button => button.getAttribute('aria-label')))
+      .toEqual(['chat.queue.removeLabel:2', 'chat.queue.removeLabel:1']);
     // Icon-only buttons must not rely on the icon font for their name.
     expect(edit.querySelector('.codicon-edit')?.getAttribute('aria-hidden')).toBe('true');
   });

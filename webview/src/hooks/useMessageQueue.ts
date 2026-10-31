@@ -1,10 +1,17 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Attachment } from '../components/ChatInputBox/types';
+import { restoreQuotes, snapshotQuotes } from '../components/ChatInputBox/utils/quoteRegistry';
+import type { QuoteSnapshot } from '../components/ChatInputBox/utils/quoteRegistry';
 
 export interface QueuedMessage {
   id: string;
   content: string;
   attachments?: Attachment[];
+  /**
+   * Text behind the quote chips in `content`. The input prunes quotes it no
+   * longer shows, so a queued message keeps its own copy for send and edit.
+   */
+  quotes?: QuoteSnapshot;
   queuedAt: number;
 }
 
@@ -73,13 +80,16 @@ export function useMessageQueue({
   // drained the whole queue in one idle period, overlapping multiple sends on
   // the same Codex thread (writer-lock conflict).
   const dispatchedAtRef = useRef<number | null>(null);
-  // Mirror of the committed queue. A removal callback has to report what it
-  // took out, and reading `queue` from its closure would be one render behind.
+  // The live queue. Every mutation moves it first and then publishes it to
+  // state, so a removal can report what it took out and the idle dispatch
+  // never sends a message an edit already took, even when either lands
+  // between a render and its effects.
   const queueRef = useRef<QueuedMessage[]>(queue);
 
-  useEffect(() => {
-    queueRef.current = queue;
-  }, [queue]);
+  const commitQueue = useCallback((next: QueuedMessage[]) => {
+    queueRef.current = next;
+    setQueue(next);
+  }, []);
 
   // Generate unique ID
   const generateId = useCallback(() => {
@@ -88,17 +98,16 @@ export function useMessageQueue({
 
   // Add message to queue
   const enqueue = useCallback((content: string, attachments?: Attachment[]) => {
+    const quotes = snapshotQuotes(content);
     const newItem: QueuedMessage = {
       id: generateId(),
       content,
       attachments,
+      ...(quotes ? { quotes } : {}),
       queuedAt: Date.now(),
     };
-    // The mirror has to move with the queue: an edit that lands before the
-    // next render would otherwise look into a snapshot without this item.
-    queueRef.current = [...queueRef.current, newItem];
-    setQueue(prev => [...prev, newItem]);
-  }, [generateId]);
+    commitQueue([...queueRef.current, newItem]);
+  }, [generateId, commitQueue]);
 
   // Remove a message for editing: the caller gets its payload back so the
   // draft can be restored in the same interaction (same semantics as dequeue
@@ -107,10 +116,9 @@ export function useMessageQueue({
   const dequeueForEdit = useCallback((id: string): QueuedMessage | undefined => {
     const removed = queueRef.current.find(item => item.id === id);
     if (!removed) return undefined;
-    queueRef.current = queueRef.current.filter(item => item.id !== id);
-    setQueue(prev => prev.filter(item => item.id !== id));
+    commitQueue(queueRef.current.filter(item => item.id !== id));
     return removed;
-  }, []);
+  }, [commitQueue]);
 
   /** Read a queued message without removing it (used to vet an edit first) */
   const peekQueuedMessage = useCallback(
@@ -125,9 +133,8 @@ export function useMessageQueue({
 
   // Clear entire queue
   const clearQueue = useCallback(() => {
-    queueRef.current = [];
-    setQueue([]);
-  }, []);
+    commitQueue([]);
+  }, [commitQueue]);
 
   /**
    * Reorder the queue by the given id sequence (orderedIds[0] executes next).
@@ -136,10 +143,8 @@ export function useMessageQueue({
    *   their original order so no message is ever dropped.
    */
   const reorder = useCallback((orderedIds: string[]) => {
-    const ordered = applyQueueOrder(queueRef.current, orderedIds);
-    queueRef.current = ordered;
-    setQueue(ordered);
-  }, []);
+    commitQueue(applyQueueOrder(queueRef.current, orderedIds));
+  }, [commitQueue]);
 
   // Auto-execute next message whenever the chat is idle. Dequeue and execute
   // must stay atomic inside this effect: deferring the execution behind a
@@ -157,21 +162,25 @@ export function useMessageQueue({
   // started a turn. A dispatch that bails before flipping loading (e.g. SDK
   // missing) leaves the gate closed so the queue waits instead of spamming
   // doomed sends; any subsequent turn reopens it.
+  //
+  // `queue` only triggers the effect; the live ref is what gets read, because
+  // a message taken for editing after this render committed is already gone
+  // from the ref while the render's `queue` still holds it.
   useEffect(() => {
     if (isLoading) {
       dispatchedAtRef.current = null;
       return;
     }
-    if (queue.length === 0 || dispatchedAtRef.current !== null) {
+    const [nextMessage, ...remaining] = queueRef.current;
+    if (!nextMessage || dispatchedAtRef.current !== null) {
       return;
     }
-    const nextMessage = queue[0];
     dispatchedAtRef.current = Date.now();
-    const remaining = queue.slice(1);
-    queueRef.current = remaining;
-    setQueue(remaining);
+    commitQueue(remaining);
+    // The input may have pruned these while the message waited.
+    restoreQuotes(nextMessage.quotes);
     onExecute(nextMessage.content, nextMessage.attachments);
-  }, [isLoading, queue, onExecute]);
+  }, [isLoading, queue, onExecute, commitQueue]);
 
   return {
     queue,

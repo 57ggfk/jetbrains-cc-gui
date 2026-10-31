@@ -47,6 +47,8 @@
     "queue": {
       "edit": "Editar mensaje en cola",
       "remove": "Quitar de la cola",
+      "editLabel": "Editar mensaje {{position}} en cola",
+      "removeLabel": "Quitar mensaje {{position}} de la cola",
       "reorderLabel": "Reordenar mensaje {{position}}",
       "reorderHint": "Arrastra para reordenar, o usa las flechas tras enfocar",
       "mergedIntoDraft": "El mensaje en cola se añadió al borrador actual",

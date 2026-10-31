@@ -22,6 +22,8 @@ export interface UseChatInputImperativeHandleOptions {
   setAttachments: (attachments: Attachment[]) => boolean;
   /** Whether attachments are owned by this input; defaults to true when absent */
   canApplyAttachments?: () => boolean;
+  /** Whether a pasted image is still landing in the draft; defaults to false when absent */
+  hasPendingImagePastes?: () => boolean;
   /**
    * Renders the rich references (@file chips, quote chips) inside the input.
    * A programmatic value write is plain text, so this has to run afterwards to
@@ -51,11 +53,13 @@ export function useChatInputImperativeHandle({
   getAttachments,
   setAttachments,
   canApplyAttachments,
+  hasPendingImagePastes,
   renderTags,
 }: UseChatInputImperativeHandleOptions): void {
   // Treat a missing probe as "capable": the plain uncontrolled input is the
   // common case, and refusing a restore there would be worse than trying.
   const attachmentsEnabled = canApplyAttachments ?? (() => true);
+  const imagePastesPending = hasPendingImagePastes ?? (() => false);
   useImperativeHandle(
     ref,
     () => ({
@@ -98,6 +102,7 @@ export function useChatInputImperativeHandle({
       getAttachments,
       setAttachments,
       canApplyAttachments: attachmentsEnabled,
+      hasPendingImagePastes: imagePastesPending,
     }),
     [
       getTextContent,
@@ -114,6 +119,7 @@ export function useChatInputImperativeHandle({
       getAttachments,
       setAttachments,
       attachmentsEnabled,
+      imagePastesPending,
       renderTags,
     ]
   );

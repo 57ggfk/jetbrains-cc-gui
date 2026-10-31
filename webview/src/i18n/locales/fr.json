@@ -47,6 +47,8 @@
     "queue": {
       "edit": "Modifier le message en file d'attente",
       "remove": "Retirer de la file d'attente",
+      "editLabel": "Modifier le message {{position}} en file d'attente",
+      "removeLabel": "Retirer le message {{position}} de la file d'attente",
       "reorderLabel": "Réordonner le message {{position}}",
       "reorderHint": "Faire glisser pour réordonner, ou utiliser les flèches après avoir mis le focus",
       "mergedIntoDraft": "Le message en file d'attente a été ajouté au brouillon en cours",

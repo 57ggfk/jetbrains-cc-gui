@@ -906,6 +906,11 @@ export interface ChatInputBoxHandle {
    * parent owns them. Lets a caller vet a restore before it removes anything.
    */
   canApplyAttachments: () => boolean;
+  /**
+   * Whether a pasted image is still on its way into the draft. `setValue`
+   * cancels such a paste, so a caller that merges into the draft waits first.
+   */
+  hasPendingImagePastes: () => boolean;
 }
 
 // ============================================================

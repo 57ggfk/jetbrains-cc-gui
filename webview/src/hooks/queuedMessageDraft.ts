@@ -1,5 +1,9 @@
 import type { Attachment } from '../components/ChatInputBox/types';
+import { restoreQuotes } from '../components/ChatInputBox/utils/quoteRegistry';
 import type { QueuedMessage } from './useMessageQueue';
+
+/** Zero-width and BOM characters that JCEF can leave behind in a visually empty editor. */
+const INVISIBLE_CHARS_RE = /[\u200B-\u200D\uFEFF]/g;
 
 /** Input-draft payload produced when a queued message is edited */
 export interface QueuedDraftRestore {
@@ -29,6 +33,11 @@ export interface QueuedDraftTarget {
    * do not implement it are treated as capable.
    */
   canApplyAttachments?: () => boolean;
+  /**
+   * True while a pasted image is still on its way into the draft. Writing the
+   * draft cancels that paste, so the edit waits instead. Absent means none.
+   */
+  hasPendingImagePastes?: () => boolean;
   focus: () => void;
 }
 
@@ -60,7 +69,9 @@ export type QueuedEditResult =
   /** The id is unknown (already sent, or already edited). */
   | { status: 'not-found' }
   /** The target cannot take attachments, so the message stays queued. */
-  | { status: 'attachments-blocked' };
+  | { status: 'attachments-blocked' }
+  /** A pasted image has not reached the draft yet; writing now would drop it. */
+  | { status: 'images-pending' };
 
 /**
  * Build the input-draft payload for editing a queued message.
@@ -74,7 +85,7 @@ export function mergeQueuedMessageIntoDraft(
   current: { content: string; attachments: Attachment[] },
   queued: { content: string; attachments?: Attachment[] },
 ): QueuedDraftRestore {
-  const hasCurrentContent = current.content.trim().length > 0;
+  const hasCurrentContent = current.content.replace(INVISIBLE_CHARS_RE, '').trim().length > 0;
   const content = hasCurrentContent
     ? `${current.content.replace(/\s+$/, '')}\n\n${queued.content}`
     : queued.content;
@@ -104,6 +115,8 @@ export function writeQueuedMessageToDraft(
     { content: target.getValue(), attachments: target.getAttachments() },
     { content: queued.content, attachments: queued.attachments },
   );
+  // setValue renders the quote chips, so their text has to be registered first.
+  restoreQuotes(queued.quotes);
   target.setValue(restored.content);
   const attachmentsApplied = target.setAttachments(restored.attachments);
   target.focus();
@@ -119,7 +132,8 @@ export function writeQueuedMessageToDraft(
  *
  * Nothing is removed until the restore is known to be safe: without a draft to
  * restore into, or when the target cannot take the message's attachments,
- * dequeuing would drop the message for good.
+ * dequeuing would drop the message for good, and while an image paste is still
+ * landing, writing the draft would drop that image.
  */
 export function takeQueuedMessageForEdit(
   target: QueuedDraftTarget | null | undefined,
@@ -132,6 +146,7 @@ export function takeQueuedMessageForEdit(
   if ((queued.attachments?.length ?? 0) > 0 && target.canApplyAttachments?.() === false) {
     return { status: 'attachments-blocked' };
   }
+  if (target.hasPendingImagePastes?.() === true) return { status: 'images-pending' };
   const removed = source.take(id);
   if (!removed) return { status: 'not-found' };
   return { status: 'restored', write: writeQueuedMessageToDraft(target, removed) };

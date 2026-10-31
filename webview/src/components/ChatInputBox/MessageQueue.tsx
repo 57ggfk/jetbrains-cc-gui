@@ -123,7 +123,7 @@ export function MessageQueue({ queue, onRemove, onEdit, onReorder, t }: MessageQ
               <button
                 type="button"
                 className="message-queue-edit"
-                aria-label={t('chat.queue.edit')}
+                aria-label={t('chat.queue.editLabel', { position: queuePosition })}
                 title={t('chat.queue.edit')}
                 onClick={() => onEdit(item.id)}
               >
@@ -133,7 +133,7 @@ export function MessageQueue({ queue, onRemove, onEdit, onReorder, t }: MessageQ
             <button
               type="button"
               className="message-queue-remove"
-              aria-label={t('chat.queue.remove')}
+              aria-label={t('chat.queue.removeLabel', { position: queuePosition })}
               title={t('chat.queue.remove')}
               onClick={() => onRemove(item.id)}
             >

@@ -119,6 +119,7 @@ const ChatInputBox = forwardRef<ChatInputBoxHandle, ChatInputBoxProps>((props, r
     getFileTags,
     getAttachments, setAttachments,   // draft attachment access (queue edit restore)
     canApplyAttachments,              // false when the parent owns the attachments
+    hasPendingImagePastes,            // true while a pasted image is still landing
   }));
 
   // A programmatic `setValue` writes plain text, so tag rendering (@file chips,
