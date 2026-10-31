@@ -66,9 +66,6 @@ public class CodexProviderTransportIntegrationTest {
         }
     }
 
-
-
-
     /** Async question identities and typed replies survive the real Java/daemon transport. */
     @Test
     public void asyncQuestionDialogsCanAnswerDuringAndAfterTheOriginalNativeTurn() throws Exception {
