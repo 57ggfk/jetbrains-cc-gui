@@ -31,6 +31,15 @@ export interface UseMessageQueueReturn {
   enqueue: (content: string, attachments?: Attachment[]) => void;
   /** Remove message from queue by id */
   dequeue: (id: string) => void;
+  /**
+   * Take a steered row off the queue while keeping its recovery data.
+   *
+   * The fold backstop uses this when the turn has ended and no receipt ever
+   * arrived: the row must stop showing as steering, but a late `undelivered`
+   * still has to be able to put the message back, so `steeringItemsRef` must
+   * keep holding it.
+   */
+  hideSteerRow: (id: string) => void;
   /** Clear entire queue */
   clearQueue: () => void;
   /** Reorder queue by an ordered list of ids (index 0 executes first) */
@@ -88,6 +97,11 @@ export function useMessageQueue({
   // Remove message from queue
   const dequeue = useCallback((id: string) => {
     steeringItemsRef.current.delete(id);
+    setQueue(prev => prev.filter(item => item.id !== id));
+  }, []);
+
+  // Drop the row from the queue without dropping the recovery copy
+  const hideSteerRow = useCallback((id: string) => {
     setQueue(prev => prev.filter(item => item.id !== id));
   }, []);
 
@@ -235,6 +249,7 @@ export function useMessageQueue({
     queue,
     enqueue,
     dequeue,
+    hideSteerRow,
     clearQueue,
     reorder,
     markSteering,

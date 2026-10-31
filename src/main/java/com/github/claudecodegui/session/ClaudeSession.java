@@ -933,19 +933,15 @@ public class ClaudeSession {
                 agentPrompt,
                 requestedReasoningEffort
         ).thenAccept(result -> {
-            boolean delivered = result != null
-                    && result.has("delivered")
-                    && !result.get("delivered").isJsonNull()
-                    && result.get("delivered").getAsBoolean();
-            if (delivered) {
-                callbackFacade.notifySteerResult(steerId, "accepted", null);
-            } else {
-                String reason = "no_active_turn";
-                if (result != null && result.has("reason") && !result.get("reason").isJsonNull()) {
-                    reason = result.get("reason").getAsString();
-                }
-                callbackFacade.notifySteerResult(steerId, "rejected", reason);
+            SteerReceiptMapper.Outcome outcome = SteerReceiptMapper.fromDaemonResult(result);
+            if (outcome.isUnconfirmed()) {
+                // The daemon call timed out and was NOT cancelled, so it may
+                // still enqueue the steer; see SteerReceiptMapper for why that
+                // must not be reported as a reject.
+                LOG.info("[Steer] daemon did not answer in time steerId=" + steerId
+                        + "; treating as unconfirmed until a receipt arrives");
             }
+            callbackFacade.notifySteerResult(steerId, outcome.getStatus(), outcome.getReason());
         }).exceptionally(error -> {
             callbackFacade.notifySteerResult(steerId, "rejected", "runtime_closed");
             return null;

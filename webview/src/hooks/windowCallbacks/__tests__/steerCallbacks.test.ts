@@ -7,7 +7,7 @@
  * - rejected    → retract it and put the queue row back;
  * - undelivered → retract it and requeue the item at the head.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { TFunction } from 'i18next';
 import {
   armSteerReceiptTimeout,
@@ -36,6 +36,7 @@ function createHarness(initialMessages: ClaudeMessage[]) {
     restore: [] as Array<[string, QueuedMessage | undefined]>,
     requeueAtHead: [] as QueuedMessage[],
     dequeue: [] as string[],
+    hideSteerRow: [] as string[],
     toasts: [] as string[],
   };
 
@@ -45,6 +46,8 @@ function createHarness(initialMessages: ClaudeMessage[]) {
     streamingContentRef: ref('streamed'),
     streamingThinkingRef: ref(''),
     streamingMessageIndexRef: ref(-1),
+    // The fold backstop defers while the turn is still streaming.
+    isStreamingRef: ref(false),
   };
 
   const options = {
@@ -59,6 +62,7 @@ function createHarness(initialMessages: ClaudeMessage[]) {
       restore: (id: string, fallback?: QueuedMessage) => { calls.restore.push([id, fallback]); },
       requeueAtHead: (item: QueuedMessage) => { calls.requeueAtHead.push(item); },
       dequeue: (id: string) => { calls.dequeue.push(id); },
+      hideSteerRow: (id: string) => { calls.hideSteerRow.push(id); },
       steeringItemsRef: ref(steeringItems),
       findSteeredBubble: () => findSteeredBubbleResult,
       steerMessage: () => true,
@@ -91,6 +95,11 @@ const streamingAssistant: ClaudeMessage = {
 };
 
 describe('steerCallbacks', () => {
+  // Terminal tombstones are module state: a session switch clears them in
+  // production, and every case here has to start from an empty set.
+  beforeEach(() => {
+    clearSteerReceiptTimeouts();
+  });
   it('rejected retracts the optimistic bubble and restores the queue row', () => {
     const { calls, getMessages } = createHarness([streamingAssistant, optimisticBubble()]);
 
@@ -268,10 +277,13 @@ describe('steerCallbacks', () => {
       // The dispatch backstop is disarmed on accept, so the fold backstop is the
       // only thing left that can settle a fold tag lost on the way back.
       vi.advanceTimersByTime(60_000);
-      expect(calls.dequeue).toHaveLength(0);
+      expect(calls.hideSteerRow).toHaveLength(0);
 
       vi.advanceTimersByTime(40_000);
-      expect(calls.dequeue).toEqual([STEER_ID]);
+      // `hideSteerRow`, not `dequeue`: the queue copy has to survive a late
+      // `undelivered`, which is the only way that message can come back.
+      expect(calls.hideSteerRow).toEqual([STEER_ID]);
+      expect(calls.dequeue).toHaveLength(0);
       // Settled as delivered: the bubble stays (only its pending marker clears)
       // because the CLI already took the message.
       expect(calls.restore).toHaveLength(0);
@@ -334,5 +346,98 @@ describe('steerCallbacks', () => {
     } finally {
       delete window.__sessionTransitioning;
     }
+  });
+
+  it('an undelivered receipt after the fold backstop still requeues the message', () => {
+    vi.useFakeTimers();
+    try {
+      const { calls, getMessages, steeringItems } = createHarness([streamingAssistant, optimisticBubble()]);
+      const item: QueuedMessage = {
+        id: STEER_ID, content: 'do not touch file B', queuedAt: 1, status: 'steering',
+      };
+      steeringItems.set(STEER_ID, item);
+
+      window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'accepted' }));
+      vi.advanceTimersByTime(90_000);
+      expect(calls.hideSteerRow).toEqual([STEER_ID]);
+
+      // The daemon then reports the steer never reached the CLI. Settling the
+      // backstop must not have thrown away the only recoverable copy.
+      window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'undelivered' }));
+
+      expect(calls.requeueAtHead).toEqual([item]);
+      expect(calls.toasts).not.toContain('chat.steerUndeliveredLost');
+      expect(getMessages()).toHaveLength(1);
+    } finally {
+      clearSteerReceiptTimeouts();
+      vi.useRealTimers();
+    }
+  });
+
+  it('defers the fold backstop while the turn is still streaming', () => {
+    vi.useFakeTimers();
+    try {
+      const { calls, refs } = createHarness([streamingAssistant, optimisticBubble()]);
+      refs.isStreamingRef.current = true;
+
+      window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'accepted' }));
+
+      // A steer injected at the start of a long tool call legitimately waits
+      // longer than one backstop window; settling it now would be the exact
+      // case where a later `undelivered` finds nothing left to requeue.
+      vi.advanceTimersByTime(90_000);
+      expect(calls.hideSteerRow).toHaveLength(0);
+
+      refs.isStreamingRef.current = false;
+      vi.advanceTimersByTime(90_000);
+      expect(calls.hideSteerRow).toEqual([STEER_ID]);
+    } finally {
+      clearSteerReceiptTimeouts();
+      vi.useRealTimers();
+    }
+  });
+
+  it('a fold settled from the turn result adds no streaming placeholder', () => {    const { calls, getMessages } = createHarness([streamingAssistant]);
+
+    window.onSteerFolded!(JSON.stringify({
+      steerId: STEER_ID,
+      atResult: true,
+      message: { type: 'user', content: 'do not touch file B', timestamp: Date.now() },
+    }));
+
+    const messages = getMessages();
+    expect(calls.dequeue).toEqual([STEER_ID]);
+    // The row lands after the answer and no empty segment is opened for content
+    // that will never arrive.
+    expect(messages).toHaveLength(2);
+    expect(messages[1].steered).toBe(true);
+    expect(messages.filter((m) => m.type === 'assistant')).toHaveLength(1);
+  });
+
+  it('a stop that reports the same steer twice settles it once', () => {
+    const { calls, getMessages } = createHarness([streamingAssistant, optimisticBubble()]);
+
+    // Aborting drains the in-flight request, so onComplete(false) reports a
+    // reject and the tombstoned undelivered arrives right behind it. Handling
+    // both would requeue a row that is already back and warn that a message
+    // sitting in the queue could not be restored.
+    window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'rejected', reason: 'runtime_closed' }));
+    window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'undelivered' }));
+
+    expect(calls.restore).toHaveLength(1);
+    expect(calls.requeueAtHead).toHaveLength(0);
+    expect(calls.toasts).toEqual(['chat.steerRejected.runtime_closed']);
+    expect(getMessages()).toHaveLength(1);
+  });
+
+  it('steering a restored row again is not blocked by the earlier tombstone', () => {
+    const { calls } = createHarness([streamingAssistant, optimisticBubble()]);
+
+    window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'rejected', reason: 'runtime_closed' }));
+    // The row went back to the queue with the same id; steering it again is a
+    // new attempt at the same id, not a duplicate receipt.
+    window.onSteerResult!(JSON.stringify({ steerId: STEER_ID, status: 'accepted' }));
+
+    expect(calls.markSteering).toEqual([STEER_ID]);
   });
 });

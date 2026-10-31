@@ -471,6 +471,11 @@ public class SessionCallbackAdapter implements ClaudeSession.SessionCallback {
             }
             payload.add("message", msgObj);
         }
+        // A fold settled from the turn result arrives after the last assistant
+        // content: the webview must not open a streaming placeholder for it.
+        if (message != null && message.raw != null && message.raw.has("atResult")) {
+            payload.addProperty("atResult", true);
+        }
         this.jsTarget.callJavaScript("onSteerFolded", JsUtils.escapeJs(new Gson().toJson(payload)));
     }
 

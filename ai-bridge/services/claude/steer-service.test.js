@@ -302,6 +302,7 @@ test('cancelAsyncMessage false with no extra queued turn folds leftover pending'
     steerId: 'steer-1',
     uuid: 'uuid-1',
     prompt: '你好',
+    atResult: true,
   }]);
   assert.equal(parseTags(text, '[STEER_UNDELIVERED]').length, 0);
   assert.equal(runtime.pendingSteers.size, 0);
@@ -341,6 +342,7 @@ test('cancelAsyncMessage false keeps reading until a later result covers the uui
     steerId: 'steer-1',
     uuid: 'uuid-1',
     prompt: 'later',
+    atResult: true,
   }]);
 });
 
@@ -483,6 +485,7 @@ test('missing queued_turn_count is treated as no queued turn (fold, never hang)'
     steerId: 'steer-1',
     uuid: 'uuid-1',
     prompt: 'later',
+    atResult: true,
   }]);
   assert.equal(runtime.pendingSteers.size, 0);
 });
@@ -695,4 +698,77 @@ test('a steerId that could forge a log line is dropped, not stored', async () =>
   assert.equal(steer.delivered, true);
   const record = [...runtime.pendingSteers.values()][0];
   assert.equal(record.steerId, '');
+});
+
+test('steer is rejected when the turn ends while the message is being built', async () => {
+  await __testing.resetState();
+  const runtime = capableRuntime();
+  __testing.setActiveTurnRuntime(runtime);
+  // Attachments make buildUserMessage do real file I/O, which is long enough
+  // for the turn to end underneath the await.
+  const buildThatEndsTheTurn = async (params) => {
+    runtime.turnSink = null;
+    return buildUserMessage(params);
+  };
+
+  const result = await steerMessagePersistent(
+    { steerId: 'steer-1', message: 'do not touch B', sessionId: 'sess-1', runtimeSessionEpoch: 'epoch-1' },
+    { buildUserMessage: buildThatEndsTheTurn },
+  );
+
+  // Acknowledging this as delivered would leave the host waiting for a fold or
+  // an undelivered receipt from a turn that can no longer emit either.
+  assert.deepEqual(result, { delivered: false, reason: STEER_REJECT.NO_ACTIVE_TURN });
+  assert.equal(runtime.__enqueued.length, 0);
+  assert.equal(runtime.pendingSteers.size, 0);
+});
+
+test('steer is rejected when the runtime closes while the message is being built', async () => {
+  await __testing.resetState();
+  const runtime = capableRuntime();
+  __testing.setActiveTurnRuntime(runtime);
+  const buildThatClosesTheRuntime = async (params) => {
+    runtime.closed = true;
+    return buildUserMessage(params);
+  };
+
+  const result = await steerMessagePersistent(
+    { steerId: 'steer-1', message: 'hi', sessionId: 'sess-1', runtimeSessionEpoch: 'epoch-1' },
+    { buildUserMessage: buildThatClosesTheRuntime },
+  );
+
+  assert.deepEqual(result, { delivered: false, reason: STEER_REJECT.RUNTIME_CLOSED });
+  assert.equal(runtime.__enqueued.length, 0);
+});
+
+test('a fold settled from the turn result is marked atResult', async () => {
+  const runtime = capableRuntime();
+  runtime.pendingSteers.set('uuid-1', { steerId: 'steer-1', prompt: 'do not touch B' });
+  const { text } = await captureStdout(() => handleSteerResultAndMaybeContinue(
+    runtime,
+    { user_message_uuids: ['uuid-1'] },
+  ));
+
+  // The host must keep the live assistant message: a fold at result time comes
+  // after the last assistant content, so closing the segment would drop
+  // turnUsage from the final result.
+  assert.deepEqual(parseTags(text, '[STEER_FOLDED]'), [{
+    steerId: 'steer-1',
+    uuid: 'uuid-1',
+    prompt: 'do not touch B',
+    atResult: true,
+  }]);
+});
+
+test('a stream fold is not marked atResult', async () => {
+  const runtime = capableRuntime();
+  runtime.pendingSteers.set('uuid-live', { steerId: 'steer-live', prompt: '继续' });
+  const { text } = await captureStdout(() => tryEmitSteerFolded(runtime, {
+    type: 'user',
+    uuid: 'uuid-live',
+    parent_tool_use_id: null,
+    message: { role: 'user', content: [{ type: 'text', text: '继续' }] },
+  }));
+
+  assert.equal(parseTags(text, '[STEER_FOLDED]')[0].atResult, undefined);
 });

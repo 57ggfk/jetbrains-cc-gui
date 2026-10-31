@@ -33,6 +33,12 @@ export interface MessageQueueSteerApi {
   restore: (id: string, fallback?: QueuedMessage) => void;
   requeueAtHead: (item: QueuedMessage) => void;
   dequeue: (id: string) => void;
+  /**
+   * Take a steered row off the queue but keep it recoverable: unlike
+   * `dequeue` this leaves `steeringItemsRef` intact so a late `undelivered`
+   * can still requeue the message.
+   */
+  hideSteerRow: (id: string) => void;
   steeringItemsRef: MutableRefObject<Map<string, QueuedMessage>>;
   /**
    * Rebuild a QueuedMessage from the optimistic steer bubble still in the

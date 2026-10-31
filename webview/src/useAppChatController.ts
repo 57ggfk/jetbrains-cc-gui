@@ -214,6 +214,7 @@ export const useAppChatController = ({
     restore: (id: string, fallback?: QueuedMessage) => void;
     requeueAtHead: (item: QueuedMessage) => void;
     dequeue: (id: string) => void;
+    hideSteerRow: (id: string) => void;
     steeringItemsRef: { current: Map<string, QueuedMessage> };
     findSteeredBubble: (steerId: string) => QueuedMessage | null;
     steerMessage: (item: QueuedMessage) => boolean;
@@ -350,6 +351,7 @@ export const useAppChatController = ({
     queue: messageQueue,
     enqueue: enqueueMessage,
     dequeue: dequeueMessage,
+    hideSteerRow,
     clearQueue,
     reorder: reorderMessageQueue,
     markSteering,
@@ -377,6 +379,7 @@ export const useAppChatController = ({
       restore,
       requeueAtHead,
       dequeue: dequeueMessage,
+      hideSteerRow,
       steeringItemsRef,
       findSteeredBubble: (steerId: string): QueuedMessage | null => {
         // Only a bubble still awaiting its fold can be recovered: once folded,
@@ -396,7 +399,7 @@ export const useAppChatController = ({
       },
       steerMessage,
     };
-  }, [markSteering, isSteering, restore, requeueAtHead, dequeueMessage, steeringItemsRef, steerMessage]);
+  }, [markSteering, isSteering, restore, requeueAtHead, dequeueMessage, hideSteerRow, steeringItemsRef, steerMessage]);
 
   // handleSubmit with queue support (new session and local commands bypass loading check)
   const handleSubmit = useCallback((content: string, attachments?: Attachment[]) => {

@@ -151,9 +151,13 @@ function buildQueryOptions(workingDirectory, sdkModelName, permissionMode, maxTh
     ...(reasoningEffort && { effort: reasoningEffort }),
     ...(maxThinkingTokens !== undefined && { maxThinkingTokens }),
     ...(streamingEnabled && { includePartialMessages: true }),
-    // Echo folded user rows on the live SDK stream so tryEmitSteerFolded can
-    // match them. Java inserts the transcript row from [STEER_FOLDED] and
-    // executeTurn consumes the replayed user message, so this does not duplicate.
+    // Echo user rows on the live SDK stream so tryEmitSteerFolded can see the
+    // fold of a steer. This is a CLI launch argument, so it covers every Claude
+    // turn, not only turns that steer: the runtime is created before the CLI
+    // reports its version, so the flag cannot be narrowed to capable versions
+    // without a probe process. The host inserts the transcript row from
+    // [STEER_FOLDED], and handleUserMessage only patches a uuid onto an existing
+    // row, so the echo does not duplicate the transcript.
     extraArgs: { 'replay-user-messages': null },
     additionalDirectories: Array.from(
       new Set(

@@ -1619,3 +1619,100 @@ describe('ensureRawTextCovers', () => {
     expect(ensureRawTextCovers(preToolTextRaw, 'Step 1. ')).toBe(preToolTextRaw);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pending steer bubbles
+// ---------------------------------------------------------------------------
+
+describe('appendOptimisticMessageIfMissing — pending steer bubbles', () => {
+  /** The bubble useMessageSender builds on click: optimistic, runtime-only. */
+  const pendingSteer = (steerId: string, content: string) => makeUserMsg(content, {
+    steered: true,
+    steerId,
+    steerPending: true,
+    raw: { steered: true, steerId },
+  });
+
+  it('keeps a pending bubble whose text repeats an earlier user message', () => {
+    // "继续" is exactly the kind of steer a user types while a turn runs, and
+    // the transcript already contains the same words from the previous turn.
+    const earlier = makeUserMsg('继续');
+    const prev = [
+      earlier,
+      makeAssistantMsg('answering the earlier 继续', { isStreaming: true }),
+      pendingSteer('s1', '继续'),
+      makeAssistantMsg('', { isStreaming: true }),
+    ];
+    const snapshot = [earlier, makeAssistantMsg('answering the earlier 继续')];
+
+    const result = appendOptimisticMessageIfMissing(prev, snapshot);
+
+    const kept = result.filter((m) => m.steerId === 's1');
+    expect(kept).toHaveLength(1);
+    // The snapshot carries no open placeholder, so the bubble goes last rather
+    // than being dropped: the message the user is watching stays on screen.
+    expect(result[result.length - 1].steerId).toBe('s1');
+  });
+
+  it('keeps two back-to-back pending steers', () => {
+    const prev = [
+      makeAssistantMsg('first segment', { isStreaming: false }),
+      pendingSteer('s1', '继续'),
+      makeAssistantMsg('second segment', { isStreaming: false }),
+      pendingSteer('s2', '继续'),
+      makeAssistantMsg('', { isStreaming: true }),
+    ];
+    // The first fold landed, the second has not.
+    const snapshot = [
+      makeAssistantMsg('first segment'),
+      makeUserMsg('继续', { steered: true, steerId: 's1' }),
+      makeAssistantMsg('second segment'),
+    ];
+
+    const result = appendOptimisticMessageIfMissing(prev, snapshot);
+
+    expect(result.filter((m) => m.steerId === 's1')).toHaveLength(1);
+    expect(result.filter((m) => m.steerId === 's2')).toHaveLength(1);
+  });
+
+  it('does not duplicate a steer the snapshot already carries', () => {
+    const prev = [pendingSteer('s1', '继续'), makeAssistantMsg('', { isStreaming: true })];
+    const snapshot = [
+      makeUserMsg('继续', { steered: true, steerId: 's1' }),
+      makeAssistantMsg('segment 2'),
+    ];
+
+    const result = appendOptimisticMessageIfMissing(prev, snapshot);
+
+    expect(result.filter((m) => m.steerId === 's1')).toHaveLength(1);
+  });
+
+  it('leaves a settled steered row alone', () => {
+    const prev = [makeUserMsg('继续', { steered: true, steerId: 's1' }), makeAssistantMsg('done')];
+    const snapshot = [makeUserMsg('继续', { steered: true, steerId: 's1' }), makeAssistantMsg('done')];
+
+    const result = appendOptimisticMessageIfMissing(prev, snapshot);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it('keeps the bubble above an open segment placeholder', () => {
+    // The shape right after clicking steer: segment 1 closed, bubble, then an
+    // empty placeholder for the reply that follows the fold. A snapshot that
+    // still carries the open assistant must not swallow the bubble or push it
+    // below the placeholder.
+    const prev = [
+      makeAssistantMsg('segment 1'),
+      pendingSteer('s1', '继续'),
+      makeAssistantMsg('', { isStreaming: true }),
+    ];
+    const snapshot = [makeAssistantMsg('segment 1'), makeAssistantMsg('', { isStreaming: true })];
+
+    const result = appendOptimisticMessageIfMissing(prev, snapshot);
+
+    const bubbleIndex = result.findIndex((m) => m.steerId === 's1');
+    expect(bubbleIndex).toBe(1);
+    expect(result[2].type).toBe('assistant');
+    expect(result[2].isStreaming).toBe(true);
+  });
+});

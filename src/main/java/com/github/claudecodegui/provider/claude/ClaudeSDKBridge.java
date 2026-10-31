@@ -831,6 +831,13 @@ public class ClaudeSDKBridge extends BaseSDKBridge implements SteerCapableBridge
             JsonObject err = new JsonObject();
             err.addProperty("delivered", false);
             err.addProperty("reason", "timeout");
+            // The daemon request is not cancelled, so it can still enqueue this
+            // steer (a slow reply, large attachments). A terminal reject would
+            // put the row back in the queue while the message is on its way and
+            // the same prompt would then run twice. Report the outcome as
+            // unknown instead and let a fold, an undelivered receipt or the end
+            // of the turn settle it.
+            err.addProperty("unconfirmed", true);
             err.addProperty("error", "steer timed out after 10 seconds");
             return err;
         });

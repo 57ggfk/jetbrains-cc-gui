@@ -3,6 +3,7 @@ package com.github.claudecodegui.session;
 import com.github.claudecodegui.session.ClaudeSession.Message;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -177,5 +178,61 @@ public class ClaudeMessageHandlerSteerTest {
 
         assertEquals("steer-7", callbackHandler.lastSteerId);
         assertEquals("undelivered", callbackHandler.lastSteerStatus);
+    }
+
+    @Test
+    public void resultTimeFoldKeepsTheAssistantSegmentLive() {
+        handler.onMessage("stream_start", "");
+        handler.onMessage("content_delta", "final answer");
+
+        handler.onMessage("steer_folded",
+                "{\"steerId\":\"steer-1\",\"prompt\":\"continue\",\"atResult\":true}");
+
+        List<Message> afterFold = state.getMessages();
+        assertEquals(2, afterFold.size());
+        assertEquals(Message.Type.USER, afterFold.get(1).type);
+        assertTrue(afterFold.get(1).raw.get("atResult").getAsBoolean());
+
+        // A fold settled from the turn result happens after the last assistant
+        // content, so no segment 2 follows it: the next delta belongs to the
+        // same assistant message, which is also the one the result stamps
+        // turnUsage on. Closing the segment here used to discard that usage.
+        handler.onMessage("content_delta", " (tail)");
+
+        List<Message> after = state.getMessages();
+        assertEquals(2, after.size());
+        assertEquals(Message.Type.ASSISTANT, after.get(0).type);
+        assertEquals("final answer (tail)", after.get(0).content);
+    }
+
+    @Test
+    public void replayedUserPromptPatchesTheUuidWithoutAddingARow() {
+        // --replay-user-messages echoes this turn's prompt back on the live
+        // stream. The row is already in the transcript because the user typed
+        // it, so the echo may only patch its uuid (rewind) - never add a copy.
+        state.addMessage(new Message(Message.Type.USER, "explain the diff", new JsonObject()));
+
+        handler.onMessage("user",
+                "{\"uuid\":\"uuid-9\",\"message\":{\"role\":\"user\",\"content\":\"explain the diff\"}}");
+
+        List<Message> messages = state.getMessages();
+        assertEquals(1, messages.size());
+        assertEquals("uuid-9", messages.get(0).raw.get("uuid").getAsString());
+    }
+
+    @Test
+    public void streamFoldStillSplitsTheSegment() {        handler.onMessage("stream_start", "");
+        handler.onMessage("content_delta", "segment one");
+
+        handler.onMessage("steer_folded", "{\"steerId\":\"steer-1\",\"prompt\":\"continue\"}");
+        handler.onMessage("content_delta", "segment two");
+
+        List<Message> messages = state.getMessages();
+        // Fold row, then a new assistant bubble for the reply that follows.
+        assertEquals(3, messages.size());
+        assertEquals("segment one", messages.get(0).content);
+        assertEquals(Message.Type.USER, messages.get(1).type);
+        assertEquals(Message.Type.ASSISTANT, messages.get(2).type);
+        assertEquals("segment two", messages.get(2).content);
     }
 }

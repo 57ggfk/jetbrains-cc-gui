@@ -9,6 +9,7 @@
 import type { MutableRefObject } from 'react';
 import type { ClaudeContentOrResultBlock, ClaudeMessage, ClaudeRawMessage } from '../../types';
 import { isSteeredUserMessage } from '../../utils/turnScope';
+import { getSteerIdOf } from '../../utils/steerMessages';
 
 /** Time window (ms) for matching optimistic messages with backend messages. */
 export const OPTIMISTIC_MESSAGE_TIME_WINDOW = 5000;
@@ -109,7 +110,7 @@ export const preserveMessageIdentity = (
  * Also merges attachment blocks from the optimistic message into the matched
  * backend message so non-image file attachments remain visible.
  */
-export const appendOptimisticMessageIfMissing = (
+const appendOptimisticTailIfMissing = (
   prevList: ClaudeMessage[],
   nextList: ClaudeMessage[],
 ): ClaudeMessage[] => {
@@ -209,6 +210,69 @@ export const appendOptimisticMessageIfMissing = (
 
   return nextList;
 };
+
+/**
+ * Keep pending steer bubbles across a backend snapshot.
+ *
+ * A steer bubble is optimistic and runtime-only: the snapshot cannot contain it
+ * until the CLI folds the steer, which can be minutes away while the CLI is busy
+ * with a tool call. Two things make the tail-only optimistic merge above the
+ * wrong tool for this:
+ *
+ * - The bubble is rarely last. Clicking steer closes the running segment and
+ * opens a placeholder after the bubble, so the tail check never even looks at
+ * it.
+ * - Matching by text is wrong for steers. A pending "continue" or "yes" matches
+ *   an earlier user message with the same words (`backendCopyExists`), and the
+ *   bubble is dropped while nothing has replaced it yet.
+ *
+ * So keep every bubble that still carries a `steerPending` marker, keyed by
+ * steerId, wherever it sits. Once the fold lands the host provides the durable
+ * row with the same steerId and this keeps it untouched.
+ */
+const retainPendingSteerBubbles = (
+  prevList: ClaudeMessage[],
+  nextList: ClaudeMessage[],
+): ClaudeMessage[] => {
+  const pending = prevList.filter((message) => (
+    message.type === 'user' && message.steerPending === true && !!getSteerIdOf(message)
+  ));
+  if (pending.length === 0) return nextList;
+
+  let next = nextList;
+  for (const bubble of pending) {
+    const steerId = getSteerIdOf(bubble);
+    if (!steerId) continue;
+    // The snapshot already carries this steer (a folded row, or a bubble kept
+    // by an earlier merge): nothing to restore.
+    if (next.some((message) => getSteerIdOf(message) === steerId)) continue;
+    const tailIndex = next.length - 1;
+    const tail = next[tailIndex];
+    // Land before the open segment placeholder so the bubble stays between the
+    // answer it interrupts and the reply that follows it.
+    next = tail && tail.type === 'assistant' && tail.isStreaming
+      ? [...next.slice(0, tailIndex), bubble, ...next.slice(tailIndex)]
+      : [...next, bubble];
+  }
+  return next;
+};
+
+/**
+ * Fold an incoming backend snapshot into the current transcript without losing
+ * the user's own optimistic rows: the just-sent message when the send has not
+ * landed yet, and every steer bubble still waiting for its fold.
+ *
+ * @param prevList current transcript
+ * @param nextList snapshot from the backend
+ * @returns merged transcript
+ */
+export const appendOptimisticMessageIfMissing = (
+  prevList: ClaudeMessage[],
+  nextList: ClaudeMessage[],
+): ClaudeMessage[] => retainPendingSteerBubbles(
+  prevList,
+  appendOptimisticTailIfMissing(prevList, nextList),
+);
 
 /**
  * Extract comparable text content from a user message for deduplication matching.

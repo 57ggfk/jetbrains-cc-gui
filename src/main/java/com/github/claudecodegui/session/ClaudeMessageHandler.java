@@ -639,6 +639,12 @@ public class ClaudeMessageHandler implements MessageCallback {
      * Fold a steer into the live transcript: append the user row, split the
      * current assistant so later deltas become segment 2.
      *
+     * <p>A fold settled from the turn {@code result} carries {@code atResult}:
+     * it happens after the last assistant content of the turn, so closing the
+     * segment here would drop {@code turnUsage} (the result handler returns
+     * early once the assistant message is null) and the webview would open a
+     * segment no delta ever fills.
+     *
      * @param content JSON payload with {@code steerId}, {@code uuid}, {@code prompt}
      */
     private void handleSteerFolded(String content) {
@@ -666,6 +672,15 @@ public class ClaudeMessageHandler implements MessageCallback {
         raw.addProperty("type", "user");
         raw.addProperty("steerId", steerId);
         raw.addProperty("steered", true);
+        boolean atResult = payload.has("atResult") && payload.get("atResult").isJsonPrimitive()
+                && payload.get("atResult").getAsJsonPrimitive().isBoolean()
+                && payload.get("atResult").getAsBoolean();
+        if (atResult) {
+            // SessionCallbackAdapter promotes this to the top-level payload so
+            // the webview can skip the placeholder; it also keeps the flag on
+            // the row itself for history/debug.
+            raw.addProperty("atResult", true);
+        }
         if (payload.has("uuid") && !payload.get("uuid").isJsonNull()) {
             raw.add("uuid", payload.get("uuid"));
         }
@@ -681,9 +696,11 @@ public class ClaudeMessageHandler implements MessageCallback {
         Message userMessage = new Message(Message.Type.USER, displayText, raw);
         state.addMessage(userMessage);
 
-        currentAssistantMessage = null;
-        assistantContent.setLength(0);
-        resetSegmentState();
+        if (!atResult) {
+            currentAssistantMessage = null;
+            assistantContent.setLength(0);
+            resetSegmentState();
+        }
 
         callbackHandler.notifyMessageUpdate(state.getMessages());
         callbackHandler.notifySteerFolded(steerId, userMessage);

@@ -21,6 +21,8 @@ interface SteerResultPayload {
 
 interface SteerFoldedPayload {
   steerId?: string;
+  /** Fold settled from the turn result: no segment follows it. */
+  atResult?: boolean;
   message?: {
     type?: string;
     content?: string;
@@ -47,10 +49,41 @@ const STEER_RECEIPT_TIMEOUT_MS = 15_000;
  * message, and requeueing it would execute the same prompt twice.
  */
 const STEER_FOLD_TIMEOUT_MS = 90_000;
+/**
+ * How many times the fold backstop may re-arm while the turn is still
+ * streaming. The CLI folds a steer between tool rounds, so a steer injected at
+ * the start of a long test run legitimately stays pending well past one
+ * backstop window; settling it then would throw away the only copy of a message
+ * a later `undelivered` should have requeued. The cap keeps a stuck streaming
+ * flag from deferring the settle forever.
+ */
+const MAX_FOLD_DEFERRALS = 6;
 /** Pending backstop timer handle (number in the DOM build, Timeout under Node types). */
 type SteerReceiptTimer = ReturnType<typeof setTimeout>;
 const steerReceiptTimers = new Map<string, SteerReceiptTimer>();
 const steerFoldTimers = new Map<string, SteerReceiptTimer>();
+
+/**
+ * Steer ids that already produced a terminal receipt.
+ *
+ * One stop can report the same steer twice: aborting drains the in-flight
+ * request, so `onComplete(false)` reports `rejected/runtime_closed` and the
+ * tombstoned `[STEER_UNDELIVERED]` arrives right after it. Without this, the
+ * second receipt requeues a row that is already back in the queue and warns
+ * that a message which is right there could not be restored.
+ */
+const terminalSteerIds = new Set<string>();
+/** Bound on the tombstone set; a session cannot hold more live steers than this. */
+const MAX_TERMINAL_STEERS = 64;
+
+function markSteerSettled(steerId: string): void {
+  if (!steerId) return;
+  terminalSteerIds.add(steerId);
+  if (terminalSteerIds.size > MAX_TERMINAL_STEERS) {
+    const oldest = terminalSteerIds.values().next().value;
+    if (oldest !== undefined) terminalSteerIds.delete(oldest);
+  }
+}
 
 function disarmSteerReceiptTimeout(steerId: string): void {
   const timer = steerReceiptTimers.get(steerId);
@@ -98,6 +131,8 @@ export function clearSteerReceiptTimeouts(): void {
     clearTimeout(timer);
   }
   steerFoldTimers.clear();
+  // The tombstones belong to the session being left.
+  terminalSteerIds.clear();
 }
 
 /**
@@ -159,15 +194,28 @@ export function registerSteerCallbacks(
       if (!api || !steerId) return;
       disarmSteerReceiptTimeout(steerId);
       if (payload.status === 'accepted') {
+        // A row restored by an earlier receipt keeps its queue id, so steering
+        // it again reuses the id: that is a new attempt, not a duplicate
+        // receipt, and must not be collapsed into the previous tombstone.
+        terminalSteerIds.delete(steerId);
         // Idempotent: the click already flipped the row. A duplicate accept for
         // a row another receipt restored must neither re-hide it nor arm a
         // backstop that would later dequeue a row that is live again.
         if (api.isSteering(steerId)) {
           api.markSteering(steerId);
-          armSteerFoldTimeout(steerId, () => {
+          let deferrals = 0;
+          const settle = () => {
             const liveApi = options.messageQueueSteerRef?.current;
             if (!liveApi?.isSteering(steerId)) return;
-            liveApi.dequeue(steerId);
+            if (options.isStreamingRef?.current && deferrals < MAX_FOLD_DEFERRALS) {
+              deferrals += 1;
+              armSteerFoldTimeout(steerId, settle);
+              return;
+            }
+            // `hideSteerRow` instead of `dequeue`: the row must stop showing as
+            // steering, but a late `undelivered` still has to be able to put
+            // the message back, which needs the steering copy kept.
+            liveApi.hideSteerRow(steerId);
             options.setMessages((prev) => clearSteerPending(prev, steerId));
             // Never silent: the row left the queue, so say what was assumed.
             options.addToast(
@@ -176,13 +224,16 @@ export function registerSteerCallbacks(
               }),
               'warning',
             );
-          });
+          };
+          armSteerFoldTimeout(steerId, settle);
         }
         return;
       }
       // Every terminal receipt also settles the fold backstop.
       disarmSteerFoldTimeout(steerId);
       if (payload.status === 'rejected') {
+        if (terminalSteerIds.has(steerId)) return;
+        markSteerSettled(steerId);
         // The bubble was inserted optimistically on click and the CLI never
         // took the steer: retract it and put the row back in the queue.
         // restore() only flips a row still in queue state; when the receipt
@@ -197,6 +248,8 @@ export function registerSteerCallbacks(
         return;
       }
       if (payload.status === 'undelivered') {
+        if (terminalSteerIds.has(steerId)) return;
+        markSteerSettled(steerId);
         // The turn ended before the CLI took the steer: put the message back
         // where the user can see it instead of dropping it silently.
         const item = api.steeringItemsRef.current.get(steerId);
@@ -239,6 +292,9 @@ export function registerSteerCallbacks(
       if (steerId) {
         disarmSteerReceiptTimeout(steerId);
         disarmSteerFoldTimeout(steerId);
+        // A fold settles the steer for good: a tombstoned undelivered that was
+        // drained just before it must not requeue a message the CLI has read.
+        markSteerSettled(steerId);
       }
       // A fold that lands mid-transition belongs to the session being closed:
       // appending it to the freshly cleared transcript would leave a ghost row
@@ -249,6 +305,20 @@ export function registerSteerCallbacks(
       const api = options.messageQueueSteerRef?.current;
       if (api && steerId) {
         api.dequeue(steerId);
+      }
+      // A fold settled from the turn result lands after the last assistant
+      // content: there is no follow-up segment, so opening a streaming
+      // placeholder here would leave a bubble no delta ever fills.
+      if (payload.atResult === true) {
+        options.setMessages((prev) => {
+          const alreadyPresent = !!steerId && prev.some((message) => (
+            message.type === 'user' && getSteerIdOf(message) === steerId
+          ));
+          return alreadyPresent
+            ? clearSteerPending(prev, steerId as string)
+            : [...prev, toSteeredUserMessage(payload)];
+        });
+        return;
       }
       const nextTurnId = options.turnIdCounterRef.current + 1;
       options.turnIdCounterRef.current = nextTurnId;

@@ -90,10 +90,9 @@ export function ensureSteerMaps(runtime) {
  *
  * Folded records exist only to recognise a `--replay-user-messages` echo of a
  * row this host already inserted. Keeping them past the turn that produced
- * them is wrong twice over: matching falls back to prompt text, so a later
- * genuine user message that repeats a steered sentence (a plain "continue")
- * would be swallowed as a replay and never reach the transcript; and the map
- * would grow for the lifetime of the runtime.
+ * them buys nothing and costs twice: a uuid is unique, so a record can never
+ * match again once its turn is over, and the map would grow for the lifetime
+ * of the runtime.
  *
  * @param {object} runtime
  */
@@ -229,18 +228,26 @@ function getQueuedCommandAttachment(msg) {
  * @param {*} prompt
  * @returns {boolean}
  */
-function foldSteerRecord(runtime, uuid, record, prompt) {
+function foldSteerRecord(runtime, uuid, record, prompt, options = {}) {
   runtime.pendingSteers.delete(uuid);
   runtime.foldedSteers.set(uuid, record);
   while (runtime.foldedSteers.size > MAX_FOLDED_STEERS) {
     const oldest = runtime.foldedSteers.keys().next().value;
     runtime.foldedSteers.delete(oldest);
   }
-  emitTurnTag('[STEER_FOLDED]', {
+  const payload = {
     steerId: record.steerId,
     uuid,
     prompt: prompt !== undefined && prompt !== null ? prompt : (record.prompt ?? ''),
-  });
+  };
+  // A fold settled from the turn `result` happens after the last assistant
+  // content of this turn. The host must keep the live assistant message so the
+  // result can still stamp turnUsage, and the webview must not open a new
+  // segment that no delta will ever fill.
+  if (options.atResult === true) {
+    payload.atResult = true;
+  }
+  emitTurnTag('[STEER_FOLDED]', payload);
   return true;
 }
 
@@ -367,7 +374,10 @@ export async function handleSteerResultAndMaybeContinue(runtime, resultMsg) {
     if (!resultUuids.has(uuid)) {
       continue;
     }
-    foldSteerRecord(runtime, uuid, record, record.prompt ?? '');
+    // Already consumed into the turn that just reported its result: mark the
+    // fold so the host keeps the live assistant message (turnUsage) instead of
+    // closing the segment behind a steer row that lands after the answer.
+    foldSteerRecord(runtime, uuid, record, record.prompt ?? '', { atResult: true });
   }
 
   const undelivered = [...runtime.pendingSteers.entries()];
@@ -405,7 +415,7 @@ export async function handleSteerResultAndMaybeContinue(runtime, resultMsg) {
   // always present on SDKResultMessage, so without this emit the frontend stays
   // stuck in `steering` with no transcript row.
   for (const [uuid, record] of [...runtime.pendingSteers.entries()]) {
-    foldSteerRecord(runtime, uuid, record, record.prompt ?? '');
+    foldSteerRecord(runtime, uuid, record, record.prompt ?? '', { atResult: true });
   }
   return true;
 }
@@ -466,7 +476,22 @@ export async function steerMessagePersistent(params = {}, deps = {}) {
 
   ensureSteerMaps(runtime);
   const hasAttachments = Array.isArray(params.attachments) && params.attachments.length > 0;
+  // Snapshot the turn this steer is being injected into. buildUserMessage does
+  // real file I/O for attachments, and the turn can end inside that await:
+  // enqueueing afterwards would be reported as delivered while no fold or
+  // undelivered receipt could ever reach the host, and the CLI would run the
+  // message as an extra top-level turn behind a stale pendingSteers entry.
+  const turnSink = runtime.turnSink;
   const userMessage = await buildUserMessage(params, hasAttachments, requestedSessionId || runtime.sessionId || '');
+  if (runtime.closed || runtime.turnSink !== turnSink) {
+    return {
+      delivered: false,
+      reason: runtime.closed ? STEER_REJECT.RUNTIME_CLOSED : STEER_REJECT.NO_ACTIVE_TURN,
+    };
+  }
+  if (typeof runtime.inputStream?.enqueue !== 'function') {
+    return { delivered: false, reason: STEER_REJECT.RUNTIME_CLOSED };
+  }
   const uuid = randomUUID();
   userMessage.priority = 'next';
   userMessage.uuid = uuid;
