@@ -76,6 +76,7 @@
     "planUsage": {
       "title": "Claude plan usage",
       "grokTitle": "Grok plan usage",
+      "staleIdle": "Last reading. It refreshes the next time you use Grok",
       "loading": "Loading usage…",
       "unavailable": "Usage unavailable",
       "dash": "Usage —",
@@ -84,8 +85,7 @@
       "clickToSwitch": "Click period label to switch window",
       "worstHint": "Dot shows worst window ({{color}})",
       "paceColors": { "green": "green", "yellow": "yellow", "red": "red", "neutral": "unknown" },
-      "stale": "Data may be outdated (refresh failed)",
-      "staleIdle": "Last reading. It refreshes the next time you use Grok"
+      "stale": "Data may be outdated (refresh failed)"
     },
     "noMatchingFiles": "No matching files",
     "noMatchingCommands": "No matching commands",
