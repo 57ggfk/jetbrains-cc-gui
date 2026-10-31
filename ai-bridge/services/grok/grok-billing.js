@@ -27,6 +27,37 @@ function centVal(cent) {
   return finiteNumber(o.val);
 }
 
+/**
+ * proto3 JSON drops a zero {@code val}, so an empty Cent message ({@code {}}) means 0.
+ * Any other shape without a number stays unknown.
+ */
+function usedCentVal(cent) {
+  const val = centVal(cent);
+  if (val != null) return val;
+  const o = asObject(cent);
+  return o && Object.keys(o).length === 0 ? 0 : null;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEK_DAYS = [6, 8];
+const MONTH_DAYS = [27, 32];
+
+/**
+ * Window id from the period dates when the agent sends no {@code currentPeriod.type}.
+ * Only spans that look like a week or a month are named; anything else stays unknown.
+ */
+function periodFromDates(start, end) {
+  const startMs = Date.parse(start || '');
+  const endMs = Date.parse(end || '');
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return null;
+  }
+  const days = (endMs - startMs) / DAY_MS;
+  if (days >= WEEK_DAYS[0] && days <= WEEK_DAYS[1]) return 'weekly';
+  if (days >= MONTH_DAYS[0] && days <= MONTH_DAYS[1]) return 'monthly';
+  return null;
+}
+
 function unwrapBilling(raw) {
   let o = asObject(raw);
   if (!o) return null;
@@ -69,7 +100,7 @@ export function billingToCapacity(raw) {
   let pct = finiteNumber(config.creditUsagePercent);
   if (pct == null) {
     const limit = centVal(config.monthlyLimit);
-    const used = centVal(config.used);
+    const used = usedCentVal(config.used);
     if (limit != null && limit > 0 && used != null) {
       pct = (used / limit) * 100;
     }
@@ -91,7 +122,9 @@ export function billingToCapacity(raw) {
   const periodType = period && typeof period.type === 'string' && period.type
     ? period.type
     : null;
-  const windowId = periodType || (centVal(config.monthlyLimit) != null ? 'monthly' : 'current');
+  const windowId = periodType
+    || periodFromDates(periodStart, resetAt)
+    || (centVal(config.monthlyLimit) != null ? 'monthly' : 'current');
 
   const window = {
     id: windowId,

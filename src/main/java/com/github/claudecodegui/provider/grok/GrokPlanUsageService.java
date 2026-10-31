@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 /**
  * Grok plan-usage snapshot for the ContextBar.
@@ -11,6 +12,8 @@ import java.util.concurrent.TimeUnit;
  * <p>The webview polls {@code get_grok_plan_usage}. A warm {@code grok agent stdio}
  * answers {@code _x.ai/billing} (one weekly or monthly credit window). When no chat
  * runtime is up, the daemon may start a short-lived stdio agent for that call only.
+ * Without a running daemon the poll is {@code dormant}: the last reading ages out
+ * normally and the failure ladder does not move.
  */
 public final class GrokPlanUsageService {
 
@@ -25,6 +28,8 @@ public final class GrokPlanUsageService {
     private static final long RPC_TIMEOUT_SECONDS = 45L;
 
     private static volatile Snapshot cache;
+    /** True while one window's RPC runs under the class lock. */
+    private static volatile boolean inFlight = false;
     private static int failureStep = 0;
     private static long retryAfterMs = 0L;
     private static String lastFailureMessage = null;
@@ -34,19 +39,36 @@ public final class GrokPlanUsageService {
 
     public static JsonObject resolvePlanUsagePayload(GrokSDKBridge bridge, String cwd) {
         long nowMs = System.currentTimeMillis();
+        Snapshot hit = cache;
         // A fresh snapshot is shared without the class lock so a second window does not wait.
-        JsonObject fresh = copyIfFresh(cache, nowMs);
+        JsonObject fresh = copyIfFresh(hit, nowMs);
         if (fresh != null) {
             return fresh;
+        }
+        // While another window's RPC runs, a young reading is served instead of waiting up to 45s for it.
+        // {@code refreshing} tells the webview to ask again soon without counting a failure.
+        if (inFlight && isYoungPresent(hit, nowMs)) {
+            JsonObject copy = staleCopy(hit);
+            copy.addProperty("refreshing", true);
+            return copy;
         }
         synchronized (GrokPlanUsageService.class) {
             // The pre-lock timestamp is already in the past. A snapshot stored while
             // this thread waited would look like now < atMs and miss.
-            return resolveLocked(bridge, cwd, System.currentTimeMillis());
+            return resolveLocked(bridge, cwd, System.currentTimeMillis(), System::currentTimeMillis);
         }
     }
 
+    /** Test entry with a frozen clock: the RPC appears to finish at {@code nowMs}. */
     static JsonObject resolveLocked(GrokSDKBridge bridge, String cwd, long nowMs) {
+        return resolveLocked(bridge, cwd, nowMs, () -> nowMs);
+    }
+
+    /**
+     * @param nowMs time the poll started, used for the cache and the retry gate
+     * @param clock read again after the RPC so a slow failure does not use up its own backoff
+     */
+    static JsonObject resolveLocked(GrokSDKBridge bridge, String cwd, long nowMs, LongSupplier clock) {
         Snapshot hit = cache;
         JsonObject fresh = copyIfFresh(hit, nowMs);
         if (fresh != null) {
@@ -61,33 +83,58 @@ public final class GrokPlanUsageService {
         if (bridge == null) {
             return unavailable("Grok bridge is not available");
         }
+        inFlight = true;
         try {
             JsonObject payload = bridge.getPlanUsage(cwd).get(RPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            if (payload != null
-                    && payload.has("skipPolling")
-                    && payload.get("skipPolling").isJsonPrimitive()
-                    && payload.get("skipPolling").getAsBoolean()) {
-                cache = null;
-                failureStep = 0;
-                retryAfterMs = 0L;
-                lastFailureMessage = null;
-                return payload.deepCopy();
-            }
-            if (!isPresentTrue(payload)) {
-                return onPollFailure(hit, nowMs, failureMessage(payload), false);
-            }
-            failureStep = 0;
-            retryAfterMs = 0L;
-            lastFailureMessage = null;
-            cache = new Snapshot(nowMs, FRESH_MS, payload);
-            return payload.deepCopy();
+            return applyPollResult(hit, nowMs, finishedAt(nowMs, clock), payload);
         } catch (InterruptedException e) {
-            return onPollFailure(hit, nowMs, "Grok usage interrupted", true);
+            return onPollFailure(hit, finishedAt(nowMs, clock), "Grok usage interrupted", true);
         } catch (Exception e) {
             LOG.warn("Grok plan-usage resolve failed: " + e.getMessage());
             String message = e.getMessage() != null ? e.getMessage() : "Grok usage unavailable";
-            return onPollFailure(hit, nowMs, message, false);
+            return onPollFailure(hit, finishedAt(nowMs, clock), message, false);
+        } finally {
+            inFlight = false;
         }
+    }
+
+    /** A clock that went backwards must not end before the poll started. */
+    private static long finishedAt(long startedMs, LongSupplier clock) {
+        return Math.max(startedMs, clock.getAsLong());
+    }
+
+    private static JsonObject applyPollResult(Snapshot hit, long startedMs, long finishedMs, JsonObject payload) {
+        if (hasTrueFlag(payload, "skipPolling")) {
+            cache = null;
+            failureStep = 0;
+            retryAfterMs = 0L;
+            lastFailureMessage = null;
+            return payload.deepCopy();
+        }
+        if (hasTrueFlag(payload, "dormant")) {
+            return dormantReply(hit, finishedMs, payload);
+        }
+        if (!hasTrueFlag(payload, "present")) {
+            return onPollFailure(hit, finishedMs, failureMessage(payload), false);
+        }
+        failureStep = 0;
+        retryAfterMs = 0L;
+        lastFailureMessage = null;
+        cache = new Snapshot(startedMs, FRESH_MS, payload);
+        return payload.deepCopy();
+    }
+
+    /**
+     * Nobody to ask (no daemon, or it is exiting). Not a failure, and it ends any failure
+     * streak: the next session starts the ladder at 20s. A young reading is still shown, and
+     * {@code dormant} lets the webview keep its normal cadence.
+     */
+    private static JsonObject dormantReply(Snapshot hit, long nowMs, JsonObject payload) {
+        failureStep = 0;
+        lastFailureMessage = null;
+        JsonObject out = isYoungPresent(hit, nowMs) ? staleCopy(hit) : unavailable(failureMessage(payload));
+        out.addProperty("dormant", true);
+        return out;
     }
 
     /** {@code now >= atMs} and age strictly inside the snapshot ttl. A future {@code atMs} misses. */
@@ -136,12 +183,12 @@ public final class GrokPlanUsageService {
         return unavailable(resolved);
     }
 
-    private static boolean isPresentTrue(JsonObject payload) {
+    private static boolean hasTrueFlag(JsonObject payload, String key) {
         return payload != null
-                && payload.has("present")
-                && payload.get("present").isJsonPrimitive()
-                && payload.get("present").getAsJsonPrimitive().isBoolean()
-                && payload.get("present").getAsBoolean();
+                && payload.has(key)
+                && payload.get(key).isJsonPrimitive()
+                && payload.get(key).getAsJsonPrimitive().isBoolean()
+                && payload.get(key).getAsBoolean();
     }
 
     private static String failureMessage(JsonObject payload) {
@@ -155,6 +202,7 @@ public final class GrokPlanUsageService {
 
     static void resetCacheForTests() {
         cache = null;
+        inFlight = false;
         failureStep = 0;
         retryAfterMs = 0L;
         lastFailureMessage = null;

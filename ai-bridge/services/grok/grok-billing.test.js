@@ -108,3 +108,50 @@ test('billingToCapacity rejects a non-object', () => {
   assert.equal(out.present, false);
   assert.match(out.message, /invalid/);
 });
+
+test('billingToCapacity reads an empty legacy used Cent as 0%', () => {
+  // proto3 JSON drops val: 0, leaving `used: {}`
+  const out = billingToCapacity({ config: { monthlyLimit: { val: 1000 }, used: {} } });
+  assert.equal(out.present, true);
+  assert.equal(out.capacity_pct, 0);
+  assert.equal(out.windows[0].id, 'monthly');
+
+  // A Cent with an unexpected shape is unknown, not 0%
+  const renamed = billingToCapacity({ config: { monthlyLimit: { val: 1000 }, used: { units: 5 } } });
+  assert.equal(renamed.present, false);
+});
+
+test('billingToCapacity names the window from the period dates when currentPeriod is missing', () => {
+  const weekly = billingToCapacity({
+    config: {
+      creditUsagePercent: 12,
+      billingPeriodStart: '2026-10-02T09:22:05Z',
+      billingPeriodEnd: '2026-10-09T09:22:05Z',
+    },
+  });
+  assert.equal(weekly.windows[0].id, 'weekly');
+  assert.equal(weekly.windows[0].period_type, 'weekly');
+
+  const monthly = billingToCapacity({
+    config: {
+      billingPeriodStart: '2026-10-01T00:00:00Z',
+      billingPeriodEnd: '2026-11-01T00:00:00Z',
+    },
+  });
+  assert.equal(monthly.capacity_pct, 0);
+  assert.equal(monthly.windows[0].id, 'monthly');
+
+  // Unparseable dates keep the old fallback instead of guessing
+  const unknown = billingToCapacity({ config: { creditUsagePercent: 5, billingPeriodEnd: 'soon' } });
+  assert.equal(unknown.windows[0].id, 'current');
+
+  // A span that is neither a week nor a month is not labelled 7d
+  const daily = billingToCapacity({
+    config: {
+      creditUsagePercent: 5,
+      billingPeriodStart: '2026-10-02T00:00:00Z',
+      billingPeriodEnd: '2026-10-03T00:00:00Z',
+    },
+  });
+  assert.equal(daily.windows[0].id, 'current');
+});

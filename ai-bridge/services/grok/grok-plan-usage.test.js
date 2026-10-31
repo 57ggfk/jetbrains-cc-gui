@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   getPlanUsagePersistent,
+  getRuntimeSnapshot,
   EPHEMERAL_HANDSHAKE_TIMEOUT_MS,
   __testing,
 } from './persistent-acp-service.js';
@@ -243,7 +244,8 @@ serial('initializeAndAuthenticate uses timeoutMs for both requests and respects 
   }
 });
 
-serial('Direction 1 (Poll during a turn): getPlanUsage reaches agent before turn ends and does not contaminate turn output', async () => {
+// The real poll-vs-turn scheduling through daemon.js is covered in grok-plan-usage-daemon.test.js.
+serial('daemon replies to grok.getPlanUsage with a result and no line events; billing reaches an agent mid-prompt', async () => {
   resetRegistry();
 
   const daemonPath = join(dirname(fileURLToPath(import.meta.url)), '../../daemon.js');
@@ -375,7 +377,7 @@ serial('Direction 1 (Poll during a turn): getPlanUsage reaches agent before turn
   }
 });
 
-serial('Direction 2 (Send during a hung cold poll + 10s ephemeral timeout and cleanup)', async () => {
+serial('a cold poll uses the 10s handshake timeout, closes its client, and leaves a warm runtime usable', async () => {
   resetRegistry();
 
   // 1. Exercise real fetchBillingEphemeral with an injected clientFactory:
@@ -504,5 +506,31 @@ serial('getPlanUsagePersistent upgrades in-flight non-ephemeral poll when epheme
   assert.equal(nonEphemeralResult.present, false);
   assert.equal(ephemeralResult.present, true);
   assert.equal(ephemeralResult.capacity_pct, 42.5);
+  resetRegistry();
+});
+
+serial('getRuntimeSnapshot reports an in-flight poll so the idle reaper waits for it', async () => {
+  resetRegistry();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const client = {
+    closed: false,
+    isUnhealthy: () => false,
+    request: async () => {
+      await gate;
+      return credits;
+    },
+  };
+  createTestRuntime('plan-usage-inflight', { client });
+  assert.equal(getRuntimeSnapshot().planUsageInFlight, false);
+
+  const pending = getPlanUsagePersistent({ ephemeral: true });
+  assert.equal(getRuntimeSnapshot().planUsageInFlight, true);
+
+  release();
+  await pending;
+  assert.equal(getRuntimeSnapshot().planUsageInFlight, false);
   resetRegistry();
 });

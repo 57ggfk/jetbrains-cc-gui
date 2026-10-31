@@ -183,6 +183,18 @@ public class GrokSDKBridgeTest {
         assertEquals("grok", result.get("provider").getAsString());
         assertEquals("x.ai/billing", result.get("source").getAsString());
         assertEquals("Grok daemon is not running", result.get("message").getAsString());
+        assertTrue(result.get("dormant").getAsBoolean());
+    }
+
+    @Test
+    public void testGetPlanUsageNeverStartsTheDaemon() {
+        GrokSDKBridge bridge = new GrokSDKBridge();
+        JsonObject result = bridge.getPlanUsage("/tmp").join();
+        assertNotNull(result);
+        assertFalse(result.get("present").getAsBoolean());
+        // api_key auth skips; any other auth finds no running daemon. Neither starts one.
+        assertTrue(result.has("skipPolling") || result.get("dormant").getAsBoolean());
+        assertNull(bridge.getCurrentDaemonBridgeForInspection());
     }
 
     @Test

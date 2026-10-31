@@ -781,16 +781,17 @@ public class GrokSDKBridge extends BaseSDKBridge {
 
     /**
      * Account credit window for the ContextBar.
-     * Starts the node daemon when needed. The daemon calls {@code _x.ai/billing}
+     * Uses the node daemon only while chat keeps it running. The daemon calls {@code _x.ai/billing}
      * on the warm {@code grok agent stdio}, or a short-lived one when no chat runtime exists.
-     * When effective auth is api_key, credit polling is skipped without starting the daemon.
+     * A poll never starts or revives the daemon, otherwise the next poll would undo its idle exit.
+     * When effective auth is api_key, credit polling is skipped without contacting the daemon.
      */
     public CompletableFuture<JsonObject> getPlanUsage(String cwd) {
         GrokLocalAuthResolver.ResolvedAuth auth = resolveEffectiveAuth();
         if (auth != null && skipsPlanUsagePoll(auth.authMethod)) {
             return CompletableFuture.completedFuture(planUsageApiKeySkip());
         }
-        return getPlanUsage(cwd, daemonCoordinator.getDaemonBridge(), auth);
+        return getPlanUsage(cwd, daemonCoordinator.getCurrentDaemonBridge(), auth);
     }
 
     static boolean skipsPlanUsagePoll(String authMethod) {
@@ -800,6 +801,13 @@ public class GrokSDKBridge extends BaseSDKBridge {
     static JsonObject planUsageApiKeySkip() {
         JsonObject out = planUsageUnavailable("Grok usage unavailable");
         out.addProperty("skipPolling", true);
+        return out;
+    }
+
+    /** No running daemon to ask. Not a failure: callers keep the last reading and do not back off. */
+    static JsonObject planUsageDormant() {
+        JsonObject out = planUsageUnavailable("Grok daemon is not running");
+        out.addProperty("dormant", true);
         return out;
     }
 
@@ -813,7 +821,7 @@ public class GrokSDKBridge extends BaseSDKBridge {
             GrokLocalAuthResolver.ResolvedAuth resolvedAuth
     ) {
         if (db == null || !db.isAlive()) {
-            return CompletableFuture.completedFuture(planUsageUnavailable("Grok daemon is not running"));
+            return CompletableFuture.completedFuture(planUsageDormant());
         }
 
         JsonObject params = buildAuthParams(cwd, resolvedAuth);

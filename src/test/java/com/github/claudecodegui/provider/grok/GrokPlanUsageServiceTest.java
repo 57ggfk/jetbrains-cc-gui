@@ -13,6 +13,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
@@ -24,6 +25,8 @@ public class GrokPlanUsageServiceTest {
         volatile JsonObject responseToReturn;
         volatile Throwable errorToThrow;
         volatile CompletableFuture<JsonObject> blocked;
+        /** Runs inside each call, e.g. to move a test clock past an RPC timeout. */
+        volatile Runnable onCall;
 
         FakeGrokBridge(JsonObject initialResponse) {
             this.responseToReturn = initialResponse;
@@ -32,6 +35,9 @@ public class GrokPlanUsageServiceTest {
         @Override
         public CompletableFuture<JsonObject> getPlanUsage(String cwd) {
             callCount.incrementAndGet();
+            if (onCall != null) {
+                onCall.run();
+            }
             if (blocked != null) {
                 return blocked;
             }
@@ -428,5 +434,121 @@ public class GrokPlanUsageServiceTest {
         JsonObject suppressed = GrokPlanUsageService.resolveLocked(bridge, "/tmp", failAt + 19_000L);
         assertStalePercent(suppressed);
         assertEquals(2, bridge.callCount.get());
+    }
+
+    @Test
+    public void testDormantKeepsYoungReadingWithoutArmingLadder() {
+        long t = 9_000_000L;
+        FakeGrokBridge bridge = new FakeGrokBridge(makePayload(true));
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", t);
+
+        // The daemon idle-exited: the reading stays and is marked dormant
+        bridge.responseToReturn = GrokSDKBridge.planUsageDormant();
+        JsonObject dormant = GrokPlanUsageService.resolveLocked(bridge, "/tmp", t + GrokPlanUsageService.FRESH_MS);
+        assertStalePercent(dormant);
+        assertTrue(dormant.get("dormant").getAsBoolean());
+        assertEquals(2, bridge.callCount.get());
+
+        // No backoff: the next tick asks again at once (the daemon is not contacted)
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", t + GrokPlanUsageService.FRESH_MS + 1_000L);
+        assertEquals(3, bridge.callCount.get());
+
+        // Past STALE_MAX_MS the reading ages out like any other
+        JsonObject aged = GrokPlanUsageService.resolveLocked(bridge, "/tmp", t + GrokPlanUsageService.STALE_MAX_MS);
+        assertHidden(aged);
+        assertTrue(aged.get("dormant").getAsBoolean());
+
+        // Chat brings the daemon back: the first real failure still starts at the 20s step
+        bridge.responseToReturn = makePayload(false);
+        long tFail = t + GrokPlanUsageService.STALE_MAX_MS + 1_000L;
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", tFail);
+        int calls = bridge.callCount.get();
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", tFail + 19_000L);
+        assertEquals(calls, bridge.callCount.get());
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", tFail + 20_000L);
+        assertEquals(calls + 1, bridge.callCount.get());
+    }
+
+    @Test
+    public void testSlowFailureBacksOffFromWhenThePollEnded() {
+        long t = 10_000_000L;
+        AtomicLong clock = new AtomicLong(t);
+        FakeGrokBridge bridge = new FakeGrokBridge(makePayload(false));
+        // Each RPC runs into the 45s timeout
+        bridge.onCall = () -> clock.addAndGet(45_000L);
+
+        JsonObject first = GrokPlanUsageService.resolveLocked(bridge, "/tmp", t, clock::get);
+        assertHidden(first);
+        assertEquals(1, bridge.callCount.get());
+
+        // A second window that waited on the lock enters right after: the 20s step still holds
+        long afterTimeout = t + 45_000L;
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", afterTimeout + 1L, clock::get);
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", afterTimeout + 19_000L, clock::get);
+        assertEquals(1, bridge.callCount.get());
+
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", afterTimeout + 20_000L, clock::get);
+        assertEquals(2, bridge.callCount.get());
+    }
+
+    @Test
+    public void testYoungReadingIsServedWithoutWaitingForAnInFlightPoll() throws Exception {
+        // Real clock: old enough to need a refresh, young enough to keep showing
+        long storedAt = System.currentTimeMillis() - GrokPlanUsageService.FRESH_MS - 1_000L;
+        GrokPlanUsageService.resolveLocked(new FakeGrokBridge(makePayload(true)), "/tmp", storedAt);
+
+        FakeGrokBridge slow = new FakeGrokBridge(makePayload(true));
+        slow.blocked = new CompletableFuture<>();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<JsonObject> polling = pool.submit(
+                    () -> GrokPlanUsageService.resolvePlanUsagePayload(slow, "/tmp"));
+            long deadline = System.currentTimeMillis() + 5_000L;
+            while (slow.callCount.get() < 1 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(5L);
+            }
+            assertEquals(1, slow.callCount.get());
+
+            FakeGrokBridge other = new FakeGrokBridge(makePayload(false));
+            JsonObject served = pool.submit(
+                    () -> GrokPlanUsageService.resolvePlanUsagePayload(other, "/tmp")).get(2, TimeUnit.SECONDS);
+            assertStalePercent(served);
+            assertTrue(served.get("refreshing").getAsBoolean());
+            assertEquals(0, other.callCount.get());
+
+            slow.blocked.complete(makePayload(true));
+            JsonObject refreshed = polling.get(5, TimeUnit.SECONDS);
+            assertTrue(refreshed.get("present").getAsBoolean());
+            assertFalse(refreshed.has("stale"));
+        } finally {
+            slow.blocked.complete(makePayload(false));
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testDormantEndsAFailureStreak() {
+        long t = 11_000_000L;
+        FakeGrokBridge bridge = new FakeGrokBridge(makePayload(false));
+        // Climb the ladder to the 5m step: failures at t, t+20s, t+80s
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", t);
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", t + 20_000L);
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", t + 80_000L);
+        assertEquals(3, bridge.callCount.get());
+
+        // The daemon exits after the 5m wait; the poll after it is dormant
+        bridge.responseToReturn = GrokSDKBridge.planUsageDormant();
+        long tDormant = t + 80_000L + 300_000L;
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", tDormant);
+        assertEquals(4, bridge.callCount.get());
+
+        // Chat brings it back and billing fails once: the wait is 20s again, not 30m
+        bridge.responseToReturn = makePayload(false);
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", tDormant + 1_000L);
+        assertEquals(5, bridge.callCount.get());
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", tDormant + 1_000L + 19_000L);
+        assertEquals(5, bridge.callCount.get());
+        GrokPlanUsageService.resolveLocked(bridge, "/tmp", tDormant + 1_000L + 20_000L);
+        assertEquals(6, bridge.callCount.get());
     }
 }

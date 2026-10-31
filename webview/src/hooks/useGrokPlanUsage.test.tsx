@@ -104,33 +104,213 @@ describe('useGrokPlanUsage', () => {
     expect(w.sendToJava).not.toHaveBeenCalled();
   });
 
-  it('stops polling and stays idle when skipPolling is true', () => {
+  it('rechecks every 5 minutes while skipPolling is true and shows the bar after a switch to OAuth', () => {
     vi.useFakeTimers();
-    w.sendToJava = vi.fn();
-    const { result } = renderHook(() => useGrokPlanUsage('grok'));
-    expect(w.sendToJava).toHaveBeenCalledTimes(1);
-    expect(w.sendToJava).toHaveBeenCalledWith('get_grok_plan_usage:');
+    try {
+      w.sendToJava = vi.fn();
+      const { result } = renderHook(() => useGrokPlanUsage('grok'));
+      expect(w.sendToJava).toHaveBeenCalledTimes(1);
+      expect(w.sendToJava).toHaveBeenCalledWith('get_grok_plan_usage:');
 
-    act(() => {
-      w.updateGrokPlanUsage?.(JSON.stringify({
-        present: false,
-        unavailable: true,
-        skipPolling: true,
-        message: 'Grok usage unavailable',
-      }));
-    });
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify({
+          present: false,
+          unavailable: true,
+          skipPolling: true,
+          message: 'Grok usage unavailable',
+        }));
+      });
+      expect(result.current.status).toBe('idle');
+      expect(result.current.snapshot).toBeNull();
 
-    expect(result.current.status).toBe('idle');
-    expect(result.current.snapshot).toBeNull();
+      // No 20s/60s polling for api_key auth
+      act(() => {
+        vi.advanceTimersByTime(299_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(1);
 
-    act(() => {
-      vi.advanceTimersByTime(60_000);
-      vi.advanceTimersByTime(300_000);
-      vi.advanceTimersByTime(1_800_000);
-    });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(2);
 
-    expect(w.sendToJava).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
+      // The user switched to OAuth in Settings while staying on Grok
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(presentPayload));
+      });
+      expect(result.current.status).toBe('ready');
+      expect(result.current.snapshot?.capacityPct).toBe(42.5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the 60s cadence while dormant and does not climb the failure ladder', () => {
+    vi.useFakeTimers();
+    try {
+      w.sendToJava = vi.fn();
+      const { result } = renderHook(() => useGrokPlanUsage('grok'));
+
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(presentPayload));
+      });
+
+      // The daemon idle-exited: Java repeats the last reading as stale + dormant
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(2);
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify({ ...presentPayload, stale: true, dormant: true }));
+      });
+      expect(result.current.status).toBe('ready');
+      expect(result.current.snapshot?.stale).toBe(true);
+
+      for (let i = 0; i < 3; i += 1) {
+        act(() => {
+          vi.advanceTimersByTime(59_000);
+        });
+        expect(w.sendToJava).toHaveBeenCalledTimes(2 + i);
+        act(() => {
+          vi.advanceTimersByTime(1_000);
+        });
+        expect(w.sendToJava).toHaveBeenCalledTimes(3 + i);
+        act(() => {
+          w.updateGrokPlanUsage?.(JSON.stringify({ ...unavailablePayload, dormant: true }));
+        });
+        expect(result.current.status).toBe('idle');
+      }
+
+      // A real failure after dormant ticks still starts the ladder at 20s
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(6);
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(unavailablePayload));
+      });
+      act(() => {
+        vi.advanceTimersByTime(20_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks again in 20s without climbing the ladder while another window refreshes', () => {
+    vi.useFakeTimers();
+    try {
+      w.sendToJava = vi.fn();
+      const { result } = renderHook(() => useGrokPlanUsage('grok'));
+
+      // A failure first, so the next real failure would wait 60s
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(unavailablePayload));
+      });
+      act(() => {
+        vi.advanceTimersByTime(20_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(2);
+
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify({ ...presentPayload, stale: true, refreshing: true }));
+      });
+      expect(result.current.status).toBe('ready');
+      act(() => {
+        vi.advanceTimersByTime(20_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(3);
+
+      // The ladder did not move: the next failure still waits 60s
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(unavailablePayload));
+      });
+      act(() => {
+        vi.advanceTimersByTime(59_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(3);
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ends a failure streak on a dormant reply', () => {
+    vi.useFakeTimers();
+    try {
+      w.sendToJava = vi.fn();
+      renderHook(() => useGrokPlanUsage('grok'));
+
+      // Two failures climb the ladder to the 5m step
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(unavailablePayload));
+      });
+      act(() => {
+        vi.advanceTimersByTime(20_000);
+      });
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(unavailablePayload));
+      });
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(3);
+
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify({ ...unavailablePayload, dormant: true }));
+      });
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(4);
+
+      // The next failure starts over at 20s, not 5m
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(unavailablePayload));
+      });
+      act(() => {
+        vi.advanceTimersByTime(20_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('polls again when a reply never arrives', () => {
+    vi.useFakeTimers();
+    try {
+      w.sendToJava = vi.fn();
+      const { result } = renderHook(() => useGrokPlanUsage('grok'));
+      expect(w.sendToJava).toHaveBeenCalledTimes(1);
+
+      // The first reply is lost
+      act(() => {
+        vi.advanceTimersByTime(119_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(2);
+
+      act(() => {
+        w.updateGrokPlanUsage?.(JSON.stringify(presentPayload));
+      });
+      expect(result.current.status).toBe('ready');
+
+      // A reply replaces the watchdog with the normal 60s tick
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(w.sendToJava).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('follows the failure ladder 20s -> 1m -> 5m -> 30m and resets on success', () => {

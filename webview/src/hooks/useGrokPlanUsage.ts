@@ -11,6 +11,30 @@ const EMPTY: GrokPlanUsageState = { status: 'idle', snapshot: null };
 
 const BACKOFF_MS = [20_000, 60_000, 300_000, 1_800_000] as const;
 const SUCCESS_POLL_MS = 60_000;
+/** api_key auth has no credit window. Ask again rarely so a switch to OAuth shows the bar. */
+const SKIP_RECHECK_MS = 300_000;
+/** Java answers within ~90s (lock wait + 45s RPC). A lost reply must not end the poll loop. */
+const REPLY_WATCHDOG_MS = 120_000;
+/** Another window's refresh was in flight; its result is cached well before this. */
+const REFRESHING_RETRY_MS = 20_000;
+
+/**
+ * skip: api_key auth. dormant: no running daemon, so nothing failed.
+ * refreshing: another window is fetching right now. fresh: a live reading.
+ * failure: anything else, including a stale copy.
+ */
+type ReplyKind = 'skip' | 'dormant' | 'refreshing' | 'fresh' | 'failure';
+
+type ReplyFlags = { skipPolling?: unknown; dormant?: unknown; refreshing?: unknown };
+
+function classifyReply(raw: unknown, snap: PlanUsageSnapshot): ReplyKind {
+  const flags = (raw && typeof raw === 'object' ? raw : {}) as ReplyFlags;
+  if (flags.skipPolling === true) return 'skip';
+  if (flags.dormant === true) return 'dormant';
+  if (flags.refreshing === true) return 'refreshing';
+  if (snap.present && snap.stale !== true) return 'fresh';
+  return 'failure';
+}
 
 /**
  * Apply one poll result. The bar stays hidden until a present payload, and a later
@@ -21,6 +45,10 @@ function applySnapshot(snap: PlanUsageSnapshot): GrokPlanUsageState {
     return { status: 'ready', snapshot: snap };
   }
   return EMPTY;
+}
+
+function keepPresentOrEmpty(prev: GrokPlanUsageState): GrokPlanUsageState {
+  return prev.snapshot?.present ? prev : EMPTY;
 }
 
 /**
@@ -34,7 +62,6 @@ export function useGrokPlanUsage(currentProvider: string) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef = useRef<(() => void) | null>(null);
   const failureStepRef = useRef(0);
-  const skipPollingRef = useRef(false);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -43,90 +70,94 @@ export function useGrokPlanUsage(currentProvider: string) {
     }
   }, []);
 
+  /** One timer: the next poll, or the watchdog while a reply is pending. */
   const scheduleNext = useCallback((delayMs: number) => {
     clearTimer();
-    if (skipPollingRef.current) return;
     timerRef.current = setTimeout(() => {
       pollRef.current?.();
     }, delayMs);
   }, [clearTimer]);
 
+  const nextFailureDelay = useCallback(() => {
+    const delay = BACKOFF_MS[failureStepRef.current];
+    failureStepRef.current = Math.min(failureStepRef.current + 1, BACKOFF_MS.length - 1);
+    return delay;
+  }, []);
+
+  const handleReply = useCallback((jsonStr: string) => {
+    let raw: unknown;
+    try {
+      raw = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+    } catch {
+      setState(keepPresentOrEmpty);
+      scheduleNext(nextFailureDelay());
+      return;
+    }
+    const snap = parseCapacityPayload(raw);
+    const kind = classifyReply(raw, snap);
+    if (kind === 'skip') {
+      failureStepRef.current = 0;
+      setState(EMPTY);
+      scheduleNext(SKIP_RECHECK_MS);
+      return;
+    }
+    setState(applySnapshot(snap));
+    if (kind === 'fresh' || kind === 'dormant') {
+      // Dormant: Java answers without contacting the daemon, so the normal cadence is
+      // cheap and picks up the next chat turn within a minute. It also ends a failure streak.
+      failureStepRef.current = 0;
+      scheduleNext(SUCCESS_POLL_MS);
+    } else if (kind === 'refreshing') {
+      scheduleNext(REFRESHING_RETRY_MS);
+    } else {
+      scheduleNext(nextFailureDelay());
+    }
+  }, [nextFailureDelay, scheduleNext]);
+
   const poll = useCallback(() => {
-    if (currentProvider !== 'grok' || skipPollingRef.current) {
+    if (currentProvider !== 'grok') {
       return;
     }
     const gen = ++genRef.current;
-    setState((prev) => (prev.snapshot?.present ? prev : EMPTY));
+    setState(keepPresentOrEmpty);
 
     const w = window as unknown as {
       updateGrokPlanUsage?: (json: string) => void;
       sendToJava?: (cmd: string) => void;
     };
 
-    const handler = (jsonStr: string) => {
-      if (gen !== genRef.current) return;
-      try {
-        const raw = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
-        if (raw && typeof raw === 'object' && (raw as { skipPolling?: boolean }).skipPolling === true) {
-          skipPollingRef.current = true;
-          clearTimer();
-          setState(EMPTY);
-          return;
-        }
-        const snap = parseCapacityPayload(raw);
-        if (snap.present && snap.stale === true) {
-          const delay = BACKOFF_MS[failureStepRef.current];
-          failureStepRef.current = Math.min(failureStepRef.current + 1, BACKOFF_MS.length - 1);
-          setState(applySnapshot(snap));
-          scheduleNext(delay);
-        } else if (snap.present) {
-          failureStepRef.current = 0;
-          setState(applySnapshot(snap));
-          scheduleNext(SUCCESS_POLL_MS);
-        } else {
-          const delay = BACKOFF_MS[failureStepRef.current];
-          failureStepRef.current = Math.min(failureStepRef.current + 1, BACKOFF_MS.length - 1);
-          setState(applySnapshot(snap));
-          scheduleNext(delay);
-        }
-      } catch {
-        const delay = BACKOFF_MS[failureStepRef.current];
-        failureStepRef.current = Math.min(failureStepRef.current + 1, BACKOFF_MS.length - 1);
-        setState((prev) => (prev.snapshot?.present ? prev : EMPTY));
-        scheduleNext(delay);
+    handlerRef.current = (jsonStr: string) => {
+      if (gen === genRef.current) {
+        handleReply(jsonStr);
       }
     };
-
-    handlerRef.current = handler;
     w.updateGrokPlanUsage = (json: string) => {
       if (handlerRef.current) {
         handlerRef.current(json);
       }
     };
 
+    // Armed before sending so a reply that arrives synchronously replaces the watchdog.
+    scheduleNext(REPLY_WATCHDOG_MS);
     try {
       w.sendToJava?.('get_grok_plan_usage:');
     } catch {
       if (gen === genRef.current) {
-        const delay = BACKOFF_MS[failureStepRef.current];
-        failureStepRef.current = Math.min(failureStepRef.current + 1, BACKOFF_MS.length - 1);
-        setState((prev) => (prev.snapshot?.present ? prev : EMPTY));
-        scheduleNext(delay);
+        setState(keepPresentOrEmpty);
+        scheduleNext(nextFailureDelay());
       }
     }
-  }, [clearTimer, currentProvider, scheduleNext]);
+  }, [currentProvider, handleReply, nextFailureDelay, scheduleNext]);
 
   pollRef.current = poll;
 
   const refresh = useCallback(() => {
-    skipPollingRef.current = false;
     failureStepRef.current = 0;
     clearTimer();
     poll();
   }, [clearTimer, poll]);
 
   useEffect(() => {
-    skipPollingRef.current = false;
     failureStepRef.current = 0;
     if (currentProvider !== 'grok') {
       setState(EMPTY);

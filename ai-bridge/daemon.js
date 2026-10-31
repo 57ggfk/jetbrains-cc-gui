@@ -730,7 +730,8 @@ async function runDaemonMain() {
     const claudeBusy = (claude.anonymousRuntimeCount || 0) > 0
       || (claude.sessionRuntimeCount || 0) > 0
       || !!claude.activeTurnEpoch;
-    const grokBusy = (grok.runtimeCount || 0) > 0 || (grok.activeTurnCount || 0) > 0;
+    const grokBusy = (grok.runtimeCount || 0) > 0 || (grok.activeTurnCount || 0) > 0
+      || grok.planUsageInFlight === true;
     const zcodeBusy = zcode.clientActive || zcode.turnActive;
     const codex = getCodexRuntimeSnapshot();
     const codexBusy = codex.busy || codex.sessionCount > 0;
@@ -809,6 +810,8 @@ async function runDaemonMain() {
         result: {
           present: false,
           unavailable: true,
+          // An exiting daemon is not a billing failure: Java keeps the last reading and does not back off.
+          dormant: true,
           provider: 'grok',
           source: 'x.ai/billing',
           message: 'Grok daemon is shutting down',

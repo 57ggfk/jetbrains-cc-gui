@@ -133,6 +133,9 @@ export function getRuntimeSnapshot() {
   return {
     runtimeCount: all.filter((runtime) => runtime && !runtime.closed).length,
     activeTurnCount: all.reduce((total, runtime) => total + (runtime?.activeTurnCount || 0), 0),
+    // A pending poll would make Java cancel the idle exit and restart the 3-minute clock.
+    // The reaper waits for it instead; the poll itself never counts as activity.
+    planUsageInFlight: planUsageInflight !== null,
   };
 }
 
